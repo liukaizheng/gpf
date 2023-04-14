@@ -16,8 +16,8 @@ pub trait Mesh: Sized {
 	fn n_faces_capacity(&self) -> usize;
 	fn n_boundary_loop_capacity(&self) -> usize;
 
-	fn vertex_is_valid(&self, vid: Vertex) -> bool;
-	fn halfedge_is_valid(&self, hid: Halfedge) -> bool;
-	fn face_is_valid(&self, fid: Face) -> bool;
-	fn boundary_loop_is_valid(&self, blid: BoundaryLoop) -> bool;
+	fn vertex_is_valid(&self, vid: VertexId) -> bool;
+	fn halfedge_is_valid(&self, hid: HalfedgeId) -> bool;
+	fn face_is_valid(&self, fid: FaceId) -> bool;
+	fn boundary_loop_is_valid(&self, blid: BoundaryLoopId) -> bool;
 }

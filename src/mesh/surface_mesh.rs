@@ -1,6 +1,6 @@
 use crate::{mesh::Mesh, build_connect_info, INVALID_IND};
 
-use super::{Vertex, Halfedge, Face, BoundaryLoop};
+use super::{VertexId, HalfedgeId, FaceId, BoundaryLoopId};
 
 struct SurfaceMesh {
 	he_next_arr: Vec<usize>,
@@ -47,19 +47,19 @@ impl Mesh for SurfaceMesh {
 		return self.bl_halfedge_arr.len();
 	}
 
-	fn vertex_is_valid(&self, vid: Vertex) -> bool {
+	fn vertex_is_valid(&self, vid: VertexId) -> bool {
 		return self.v_halfedge_arr[vid] != INVALID_IND;
 	}
 
-	fn halfedge_is_valid(&self, hid: Halfedge) -> bool {
+	fn halfedge_is_valid(&self, hid: HalfedgeId) -> bool {
 		return self.he_next_arr[hid] != INVALID_IND;
 	}
 
-	fn face_is_valid(&self, fid: Face) -> bool {
+	fn face_is_valid(&self, fid: FaceId) -> bool {
 		return self.f_halfedge_arr[fid] != INVALID_IND;
 	}
 
-	fn boundary_loop_is_valid(&self, blid: BoundaryLoop) -> bool {
+	fn boundary_loop_is_valid(&self, blid: BoundaryLoopId) -> bool {
 		return self.bl_halfedge_arr[blid] != INVALID_IND;
 	}
 }
