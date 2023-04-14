@@ -1,4 +1,4 @@
-use std::ops::Index;
+use std::ops::{Index, Deref};
 
 use crate::mesh::Mesh;
 use super::{Element, iter_next};
@@ -12,25 +12,33 @@ impl From<usize> for FaceId {
 	}
 }
 
-impl Index<FaceId> for Vec<usize> {
-	type Output = usize;
+impl <T> Index<FaceId> for Vec<T> {
+	type Output = T;
 	fn index(&self, index: FaceId) -> &Self::Output {
 		&self[index.0]
 	}
 }
 
-pub struct Face<'a, M: Mesh> {
+pub struct FaceIter<'a, M: Mesh> {
 	id: FaceId,
 	mesh: &'a M,
 }
 
-impl <'a, M: Mesh> Face<'a, M> {
+impl <'a, M: Mesh> FaceIter<'a, M> {
 	pub fn new(id: FaceId, mesh: &'a M) -> Self {
 		Self { id, mesh }
 	}
 }
 
-impl <'a, M: Mesh> Element for Face<'a, M> {
+impl <'a, M: Mesh> Deref for FaceIter<'a, M> {
+	type Target = FaceId;
+
+	fn deref(&self) -> &Self::Target {
+		&self.id
+	}
+}
+
+impl <'a, M: Mesh> Element for FaceIter<'a, M> {
 	type Item = FaceId;
 	type M = M;
 
@@ -60,7 +68,7 @@ impl <'a, M: Mesh> Element for Face<'a, M> {
 	}
 }
 
-impl <'a, M: Mesh> Iterator for Face<'a, M> {
+impl <'a, M: Mesh> Iterator for FaceIter<'a, M> {
 	type Item = FaceId;
 
 	fn next(&mut self) -> Option<Self::Item> {

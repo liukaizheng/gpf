@@ -1,4 +1,4 @@
-use std::ops::Index;
+use std::ops::{Index, Deref};
 
 use crate::mesh::Mesh;
 use super::{Element, iter_next};
@@ -12,25 +12,33 @@ impl From<usize> for VertexId {
 	}
 }
 
-impl Index<VertexId> for Vec<usize> {
-	type Output = usize;
+impl <T> Index<VertexId> for Vec<T> {
+	type Output = T;
 	fn index(&self, index: VertexId) -> &Self::Output {
 		&self[index.0]
 	}
 }
 
-pub struct Vertex<'a, M: Mesh> {
+pub struct VertexIter<'a, M: Mesh> {
 	id: VertexId,
 	mesh: &'a M,
 }
 
-impl <'a, M: Mesh> Vertex<'a, M> {
+impl <'a, M: Mesh> VertexIter<'a, M> {
 	pub fn new(id: VertexId, mesh: &'a M) -> Self {
 		Self { id, mesh }
 	}
 }
 
-impl <'a, M: Mesh> Element for Vertex<'a, M> {
+impl <'a, M: Mesh> Deref for VertexIter<'a, M> {
+	type Target = VertexId;
+
+	fn deref(&self) -> &Self::Target {
+		&self.id
+	}
+}
+
+impl <'a, M: Mesh> Element for VertexIter<'a, M> {
 	type Item = VertexId;
 	type M = M;
 
@@ -59,7 +67,7 @@ impl <'a, M: Mesh> Element for Vertex<'a, M> {
 	}
 }
 
-impl <'a, M: Mesh> Iterator for Vertex<'a, M> {
+impl <'a, M: Mesh> Iterator for VertexIter<'a, M> {
 	type Item = VertexId;
 
 	fn next(&mut self) -> Option<Self::Item> {

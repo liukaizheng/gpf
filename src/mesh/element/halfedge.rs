@@ -1,4 +1,4 @@
-use std::ops::Index;
+use std::ops::{Index, Deref};
 
 use crate::mesh::Mesh;
 use super::{Element, iter_next};
@@ -12,25 +12,33 @@ impl From<usize> for HalfedgeId {
 	}
 }
 
-impl Index<HalfedgeId> for Vec<usize> {
-	type Output = usize;
+impl <T> Index<HalfedgeId> for Vec<T> {
+	type Output = T;
 	fn index(&self, index: HalfedgeId) -> &Self::Output {
 		&self[index.0]
 	}
 }
 
-pub struct Halfedge<'a, M: Mesh> {
+pub struct HalfedgeIter<'a, M: Mesh> {
 	id: HalfedgeId,
 	mesh: &'a M,
 }
 
-impl <'a, M: Mesh> Halfedge<'a, M> {
+impl <'a, M: Mesh> HalfedgeIter<'a, M> {
 	pub fn new(id: HalfedgeId, mesh: &'a M) -> Self {
 		Self { id, mesh }
 	}
 }
 
-impl <'a, M: Mesh> Element for Halfedge<'a, M> {
+impl <'a, M: Mesh> Deref for HalfedgeIter<'a, M> {
+	type Target = HalfedgeId;
+
+	fn deref(&self) -> &Self::Target {
+		&self.id
+	}
+}
+
+impl <'a, M: Mesh> Element for HalfedgeIter<'a, M> {
 	type Item = HalfedgeId;
 	type M = M;
 
@@ -61,7 +69,7 @@ impl <'a, M: Mesh> Element for Halfedge<'a, M> {
 	}
 }
 
-impl <'a, M: Mesh> Iterator for Halfedge<'a, M> {
+impl <'a, M: Mesh> Iterator for HalfedgeIter<'a, M> {
 	type Item = HalfedgeId;
 
 	fn next(&mut self) -> Option<Self::Item> {
