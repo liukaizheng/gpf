@@ -1,35 +1,35 @@
-mod vertex;
-mod halfedge;
-mod face;
 mod boundary_loop;
+mod edge;
+mod face;
+mod halfedge;
+mod vertex;
 
-pub use vertex::*;
-pub use halfedge::*;
-pub use face::*;
 pub use boundary_loop::*;
+pub use edge::*;
+pub use face::*;
+pub use halfedge::*;
+pub use vertex::*;
 
 use super::Mesh;
 
 pub trait Element {
-	type Item: From<usize>;
-	type M : Mesh;
-	fn id(&self) -> Self::Item;
-	fn mesh(&self) -> &Self::M;
-	fn len(&self) -> usize;
-	fn capacity(&self) -> usize;
-	fn valid(&self) -> bool;
-	fn next(&mut self) -> bool;
+    type Item: From<usize>;
+    type M: Mesh;
+    fn id(&self) -> Self::Item;
+    fn mesh(&self) -> &Self::M;
+    fn valid(&self) -> bool;
+    fn next(&mut self) -> bool;
 }
 
 fn iter_next<E: Element>(ele: &mut E) -> Option<<E as Element>::Item> {
-	loop {
-		if !ele.next() {
-			return None;
-		}
-		if ele.valid() {
-			return Some(ele.id());
-		}
-	}
+    loop {
+        if !ele.next() {
+            return None;
+        }
+        if ele.valid() {
+            return Some(ele.id());
+        }
+    }
 }
 
 // impl <'a, M: Mesh, E : Element<'a, M>> Iterator for E {

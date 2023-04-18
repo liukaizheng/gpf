@@ -28,6 +28,14 @@ impl <'a, M: Mesh> BoundaryLoopIter<'a, M> {
 	pub fn new(id: BoundaryLoopId, mesh: &'a M) -> Self {
 		Self { id, mesh }
 	}
+
+	fn len(&self) -> usize {
+		self.mesh.n_boundary_loops()
+	}
+
+	fn capacity(&self) -> usize {
+		self.mesh.n_boundary_loop_capacity()
+	}
 }
 
 impl <'a, M: Mesh> Deref for BoundaryLoopIter<'a, M> {
@@ -49,14 +57,6 @@ impl <'a, M: Mesh> Element for BoundaryLoopIter<'a, M> {
 
 	fn mesh(&self) -> &M {
 		self.mesh
-	}
-
-	fn len(&self) -> usize {
-		self.mesh.n_boundary_loop()
-	}
-
-	fn capacity(&self) -> usize {
-		self.mesh.n_boundary_loop_capacity()
 	}
 
 	fn valid(&self) -> bool {

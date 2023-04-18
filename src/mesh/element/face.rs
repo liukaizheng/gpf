@@ -28,6 +28,14 @@ impl <'a, M: Mesh> FaceIter<'a, M> {
 	pub fn new(id: FaceId, mesh: &'a M) -> Self {
 		Self { id, mesh }
 	}
+
+	fn len(&self) -> usize {
+		self.mesh.n_faces()
+	}
+
+	fn capacity(&self) -> usize {
+		self.mesh.n_faces_capacity()
+	}
 }
 
 impl <'a, M: Mesh> Deref for FaceIter<'a, M> {
@@ -48,14 +56,6 @@ impl <'a, M: Mesh> Element for FaceIter<'a, M> {
 
 	fn mesh(&self) -> &M {
 		self.mesh
-	}
-
-	fn len(&self) -> usize {
-		self.mesh.n_faces()
-	}
-
-	fn capacity(&self) -> usize {
-		self.mesh.n_faces_capacity()
 	}
 
 	fn valid(&self) -> bool {

@@ -1,7 +1,7 @@
 use std::ops::{Index, Deref};
 
 use crate::mesh::Mesh;
-use super::{Element, iter_next};
+use super::{Element, iter_next, EdgeIter};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct HalfedgeId(usize);
@@ -28,6 +28,14 @@ impl <'a, M: Mesh> HalfedgeIter<'a, M> {
 	pub fn new(id: HalfedgeId, mesh: &'a M) -> Self {
 		Self { id, mesh }
 	}
+
+	fn len(&self) -> usize {
+		self.mesh.n_halfedges()
+	}
+
+	fn capacity(&self) -> usize {
+		self.mesh.n_halfedges_capacity()
+	}
 }
 
 impl <'a, M: Mesh> Deref for HalfedgeIter<'a, M> {
@@ -51,14 +59,6 @@ impl <'a, M: Mesh> Element for HalfedgeIter<'a, M> {
 		self.mesh
 	}
 
-	fn len(&self) -> usize {
-		self.mesh.n_halfedges()
-	}
-
-	fn capacity(&self) -> usize {
-		self.mesh.n_halfedges_capacity()
-	}
-
 	fn valid(&self) -> bool {
 		self.mesh.halfedge_is_valid(self.id)
 	}
@@ -66,6 +66,16 @@ impl <'a, M: Mesh> Element for HalfedgeIter<'a, M> {
 	fn next(&mut self) -> bool {
 		self.id.0 += 1;
 		self.id.0 < self.capacity()
+	}
+}
+
+pub trait Halfedge: Element {
+	fn edge(&self) -> EdgeIter<'_, Self::M>;
+}
+
+impl <'a, M: Mesh> Halfedge for HalfedgeIter<'a, M> {
+	fn edge(&self) -> EdgeIter<'_, Self::M> {
+		EdgeIter::new(self.mesh.he_edge(self.id), self.mesh)
 	}
 }
 
