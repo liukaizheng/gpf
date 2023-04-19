@@ -1,10 +1,10 @@
-use std::ops::{Deref, Index};
+use std::ops::{Deref, Index, IndexMut};
 
 use super::{iter_next, Element};
 use crate::mesh::Mesh;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FaceId(usize);
+pub struct FaceId(pub usize);
 
 impl From<usize> for FaceId {
     fn from(id: usize) -> Self {
@@ -16,6 +16,12 @@ impl<T> Index<FaceId> for Vec<T> {
     type Output = T;
     fn index(&self, index: FaceId) -> &Self::Output {
         &self[index.0]
+    }
+}
+
+impl<T> IndexMut<FaceId> for Vec<T> {
+    fn index_mut(&mut self, index: FaceId) -> &mut Self::Output {
+        &mut self[index.0]
     }
 }
 

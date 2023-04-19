@@ -40,6 +40,11 @@ pub trait Mesh: Sized {
     fn face<'a>(&'a self, fid: FaceId) -> FaceIter<'a, Self>;
     fn boundary_loop<'a>(&'a self, blid: BoundaryLoopId) -> BoundaryLoopIter<'a, Self>;
 
+    fn vertices(&self) -> VertexIter<'_, Self>;
+    fn halfedges(&self) -> HalfedgeIter<'_, Self>;
+    fn edges(&self) -> EdgeIter<'_, Self>;
+    fn faces(&self) -> FaceIter<'_, Self>;
+
     /// the halfedge starting from this vertex
     fn v_halfedge(&self, vid: VertexId) -> HalfedgeId;
 
@@ -71,4 +76,8 @@ pub trait Mesh: Sized {
     fn f_halfedge(&self, fid: FaceId) -> HalfedgeId;
 
     fn use_implicit_twin(&self) -> bool;
+
+    fn new_halfedge(&mut self, is_interior: bool) -> HalfedgeId;
+
+    fn new_edge(&mut self) -> EdgeId;
 }

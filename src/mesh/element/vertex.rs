@@ -1,10 +1,10 @@
-use std::ops::{Deref, Index};
+use std::ops::{Deref, Index, IndexMut};
 
 use super::{iter_next, Edge, EdgeId, Element, Halfedge, HalfedgeId, HalfedgeIter};
 use crate::{element_iterator, mesh::Mesh};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct VertexId(usize);
+pub struct VertexId(pub usize);
 
 impl From<usize> for VertexId {
     fn from(id: usize) -> Self {
@@ -16,6 +16,12 @@ impl<T> Index<VertexId> for Vec<T> {
     type Output = T;
     fn index(&self, index: VertexId) -> &Self::Output {
         &self[index.0]
+    }
+}
+
+impl<T> IndexMut<VertexId> for Vec<T> {
+    fn index_mut(&mut self, index: VertexId) -> &mut Self::Output {
+        &mut self[index.0]
     }
 }
 
@@ -153,7 +159,6 @@ pub struct VVertexIter<'a, M: Mesh> {
     start_state: VNeighborIterState,
     first_he: HalfedgeId,
 }
-
 
 macro_rules! vertex_state_iterator {
     (struct $name:ident -> $item: ty, {$($id: tt)*}) => {

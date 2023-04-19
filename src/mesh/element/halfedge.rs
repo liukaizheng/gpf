@@ -1,10 +1,10 @@
-use std::ops::{Deref, Index};
+use std::ops::{Deref, Index, IndexMut};
 
 use super::{iter_next, EdgeIter, Element};
 use crate::mesh::Mesh;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct HalfedgeId(usize);
+pub struct HalfedgeId(pub usize);
 
 impl From<usize> for HalfedgeId {
     fn from(id: usize) -> Self {
@@ -16,6 +16,12 @@ impl<T> Index<HalfedgeId> for Vec<T> {
     type Output = T;
     fn index(&self, index: HalfedgeId) -> &Self::Output {
         &self[index.0]
+    }
+}
+
+impl<T> IndexMut<HalfedgeId> for Vec<T> {
+    fn index_mut(&mut self, index: HalfedgeId) -> &mut Self::Output {
+        &mut self[index.0]
     }
 }
 

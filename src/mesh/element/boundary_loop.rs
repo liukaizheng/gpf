@@ -1,4 +1,4 @@
-use std::ops::{Deref, Index};
+use std::ops::{Deref, Index, IndexMut};
 
 use super::{iter_next, Element};
 use crate::mesh::Mesh;
@@ -16,6 +16,12 @@ impl<T> Index<BoundaryLoopId> for Vec<T> {
     type Output = T;
     fn index(&self, index: BoundaryLoopId) -> &Self::Output {
         &self[index.0]
+    }
+}
+
+impl<T> IndexMut<BoundaryLoopId> for Vec<T> {
+    fn index_mut(&mut self, index: BoundaryLoopId) -> &mut Self::Output {
+        &mut self[index.0]
     }
 }
 
