@@ -4,6 +4,9 @@ mod face;
 mod halfedge;
 mod vertex;
 
+#[macro_use]
+mod macros;
+
 pub use boundary_loop::*;
 pub use edge::*;
 pub use face::*;
@@ -31,19 +34,3 @@ fn iter_next<E: Element>(ele: &mut E) -> Option<<E as Element>::Item> {
         }
     }
 }
-
-// impl <'a, M: Mesh, E : Element<'a, M>> Iterator for E {
-// 	type Item = Self::Item;
-
-// 	fn next(&mut self) -> Option<Self::Item> {
-// 		let ele_id = self.id + 1;
-// 		while ele_id < self.capacity() && self.build(ele_id).valid() {
-// 			ele_id += 1;
-// 		}
-// 		if ele_id >= self.capacity() {
-// 			None
-// 		} else {
-// 			Some(Self::Item::from(ele_id))
-// 		}
-// 	}
-// }
