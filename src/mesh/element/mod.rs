@@ -15,22 +15,22 @@ pub use vertex::*;
 
 use super::Mesh;
 
-pub trait ElementId {
+pub trait ElementId: From<usize> {
     fn new() -> Self;
     fn valid(&self) -> bool;
 }
 
 pub trait Element {
-    type Item: From<usize>;
+    type Id: ElementId;
     type M: Mesh;
-    fn id(&self) -> Self::Item;
+    fn id(&self) -> Self::Id;
     fn mesh(&self) -> &Self::M;
     fn valid(&self) -> bool;
     fn next(&mut self);
     fn is_end(&self) -> bool;
 }
 
-fn iter_next<E: Element>(ele: &mut E) -> Option<<E as Element>::Item> {
+fn iter_next<E: Element>(ele: &mut E) -> Option<<E as Element>::Id> {
     if ele.is_end() {
         return None;
     }

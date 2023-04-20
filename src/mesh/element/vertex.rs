@@ -203,7 +203,7 @@ macro_rules! vertex_halfedge_iterator {
     (struct $name:ident) => {
         element_iterator! {
             struct $name -> HalfedgeId, {
-                fn id(&self) -> Self::Item {
+                fn id(&self) -> Self::Id {
                     self.curr_he
                 }
             }, {

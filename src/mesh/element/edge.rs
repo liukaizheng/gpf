@@ -37,7 +37,7 @@ impl<'a, M: Mesh> Deref for EdgeIter<'a, M> {
 }
 
 impl<'a, M: Mesh> Element for EdgeIter<'a, M> {
-    type Item = EdgeId;
+    type Id = EdgeId;
     type M = M;
 
     fn id(&self) -> EdgeId {

@@ -37,7 +37,7 @@ impl<'a, M: Mesh> Deref for BoundaryLoopIter<'a, M> {
 }
 
 impl<'a, M: Mesh> Element for BoundaryLoopIter<'a, M> {
-    type Item = BoundaryLoopId;
+    type Id = BoundaryLoopId;
     type M = M;
 
     fn id(&self) -> BoundaryLoopId {

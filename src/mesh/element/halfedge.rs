@@ -37,7 +37,7 @@ impl<'a, M: Mesh> Deref for HalfedgeIter<'a, M> {
 }
 
 impl<'a, M: Mesh> Element for HalfedgeIter<'a, M> {
-    type Item = HalfedgeId;
+    type Id = HalfedgeId;
     type M = M;
 
     fn id(&self) -> HalfedgeId {

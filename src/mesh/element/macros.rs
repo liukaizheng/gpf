@@ -52,7 +52,7 @@ macro_rules! element_id {
 macro_rules! element_iterator {
     (struct $name: ident -> $item: ty, {$($id: tt)*}, {$($valid: tt)*}, {$($next: tt)*}, {$($is_end: tt)*}) => {
         impl<'a, M: Mesh> Element for $name<'a, M> {
-            type Item = $item;
+            type Id = $item;
             type M = M;
             #[inline]
             $($id)*

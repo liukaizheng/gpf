@@ -37,7 +37,7 @@ impl<'a, M: Mesh> Deref for FaceIter<'a, M> {
 }
 
 impl<'a, M: Mesh> Element for FaceIter<'a, M> {
-    type Item = FaceId;
+    type Id = FaceId;
     type M = M;
 
     fn id(&self) -> FaceId {
