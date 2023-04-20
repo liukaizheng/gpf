@@ -1,29 +1,12 @@
-use std::ops::{Deref, Index, IndexMut};
+use std::ops::{Deref, DerefMut, Index, IndexMut};
 
-use super::{iter_next, Element};
-use crate::mesh::Mesh;
+use super::{iter_next, Element, ElementId};
+use crate::{mesh::Mesh, element_id, INVALID_IND};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BoundaryLoopId(usize);
 
-impl From<usize> for BoundaryLoopId {
-    fn from(id: usize) -> Self {
-        Self(id)
-    }
-}
-
-impl<T> Index<BoundaryLoopId> for Vec<T> {
-    type Output = T;
-    fn index(&self, index: BoundaryLoopId) -> &Self::Output {
-        &self[index.0]
-    }
-}
-
-impl<T> IndexMut<BoundaryLoopId> for Vec<T> {
-    fn index_mut(&mut self, index: BoundaryLoopId) -> &mut Self::Output {
-        &mut self[index.0]
-    }
-}
+element_id!{struct BoundaryLoopId}
 
 pub struct BoundaryLoopIter<'a, M: Mesh> {
     id: BoundaryLoopId,
@@ -69,9 +52,12 @@ impl<'a, M: Mesh> Element for BoundaryLoopIter<'a, M> {
         self.mesh.boundary_loop_is_valid(self.id)
     }
 
-    fn next(&mut self) -> bool {
+    fn next(&mut self) {
         self.id.0 += 1;
-        self.id.0 < self.capacity()
+    }
+
+    fn is_end(&self) -> bool {
+        self.id.0 == self.capacity()
     }
 }
 

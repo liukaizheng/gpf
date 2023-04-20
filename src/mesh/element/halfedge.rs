@@ -1,29 +1,12 @@
-use std::ops::{Deref, Index, IndexMut};
+use std::ops::{Deref, DerefMut, Index, IndexMut};
 
-use super::{iter_next, EdgeIter, Element};
-use crate::mesh::Mesh;
+use super::{iter_next, EdgeIter, Element, ElementId};
+use crate::{element_id, mesh::Mesh, INVALID_IND};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct HalfedgeId(pub usize);
 
-impl From<usize> for HalfedgeId {
-    fn from(id: usize) -> Self {
-        Self(id)
-    }
-}
-
-impl<T> Index<HalfedgeId> for Vec<T> {
-    type Output = T;
-    fn index(&self, index: HalfedgeId) -> &Self::Output {
-        &self[index.0]
-    }
-}
-
-impl<T> IndexMut<HalfedgeId> for Vec<T> {
-    fn index_mut(&mut self, index: HalfedgeId) -> &mut Self::Output {
-        &mut self[index.0]
-    }
-}
+element_id! {struct HalfedgeId}
 
 pub struct HalfedgeIter<'a, M: Mesh> {
     id: HalfedgeId,
@@ -69,9 +52,12 @@ impl<'a, M: Mesh> Element for HalfedgeIter<'a, M> {
         self.mesh.halfedge_is_valid(self.id)
     }
 
-    fn next(&mut self) -> bool {
-        self.id.0 += 1;
-        self.id.0 < self.capacity()
+    fn next(&mut self) {
+        *self.id += 1;
+    }
+
+    fn is_end(&self) -> bool {
+        *self.id == self.capacity()
     }
 }
 

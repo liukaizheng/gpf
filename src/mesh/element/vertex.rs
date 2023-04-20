@@ -1,29 +1,12 @@
-use std::ops::{Deref, Index, IndexMut};
+use std::ops::{Deref, DerefMut, Index, IndexMut};
 
-use super::{iter_next, Edge, EdgeId, Element, Halfedge, HalfedgeId, HalfedgeIter};
-use crate::{element_iterator, mesh::Mesh};
+use super::{iter_next, Edge, EdgeId, Element, ElementId, Halfedge, HalfedgeId, HalfedgeIter};
+use crate::{element_id, element_iterator, mesh::Mesh, INVALID_IND};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VertexId(pub usize);
 
-impl From<usize> for VertexId {
-    fn from(id: usize) -> Self {
-        Self(id)
-    }
-}
-
-impl<T> Index<VertexId> for Vec<T> {
-    type Output = T;
-    fn index(&self, index: VertexId) -> &Self::Output {
-        &self[index.0]
-    }
-}
-
-impl<T> IndexMut<VertexId> for Vec<T> {
-    fn index_mut(&mut self, index: VertexId) -> &mut Self::Output {
-        &mut self[index.0]
-    }
-}
+element_id! {struct VertexId}
 
 pub struct VertexIter<'a, M: Mesh> {
     id: VertexId,
@@ -98,9 +81,12 @@ element_iterator! {
             self.mesh.vertex_is_valid(self.id)
         }
     }, {
-        fn next(&mut self) -> bool {
-            self.id.0 += 1;
-            self.id.0 < self.capacity()
+        fn next(&mut self) {
+            *self.id += 1;
+        }
+    }, {
+        fn is_end(&self) -> bool {
+            *self.id == self.capacity()
         }
     }
 }
@@ -155,6 +141,7 @@ impl VNeighborIterState {
 
 pub struct VVertexIter<'a, M: Mesh> {
     mesh: &'a M,
+    just_start: bool,
     curr_state: VNeighborIterState,
     start_state: VNeighborIterState,
     first_he: HalfedgeId,
@@ -176,6 +163,7 @@ macro_rules! vertex_state_iterator {
                 let start_state = curr_state.clone();
                 Self {
                     mesh,
+                    just_start: true,
                     curr_state,
                     start_state,
                     first_he,
@@ -189,9 +177,13 @@ macro_rules! vertex_state_iterator {
                 self.curr_state.is_halfedge_canonical(self.mesh)
             }
         }, {
-            fn next(&mut self) -> bool {
+            fn next(&mut self) {
+                self.just_start = false;
                 self.curr_state.next(self.mesh, &mut self.first_he);
-                self.curr_state != self.start_state
+            }
+        }, {
+            fn is_end(&self) -> bool {
+                !self.just_start && self.curr_state == self.start_state
             }
         }}
     };
@@ -219,9 +211,13 @@ macro_rules! vertex_halfedge_iterator {
                     true
                 }
             }, {
-                fn next(&mut self) -> bool {
+                fn next(&mut self) {
+                    self.just_start = false;
                     self.next();
-                    self.curr_he != self.first_he
+                }
+            }, {
+                fn is_end(&self) -> bool {
+                    !self.just_start && self.curr_he == self.first_he
                 }
             }
 
@@ -231,6 +227,7 @@ macro_rules! vertex_halfedge_iterator {
 
 pub struct VIncomingHalfedgeIter<'a, M: Mesh> {
     mesh: &'a M,
+    just_start: bool,
     first_he: HalfedgeId,
     curr_he: HalfedgeId,
 }
@@ -239,6 +236,7 @@ impl<'a, M: Mesh> VIncomingHalfedgeIter<'a, M> {
     pub fn new(mesh: &'a M, he: HalfedgeId) -> Self {
         Self {
             mesh,
+            just_start: true,
             first_he: he,
             curr_he: he,
         }
@@ -253,6 +251,7 @@ vertex_halfedge_iterator! {struct VIncomingHalfedgeIter}
 
 pub struct VOutgoingHalfedgeIter<'a, M: Mesh> {
     mesh: &'a M,
+    just_start: bool,
     first_he: HalfedgeId,
     curr_he: HalfedgeId,
 }
@@ -261,6 +260,7 @@ impl<'a, M: Mesh> VOutgoingHalfedgeIter<'a, M> {
     pub fn new(mesh: &'a M, he: HalfedgeId) -> Self {
         Self {
             mesh,
+            just_start: true,
             first_he: he,
             curr_he: he,
         }
@@ -275,6 +275,7 @@ vertex_halfedge_iterator! {struct VOutgoingHalfedgeIter}
 
 pub struct VEdgeIter<'a, M: Mesh> {
     mesh: &'a M,
+    just_start: bool,
     curr_state: VNeighborIterState,
     start_state: VNeighborIterState,
     first_he: HalfedgeId,

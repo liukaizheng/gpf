@@ -1,29 +1,12 @@
-use std::ops::{Deref, Index, IndexMut};
+use std::ops::{Deref, DerefMut, Index, IndexMut};
 
-use super::{iter_next, Element};
-use crate::mesh::Mesh;
+use super::{iter_next, Element, ElementId};
+use crate::{element_id, mesh::Mesh, INVALID_IND};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FaceId(pub usize);
 
-impl From<usize> for FaceId {
-    fn from(id: usize) -> Self {
-        Self(id)
-    }
-}
-
-impl<T> Index<FaceId> for Vec<T> {
-    type Output = T;
-    fn index(&self, index: FaceId) -> &Self::Output {
-        &self[index.0]
-    }
-}
-
-impl<T> IndexMut<FaceId> for Vec<T> {
-    fn index_mut(&mut self, index: FaceId) -> &mut Self::Output {
-        &mut self[index.0]
-    }
-}
+element_id! {struct FaceId}
 
 pub struct FaceIter<'a, M: Mesh> {
     id: FaceId,
@@ -69,9 +52,12 @@ impl<'a, M: Mesh> Element for FaceIter<'a, M> {
         self.mesh.face_is_valid(self.id)
     }
 
-    fn next(&mut self) -> bool {
+    fn next(&mut self) {
         self.id.0 += 1;
-        self.id.0 < self.capacity()
+    }
+
+    fn is_end(&self) -> bool {
+        *self.id == self.capacity()
     }
 }
 

@@ -5,6 +5,7 @@ mod surface_mesh;
 mod mesh_macro;
 
 pub use element::*;
+pub use surface_mesh::*;
 
 use crate::INVALID_IND;
 
