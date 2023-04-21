@@ -1,13 +1,17 @@
 mod element;
-mod surface_mesh;
 mod manifold_mesh;
+mod mesh_data;
+mod surface_mesh;
 
 #[macro_use]
 mod mesh_macro;
 
+use std::{cell::RefCell, rc::Weak};
+
 pub use element::*;
-pub use surface_mesh::*;
 pub use manifold_mesh::*;
+pub use mesh_data::*;
+pub use surface_mesh::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FaceOrBoundaryLoopId {
@@ -77,4 +81,12 @@ pub trait Mesh: Sized {
     fn f_halfedge(&self, fid: FaceId) -> HalfedgeId;
 
     fn use_implicit_twin(&self) -> bool;
+
+    /// add halfedges data reference
+    fn add_halfedges_data<T: Default + Clone + 'static>(
+        &mut self,
+        data: Weak<RefCell<HalfedgeData<T, Self>>>,
+    );
+
+    fn remove_halfedges_data<T: Default + Clone>(&mut self, data: &HalfedgeData<T, Self>);
 }

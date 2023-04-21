@@ -1,8 +1,11 @@
+use std::{cell::RefCell, rc::Weak};
+
 use crate::build_connect_info;
 
 use super::{
     BoundaryLoopId, BoundaryLoopIter, EdgeId, EdgeIter, ElementId, FaceId, FaceIter,
-    FaceOrBoundaryLoopId, HalfedgeId, HalfedgeIter, VertexId, VertexIter, Mesh,
+    FaceOrBoundaryLoopId, HalfedgeData, HalfedgeId, HalfedgeIter, Mesh, MeshData, VertexId,
+    VertexIter,
 };
 
 pub struct ManifoldMesh {
@@ -18,6 +21,8 @@ pub struct ManifoldMesh {
     n_interior_halfedges: usize,
     n_faces: usize,
     n_boundary_loops: usize,
+
+    halfedges_data: Vec<Weak<RefCell<dyn MeshData<Id = HalfedgeId>>>>,
 }
 
 impl ManifoldMesh {
@@ -48,7 +53,6 @@ impl ManifoldMesh {
     pub fn boundary_loop<'a>(&'a self, blid: BoundaryLoopId) -> BoundaryLoopIter<'a> {
         BoundaryLoopIter::new(blid, self)
     }
-
 }
 
 impl Mesh for ManifoldMesh {

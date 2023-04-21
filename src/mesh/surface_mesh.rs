@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap, rc::Weak};
 
 use crate::{build_connect_info, mesh::Mesh, INVALID_IND};
 
 use super::{
-    EdgeId, EdgeIter, ElementId, FaceId, FaceIter,
-    FaceOrBoundaryLoopId, HalfedgeId, HalfedgeIter, VertexId, VertexIter,
+    EdgeId, EdgeIter, ElementId, FaceId, FaceIter, FaceOrBoundaryLoopId, HalfedgeData, HalfedgeId,
+    HalfedgeIter, MeshData, VertexId, VertexIter,
 };
 
 pub struct SurfaceMesh {
@@ -26,6 +26,8 @@ pub struct SurfaceMesh {
     he_vert_out_prev_arr: Vec<HalfedgeId>,
     he_sibling_arr: Vec<HalfedgeId>,
     e_halfedge_arr: Vec<HalfedgeId>,
+
+    pub halfedges_data: Vec<Weak<RefCell<dyn MeshData<Id = HalfedgeId>>>>,
 }
 
 impl SurfaceMesh {
@@ -73,7 +75,11 @@ impl SurfaceMesh {
         self.he_vert_out_prev_arr.push(HalfedgeId::new());
         self.n_halfedges += 1;
 
-        // TODO: update callback
+        for data in &self.halfedges_data {
+            if let Some(data) = data.upgrade() {
+                data.borrow_mut().expand(self.n_halfedges);
+            }
+        }
 
         hid
     }
@@ -118,6 +124,8 @@ impl From<Vec<Vec<usize>>> for SurfaceMesh {
             he_vert_out_prev_arr: vec![],
             he_sibling_arr: vec![],
             e_halfedge_arr: vec![],
+
+            halfedges_data: vec![],
         };
 
         for (fid, polygon) in polygons.iter().enumerate() {
@@ -239,7 +247,6 @@ impl Mesh for SurfaceMesh {
         self.e_halfedge_arr[eid].valid()
     }
 
-
     /// the twin halfedge of the halfedge
     #[inline(always)]
     fn he_twin(&self, hid: HalfedgeId) -> HalfedgeId {
@@ -286,5 +293,4 @@ impl Mesh for SurfaceMesh {
     fn use_implicit_twin(&self) -> bool {
         false
     }
-
 }
