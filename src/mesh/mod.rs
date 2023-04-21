@@ -1,15 +1,15 @@
 mod element;
 mod surface_mesh;
+mod manifold_mesh;
 
 #[macro_use]
 mod mesh_macro;
 
 pub use element::*;
 pub use surface_mesh::*;
+pub use manifold_mesh::*;
 
-use crate::INVALID_IND;
-
-const BL_START: usize = INVALID_IND - 1;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FaceOrBoundaryLoopId {
     Face(FaceId),
     BoundaryLoop(BoundaryLoopId),
@@ -21,25 +21,25 @@ pub trait Mesh: Sized {
     fn n_halfedges(&self) -> usize;
     fn n_edges(&self) -> usize;
     fn n_faces(&self) -> usize;
-    fn n_boundary_loops(&self) -> usize;
+    // fn n_boundary_loops(&self) -> usize;
 
     fn n_vertices_capacity(&self) -> usize;
     fn n_halfedges_capacity(&self) -> usize;
     fn n_edges_capacity(&self) -> usize;
     fn n_faces_capacity(&self) -> usize;
-    fn n_boundary_loop_capacity(&self) -> usize;
+    // fn n_boundary_loop_capacity(&self) -> usize;
 
     fn vertex_is_valid(&self, vid: VertexId) -> bool;
     fn halfedge_is_valid(&self, hid: HalfedgeId) -> bool;
     fn edge_is_valid(&self, eid: EdgeId) -> bool;
     fn face_is_valid(&self, fid: FaceId) -> bool;
-    fn boundary_loop_is_valid(&self, blid: BoundaryLoopId) -> bool;
+    // fn boundary_loop_is_valid(&self, blid: BoundaryLoopId) -> bool;
 
     fn vertex<'a>(&'a self, vid: VertexId) -> VertexIter<'a, Self>;
     fn halfedge<'a>(&'a self, hid: HalfedgeId) -> HalfedgeIter<'a, Self>;
     fn edge<'a>(&'a self, eid: EdgeId) -> EdgeIter<'a, Self>;
     fn face<'a>(&'a self, fid: FaceId) -> FaceIter<'a, Self>;
-    fn boundary_loop<'a>(&'a self, blid: BoundaryLoopId) -> BoundaryLoopIter<'a, Self>;
+    // fn boundary_loop<'a>(&'a self, blid: BoundaryLoopId) -> BoundaryLoopIter<'a, Self>;
 
     fn vertices(&self) -> VertexIter<'_, Self>;
     fn halfedges(&self) -> HalfedgeIter<'_, Self>;
@@ -77,8 +77,4 @@ pub trait Mesh: Sized {
     fn f_halfedge(&self, fid: FaceId) -> HalfedgeId;
 
     fn use_implicit_twin(&self) -> bool;
-
-    fn new_halfedge(&mut self, is_interior: bool) -> HalfedgeId;
-
-    fn new_edge(&mut self) -> EdgeId;
 }

@@ -1,20 +1,20 @@
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 
 use super::{iter_next, Element, ElementId};
-use crate::{mesh::Mesh, element_id, INVALID_IND};
+use crate::{element_id, mesh::ManifoldMesh, INVALID_IND};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BoundaryLoopId(usize);
 
-element_id!{struct BoundaryLoopId}
+element_id! {struct BoundaryLoopId}
 
-pub struct BoundaryLoopIter<'a, M: Mesh> {
+pub struct BoundaryLoopIter<'a> {
     id: BoundaryLoopId,
-    mesh: &'a M,
+    mesh: &'a ManifoldMesh,
 }
 
-impl<'a, M: Mesh> BoundaryLoopIter<'a, M> {
-    pub fn new(id: BoundaryLoopId, mesh: &'a M) -> Self {
+impl<'a> BoundaryLoopIter<'a> {
+    pub fn new(id: BoundaryLoopId, mesh: &'a ManifoldMesh) -> Self {
         Self { id, mesh }
     }
 
@@ -28,7 +28,7 @@ impl<'a, M: Mesh> BoundaryLoopIter<'a, M> {
     }
 }
 
-impl<'a, M: Mesh> Deref for BoundaryLoopIter<'a, M> {
+impl<'a> Deref for BoundaryLoopIter<'a> {
     type Target = BoundaryLoopId;
 
     fn deref(&self) -> &Self::Target {
@@ -36,15 +36,15 @@ impl<'a, M: Mesh> Deref for BoundaryLoopIter<'a, M> {
     }
 }
 
-impl<'a, M: Mesh> Element for BoundaryLoopIter<'a, M> {
+impl<'a> Element for BoundaryLoopIter<'a> {
     type Id = BoundaryLoopId;
-    type M = M;
+    type M = ManifoldMesh;
 
     fn id(&self) -> BoundaryLoopId {
         self.id
     }
 
-    fn mesh(&self) -> &M {
+    fn mesh(&self) -> &Self::M {
         self.mesh
     }
 
@@ -61,7 +61,7 @@ impl<'a, M: Mesh> Element for BoundaryLoopIter<'a, M> {
     }
 }
 
-impl<'a, M: Mesh> Iterator for BoundaryLoopIter<'a, M> {
+impl<'a> Iterator for BoundaryLoopIter<'a> {
     type Item = BoundaryLoopId;
 
     fn next(&mut self) -> Option<Self::Item> {

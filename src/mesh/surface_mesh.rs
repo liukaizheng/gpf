@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::{build_connect_info, mesh::Mesh, INVALID_IND};
 
 use super::{
-    BoundaryLoopId, BoundaryLoopIter, EdgeId, EdgeIter, ElementId, FaceId, FaceIter,
+    EdgeId, EdgeIter, ElementId, FaceId, FaceIter,
     FaceOrBoundaryLoopId, HalfedgeId, HalfedgeIter, VertexId, VertexIter,
 };
 
@@ -13,14 +13,11 @@ pub struct SurfaceMesh {
     he_vertex_arr: Vec<VertexId>,
     he_face_arr: Vec<FaceId>,
     f_halfedge_arr: Vec<HalfedgeId>,
-    bl_halfedge_arr: Vec<BoundaryLoopId>,
 
     n_vertices: usize,
     n_halfedges: usize,
-    n_interior_halfedges: usize,
     n_edges: usize,
     n_faces: usize,
-    n_loops: usize,
 
     he_edge_arr: Vec<EdgeId>,
     he_vert_in_next_arr: Vec<HalfedgeId>,
@@ -61,6 +58,35 @@ impl SurfaceMesh {
         });
         (vertex_halfedges, vertex_separators)
     }
+
+    fn new_halfedge(&mut self) -> HalfedgeId {
+        let hid = HalfedgeId::from(self.he_next_arr.len());
+        self.he_next_arr.push(HalfedgeId::new());
+        self.he_vertex_arr.push(VertexId::new());
+
+        self.he_face_arr.push(FaceId::new());
+        self.he_sibling_arr.push(HalfedgeId::new());
+        self.he_edge_arr.push(EdgeId::new());
+        self.he_vert_in_next_arr.push(HalfedgeId::new());
+        self.he_vert_in_prev_arr.push(HalfedgeId::new());
+        self.he_vert_out_next_arr.push(HalfedgeId::new());
+        self.he_vert_out_prev_arr.push(HalfedgeId::new());
+        self.n_halfedges += 1;
+
+        // TODO: update callback
+
+        hid
+    }
+
+    fn new_edge(&mut self) -> EdgeId {
+        let eid = self.e_halfedge_arr.len();
+        self.e_halfedge_arr.push(HalfedgeId::new());
+
+        // TODO: update edge callback
+
+        self.n_edges += 1;
+        eid.into()
+    }
 }
 
 impl From<Vec<Vec<usize>>> for SurfaceMesh {
@@ -79,14 +105,11 @@ impl From<Vec<Vec<usize>>> for SurfaceMesh {
             he_vertex_arr: vec![],
             he_face_arr: vec![],
             f_halfedge_arr: vec![HalfedgeId::new(); n_faces],
-            bl_halfedge_arr: vec![],
 
             n_vertices,
             n_halfedges: 0,
-            n_interior_halfedges: 0,
             n_edges: 0,
             n_faces,
-            n_loops: 0,
 
             he_edge_arr: vec![],
             he_vert_in_next_arr: vec![],
@@ -102,7 +125,7 @@ impl From<Vec<Vec<usize>>> for SurfaceMesh {
             let mut prev_hid = first_hid;
             for i in 0..polygon.len() {
                 let tail = polygon[i];
-                let hid = mesh.new_halfedge(true);
+                let hid = mesh.new_halfedge();
 
                 mesh.he_vertex_arr[hid] = tail.into();
                 mesh.he_face_arr[hid] = fid.into();
@@ -198,40 +221,10 @@ impl From<Vec<Vec<usize>>> for SurfaceMesh {
 impl Mesh for SurfaceMesh {
     build_connect_info!();
 
-    /// the number of halfedges
-    #[inline(always)]
-    fn n_halfedges(&self) -> usize {
-        return self.n_halfedges;
-    }
-
     /// the number of edges
     #[inline(always)]
     fn n_edges(&self) -> usize {
         return self.n_edges;
-    }
-
-    /// the number of faces
-    #[inline(always)]
-    fn n_faces(&self) -> usize {
-        return self.n_faces;
-    }
-
-    /// the number of boundary loops
-    #[inline(always)]
-    fn n_boundary_loops(&self) -> usize {
-        return self.n_loops;
-    }
-
-    /// the capacity of vertices
-    #[inline(always)]
-    fn n_vertices_capacity(&self) -> usize {
-        return self.v_halfedge_arr.len();
-    }
-
-    /// the capacity of halfedges
-    #[inline(always)]
-    fn n_halfedges_capacity(&self) -> usize {
-        return self.he_next_arr.len();
     }
 
     /// the capacity of edges
@@ -240,133 +233,12 @@ impl Mesh for SurfaceMesh {
         return self.e_halfedge_arr.len();
     }
 
-    /// the capacity of faces
-    #[inline(always)]
-    fn n_faces_capacity(&self) -> usize {
-        return self.f_halfedge_arr.len();
-    }
-
-    /// the capacity of boundary loops
-    #[inline(always)]
-    fn n_boundary_loop_capacity(&self) -> usize {
-        return self.bl_halfedge_arr.len();
-    }
-
-    /// vertex id is valid
-    #[inline(always)]
-    fn vertex_is_valid(&self, vid: VertexId) -> bool {
-        self.v_halfedge_arr[vid].valid()
-    }
-
-    /// halfedge id is valid
-    #[inline(always)]
-    fn halfedge_is_valid(&self, hid: HalfedgeId) -> bool {
-        self.he_next_arr[hid].valid()
-    }
-
     /// edge id is valid
     #[inline(always)]
     fn edge_is_valid(&self, eid: super::EdgeId) -> bool {
         self.e_halfedge_arr[eid].valid()
     }
 
-    /// face id is valid
-    #[inline(always)]
-    fn face_is_valid(&self, fid: FaceId) -> bool {
-        self.f_halfedge_arr[fid].valid()
-    }
-
-    /// boundary loop id is valid
-    #[inline(always)]
-    fn boundary_loop_is_valid(&self, blid: BoundaryLoopId) -> bool {
-        self.bl_halfedge_arr[blid].valid()
-    }
-
-    /// start vertex iterator
-    #[inline(always)]
-    fn vertex<'a>(&'a self, vid: VertexId) -> VertexIter<'a, Self> {
-        VertexIter::new(vid, self)
-    }
-
-    /// start halfedge iterator
-    #[inline(always)]
-    fn halfedge<'a>(&'a self, hid: HalfedgeId) -> HalfedgeIter<'a, Self> {
-        HalfedgeIter::new(hid, self)
-    }
-
-    /// start edge iterator
-    #[inline(always)]
-    fn edge<'a>(&'a self, eid: EdgeId) -> super::EdgeIter<'a, Self> {
-        EdgeIter::new(eid, self)
-    }
-
-    /// start face iterator
-    #[inline(always)]
-    fn face<'a>(&'a self, fid: FaceId) -> FaceIter<'a, Self> {
-        FaceIter::new(fid, self)
-    }
-
-    /// start boundary loop iterator
-    #[inline(always)]
-    fn boundary_loop<'a>(&'a self, blid: BoundaryLoopId) -> BoundaryLoopIter<'a, Self> {
-        BoundaryLoopIter::new(blid, self)
-    }
-
-    #[inline(always)]
-    fn vertices(&self) -> VertexIter<'_, Self> {
-        VertexIter::new(VertexId::from(0), self)
-    }
-
-    #[inline(always)]
-    fn halfedges(&self) -> HalfedgeIter<'_, Self> {
-        HalfedgeIter::new(HalfedgeId::from(0), self)
-    }
-
-    #[inline(always)]
-    fn edges(&self) -> EdgeIter<'_, Self> {
-        EdgeIter::new(EdgeId::from(0), self)
-    }
-
-    #[inline(always)]
-    fn faces(&self) -> FaceIter<'_, Self> {
-        FaceIter::new(FaceId::from(0), self)
-    }
-
-    /// the halfedge starting from this vertex
-    #[inline(always)]
-    fn v_halfedge(&self, vid: VertexId) -> HalfedgeId {
-        HalfedgeId::from(self.v_halfedge_arr[vid])
-    }
-
-    /// the start vertex of the halfedge
-    #[inline(always)]
-    fn he_vertex(&self, hid: HalfedgeId) -> VertexId {
-        VertexId::from(self.he_vertex_arr[hid])
-    }
-
-    /// the end vertex of the halfedge
-    #[inline(always)]
-    fn he_tip_vertex(&self, hid: HalfedgeId) -> VertexId {
-        VertexId::from(self.he_vertex_arr[self.he_next_arr[hid]])
-    }
-
-    /// the next halfedge of the halfedge
-    #[inline(always)]
-    fn he_next(&self, hid: HalfedgeId) -> HalfedgeId {
-        HalfedgeId::from(self.he_next_arr[hid])
-    }
-
-    /// the previous halfedge of the halfedge
-    fn he_prev(&self, hid: HalfedgeId) -> HalfedgeId {
-        let mut curr = hid;
-        loop {
-            let next = self.he_next(curr);
-            if next == hid {
-                return curr;
-            }
-            curr = next;
-        }
-    }
 
     /// the twin halfedge of the halfedge
     #[inline(always)]
@@ -410,45 +282,9 @@ impl Mesh for SurfaceMesh {
         HalfedgeId::from(self.e_halfedge_arr[eid])
     }
 
-    /// the first halfedge of the face
-    #[inline(always)]
-    fn f_halfedge(&self, fid: FaceId) -> HalfedgeId {
-        HalfedgeId::from(self.f_halfedge_arr[fid])
-    }
-
     #[inline(always)]
     fn use_implicit_twin(&self) -> bool {
-        true
+        false
     }
 
-    fn new_halfedge(&mut self, is_interior: bool) -> HalfedgeId {
-        let hid = HalfedgeId::from(self.he_next_arr.len());
-        self.he_next_arr.push(HalfedgeId::new());
-        self.he_vertex_arr.push(VertexId::new());
-
-        self.he_face_arr.push(FaceId::new());
-        self.he_sibling_arr.push(HalfedgeId::new());
-        self.he_edge_arr.push(EdgeId::new());
-        self.he_vert_in_next_arr.push(HalfedgeId::new());
-        self.he_vert_in_prev_arr.push(HalfedgeId::new());
-        self.he_vert_out_next_arr.push(HalfedgeId::new());
-        self.he_vert_out_prev_arr.push(HalfedgeId::new());
-        self.n_halfedges += 1;
-
-        if is_interior {
-            self.n_interior_halfedges += 1;
-        }
-
-        // TODO: update callback
-
-        hid
-    }
-
-    fn new_edge(&mut self) -> EdgeId {
-        let eid = self.e_halfedge_arr.len();
-        self.e_halfedge_arr.push(HalfedgeId::new());
-        // TODO: update edge callback
-        self.n_edges += 1;
-        eid.into()
-    }
 }
