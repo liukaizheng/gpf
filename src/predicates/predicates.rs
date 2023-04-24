@@ -149,6 +149,16 @@ pub const fn two_product(a: f64, b: f64) -> (f64, f64) {
 }
 
 #[inline(always)]
+pub const fn two_one_product(a1: f64, a0: f64, b: f64) -> (f64, f64, f64, f64) {
+    let (bhi, blo) = split(b);
+    let (_i, x0) = two_product_pre_split(a0, b, bhi, blo);
+    let (_j, _0) = two_product_pre_split(a1, b, bhi, blo);
+    let (_k, x1) = two_sum(_i, _0);
+    let (x3, x2) = fast_two_sum(_j, _k);
+    (x3, x2, x1, x0)
+}
+
+#[inline(always)]
 pub const fn two_product_pre_split(a: f64, b: f64, bhi: f64, blo: f64) -> (f64, f64) {
     let x = a * b;
     let (ahi, alo) = split(a);
@@ -458,4 +468,224 @@ pub fn orien2d<'a>(pa: &[f64], pb: &[f64], pc: &[f64], bump: &'a Bump) -> f64 {
     }
 
     orient2d_adapt(pa, pb, pc, detsum, bump)
+}
+
+fn orient3d_adapt<'a>(
+    pa: &[f64],
+    pb: &[f64],
+    pc: &[f64],
+    pd: &[f64],
+    permanent: f64,
+    bump: &'a Bump,
+) -> f64 {
+    let adx = pa[0] - pd[0];
+    let bdx = pb[0] - pd[0];
+    let cdx = pc[0] - pd[0];
+    let ady = pa[1] - pd[1];
+    let bdy = pb[1] - pd[1];
+    let cdy = pc[1] - pd[1];
+    let adz = pa[2] - pd[2];
+    let bdz = pb[2] - pd[2];
+    let cdz = pc[2] - pd[2];
+
+    let (bdxcdy1, bdxcdy0) = two_product(bdx, cdy);
+    let (cdxbdy1, cdxbdy0) = two_product(cdx, bdy);
+    let mut bc = bumpalo::vec![in bump; 0.0; 4];
+    (bc[3], bc[2], bc[1], bc[0]) = two_two_diff(bdxcdy1, bdxcdy0, cdxbdy1, cdxbdy0);
+    let adet = scale_expansion_zeroelim(&bc, adz, bump);
+
+    let (cdxady1, cdxady0) = two_product(cdx, ady);
+    let (adxcdy1, adxcdy0) = two_product(adx, cdy);
+    let mut ca = bumpalo::vec![in bump; 0.0; 4];
+    (ca[3], ca[2], ca[1], ca[0]) = two_two_diff(cdxady1, cdxady0, adxcdy1, adxcdy0);
+    let bdet = scale_expansion_zeroelim(&ca, bdz, bump);
+
+    let (adxbdy1, adxbdy0) = two_product(adx, bdy);
+    let (bdxady1, bdxady0) = two_product(bdx, ady);
+    let mut ab = bumpalo::vec![in bump; 0.0; 4];
+    (ab[3], ab[2], ab[1], ab[0]) = two_two_diff(adxbdy1, adxbdy0, bdxady1, bdxady0);
+    let cdet = scale_expansion_zeroelim(&ab, cdz, bump);
+
+    let abdet = fast_expansion_sum_zeroelim(&adet, &bdet, bump);
+    let mut fin = fast_expansion_sum_zeroelim(&abdet, &cdet, bump);
+
+    let mut det = estimate(&fin);
+    let errbound = B.o3derrboundB * permanent;
+    if (det >= errbound) || (-det >= errbound) {
+        return det;
+    }
+
+    let adxtail = two_diff_tail(pa[0], pd[0], adx);
+    let bdxtail = two_diff_tail(pb[0], pd[0], bdx);
+    let cdxtail = two_diff_tail(pc[0], pd[0], cdx);
+    let adytail = two_diff_tail(pa[1], pd[1], ady);
+    let bdytail = two_diff_tail(pb[1], pd[1], bdy);
+    let cdytail = two_diff_tail(pc[1], pd[1], cdy);
+    let adztail = two_diff_tail(pa[2], pd[2], adz);
+    let bdztail = two_diff_tail(pb[2], pd[2], bdz);
+    let cdztail = two_diff_tail(pc[2], pd[2], cdz);
+
+    if (adxtail == 0.0)
+        && (bdxtail == 0.0)
+        && (cdxtail == 0.0)
+        && (adytail == 0.0)
+        && (bdytail == 0.0)
+        && (cdytail == 0.0)
+        && (adztail == 0.0)
+        && (bdztail == 0.0)
+        && (cdztail == 0.0)
+    {
+        return det;
+    }
+
+    let errbound = B.o3derrboundC * permanent + B.resulterrbound * det.abs();
+    det += (adz * ((bdx * cdytail + cdy * bdxtail) - (bdy * cdxtail + cdx * bdytail))
+        + adztail * (bdx * cdy - bdy * cdx))
+        + (bdz * ((cdx * adytail + ady * cdxtail) - (cdy * adxtail + adx * cdytail))
+            + bdztail * (cdx * ady - cdy * adx))
+        + (cdz * ((adx * bdytail + bdy * adxtail) - (ady * bdxtail + bdx * adytail))
+            + cdztail * (adx * bdy - ady * bdx));
+    if (det >= errbound) || (-det >= errbound) {
+        return det;
+    }
+
+    fn helper(
+        adxtail: f64,
+        adytail: f64,
+        bdx: f64,
+        bdy: f64,
+        cdx: f64,
+        cdy: f64,
+        bump: &Bump,
+    ) -> (Vec<f64>, Vec<f64>) {
+        if adxtail == 0.0 {
+            if adytail == 0.0 {
+                (bumpalo::vec![in bump; 0.0], bumpalo::vec![in bump; 0.0])
+            } else {
+                let (mut at_b, mut at_c) = (
+                    bumpalo::vec![in bump; 0.0, 0.0],
+                    bumpalo::vec![in bump; 0.0, 0.0],
+                );
+                (at_b[1], at_b[0]) = two_product(-adytail, bdx);
+                (at_c[1], at_c[0]) = two_product(adytail, cdx);
+                (at_b, at_c)
+            }
+        } else {
+            if adytail == 0.0 {
+                let (mut at_b, mut at_c) = (
+                    bumpalo::vec![in bump; 0.0, 0.0],
+                    bumpalo::vec![in bump; 0.0, 0.0],
+                );
+                (at_b[1], at_b[0]) = two_product(adxtail, bdy);
+                (at_c[1], at_c[0]) = two_product(-adxtail, cdy);
+                (at_b, at_c)
+            } else {
+                let (adxt_bdy1, adxt_bdy0) = two_product(adxtail, bdy);
+                let (adyt_bdx1, adyt_bdx0) = two_product(adytail, bdx);
+                let (mut at_b, mut at_c) = (
+                    bumpalo::vec![in bump; 0.0; 4],
+                    bumpalo::vec![in bump; 0.0; 4],
+                );
+                (at_b[3], at_b[2], at_b[1], at_b[0]) =
+                    two_two_diff(adxt_bdy1, adxt_bdy0, adyt_bdx1, adyt_bdx0);
+                let (adyt_cdx1, adyt_cdx0) = two_product(adytail, cdx);
+                let (adxt_cdy1, adxt_cdy0) = two_product(adxtail, cdy);
+                (at_c[3], at_c[2], at_c[1], at_c[0]) =
+                    two_two_diff(adyt_cdx1, adyt_cdx0, adxt_cdy1, adxt_cdy0);
+                (at_b, at_c)
+            }
+        }
+    }
+
+    let (at_b, at_c) = helper(adxtail, adytail, bdx, bdy, cdx, cdy, bump);
+    let (bt_c, bt_a) = helper(bdxtail, bdytail, cdx, cdy, adx, ady, bump);
+    let (ct_a, ct_b) = helper(cdxtail, cdytail, adx, ady, bdx, bdy, bump);
+
+    let xyt = Vec::from_iter_in(
+        [(bt_c, ct_b, adz), (ct_a, at_c, bdz), (at_b, bt_a, cdz)]
+            .into_iter()
+            .map(|tuple| {
+                let sum = fast_expansion_sum_zeroelim(&tuple.0, &tuple.1, bump);
+                let w = scale_expansion_zeroelim(&sum, tuple.2, bump);
+                fin = fast_expansion_sum_zeroelim(&fin, &w, bump);
+                sum
+            }),
+        bump,
+    );
+
+    if adztail != 0.0 {
+        let v = scale_expansion_zeroelim(&bc, adztail, bump);
+        fin = fast_expansion_sum_zeroelim(&fin, &v, bump);
+    }
+
+    if bdztail != 0.0 {
+        let v = scale_expansion_zeroelim(&ca, bdztail, bump);
+        fin = fast_expansion_sum_zeroelim(&fin, &v, bump);
+    }
+
+    if cdztail != 0.0 {
+        let v = scale_expansion_zeroelim(&ab, cdztail, bump);
+        fin = fast_expansion_sum_zeroelim(&fin, &v, bump);
+    }
+
+    fn helper2<'a>(
+        adxtail: f64,
+        bdytail: f64,
+        bdztail: f64,
+        bdz: f64,
+        cdz: f64,
+        cdytail: f64,
+        cdztail: f64,
+        fin: &mut Vec<'a, f64>,
+        bump: &'a Bump,
+    ) {
+        if adxtail != 0.0 {
+            if bdytail != 0.0 {
+                let (adxt_bdyt1, adxt_bdyt0) = two_product(adxtail, bdytail);
+                let mut u = bumpalo::vec![in bump; 0.0; 4];
+                (u[3], u[2], u[1], u[0]) = two_one_product(adxt_bdyt1, adxt_bdyt0, cdz);
+                *fin = fast_expansion_sum_zeroelim(fin, &u, bump);
+                if cdztail != 0.0 {
+                    (u[3], u[2], u[1], u[0]) = two_one_product(adxt_bdyt1, adxt_bdyt0, cdztail);
+                    *fin = fast_expansion_sum_zeroelim(fin, &u, bump);
+                }
+            }
+            if cdytail != 0.0 {
+                let (adxt_cdyt1, adxt_cdyt0) = two_product(-adxtail, cdytail);
+                let mut u = bumpalo::vec![in bump; 0.0; 4];
+                (u[3], u[2], u[1], u[0]) = two_one_product(adxt_cdyt1, adxt_cdyt0, bdz);
+                *fin = fast_expansion_sum_zeroelim(fin, &u, bump);
+                if bdztail != 0.0 {
+                    (u[3], u[2], u[1], u[0]) = two_one_product(adxt_cdyt1, adxt_cdyt0, bdztail);
+                    *fin = fast_expansion_sum_zeroelim(fin, &u, bump);
+                }
+            }
+        }
+    }
+
+    helper2(
+        adxtail, bdytail, bdztail, bdz, cdz, cdytail, cdztail, &mut fin, bump,
+    );
+    helper2(
+        bdxtail, cdytail, cdztail, cdz, adz, adytail, adztail, &mut fin, bump,
+    );
+    helper2(
+        cdztail, adytail, adztail, adz, bdz, bdytail, bdztail, &mut fin, bump,
+    );
+
+    if adztail != 0.0 {
+        let v = scale_expansion_zeroelim(&xyt[0], adztail, bump);
+        fin = fast_expansion_sum_zeroelim(&fin, &v, bump);
+    }
+
+    if bdztail != 0.0 {
+        let v = scale_expansion_zeroelim(&xyt[1], bdztail, bump);
+        fin = fast_expansion_sum_zeroelim(&fin, &v, bump);
+    }
+
+    if cdztail != 0.0 {
+        let v = scale_expansion_zeroelim(&xyt[2], cdztail, bump);
+        fin = fast_expansion_sum_zeroelim(&fin, &v, bump);
+    }
+    *fin.last().unwrap()
 }
