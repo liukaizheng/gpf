@@ -1,22 +1,20 @@
-#![allow(non_snake_case)]
-
 use bumpalo::{collections::Vec, Bump};
 
 struct Bound {
     splitter: f64,
-    resulterrbound: f64,
-    ccwerrboundA: f64,
-    ccwerrboundB: f64,
-    ccwerrboundC: f64,
-    o3derrboundA: f64,
-    o3derrboundB: f64,
-    o3derrboundC: f64,
-    iccerrboundA: f64,
-    iccerrboundB: f64,
-    iccerrboundC: f64,
-    isperrboundA: f64,
-    isperrboundB: f64,
-    isperrboundC: f64,
+    result_err_bound: f64,
+    ccw_err_bounda: f64,
+    ccw_err_boundb: f64,
+    ccw_err_boundc: f64,
+    o3d_err_bounda: f64,
+    o3d_err_boundb: f64,
+    o3d_err_boundc: f64,
+    icc_err_bounda: f64,
+    icc_err_boundb: f64,
+    icc_err_boundc: f64,
+    isp_err_bounda: f64,
+    isp_err_boundb: f64,
+    isp_err_boundc: f64,
 }
 
 const fn exact_init() -> Bound {
@@ -46,34 +44,34 @@ const fn exact_init() -> Bound {
     splitter += 1.0;
 
     /* Error bounds for orientation and incircle tests. */
-    let resulterrbound = (3.0 + 8.0 * epsilon) * epsilon;
-    let ccwerrboundA = (3.0 + 16.0 * epsilon) * epsilon;
-    let ccwerrboundB = (2.0 + 12.0 * epsilon) * epsilon;
-    let ccwerrboundC = (9.0 + 64.0 * epsilon) * epsilon * epsilon;
-    let o3derrboundA = (7.0 + 56.0 * epsilon) * epsilon;
-    let o3derrboundB = (3.0 + 28.0 * epsilon) * epsilon;
-    let o3derrboundC = (26.0 + 288.0 * epsilon) * epsilon * epsilon;
-    let iccerrboundA = (10.0 + 96.0 * epsilon) * epsilon;
-    let iccerrboundB = (4.0 + 48.0 * epsilon) * epsilon;
-    let iccerrboundC = (44.0 + 576.0 * epsilon) * epsilon * epsilon;
-    let isperrboundA = (16.0 + 224.0 * epsilon) * epsilon;
-    let isperrboundB = (5.0 + 72.0 * epsilon) * epsilon;
-    let isperrboundC = (71.0 + 1408.0 * epsilon) * epsilon * epsilon;
+    let result_err_bound = (3.0 + 8.0 * epsilon) * epsilon;
+    let ccw_err_bounda = (3.0 + 16.0 * epsilon) * epsilon;
+    let ccw_err_boundb = (2.0 + 12.0 * epsilon) * epsilon;
+    let ccw_err_boundc = (9.0 + 64.0 * epsilon) * epsilon * epsilon;
+    let o3d_err_bounda = (7.0 + 56.0 * epsilon) * epsilon;
+    let o3d_err_boundb = (3.0 + 28.0 * epsilon) * epsilon;
+    let o3d_err_boundc = (26.0 + 288.0 * epsilon) * epsilon * epsilon;
+    let icc_err_bounda = (10.0 + 96.0 * epsilon) * epsilon;
+    let icc_err_boundb = (4.0 + 48.0 * epsilon) * epsilon;
+    let icc_err_boundc = (44.0 + 576.0 * epsilon) * epsilon * epsilon;
+    let isp_err_bounda = (16.0 + 224.0 * epsilon) * epsilon;
+    let isp_err_boundb = (5.0 + 72.0 * epsilon) * epsilon;
+    let isp_err_boundc = (71.0 + 1408.0 * epsilon) * epsilon * epsilon;
     Bound {
         splitter,
-        resulterrbound,
-        ccwerrboundA,
-        ccwerrboundB,
-        ccwerrboundC,
-        o3derrboundA,
-        o3derrboundB,
-        o3derrboundC,
-        iccerrboundA,
-        iccerrboundB,
-        iccerrboundC,
-        isperrboundA,
-        isperrboundB,
-        isperrboundC,
+        result_err_bound,
+        ccw_err_bounda,
+        ccw_err_boundb,
+        ccw_err_boundc,
+        o3d_err_bounda,
+        o3d_err_boundb,
+        o3d_err_boundc,
+        icc_err_bounda,
+        icc_err_boundb,
+        icc_err_boundc,
+        isp_err_bounda,
+        isp_err_boundb,
+        isp_err_boundc,
     }
 }
 
@@ -416,7 +414,7 @@ fn orient2d_adapt<'a>(pa: &[f64], pb: &[f64], pc: &[f64], detsum: f64, bump: &'a
     (b[3], b[2], b[1], b[0]) = two_two_diff(detleft, detlefttail, detright, detrighttail);
 
     let mut det = estimate(&b);
-    let errbound = B.ccwerrboundB * detsum;
+    let errbound = B.ccw_err_boundb * detsum;
     if (det >= errbound) || (-det >= errbound) {
         return det;
     }
@@ -430,7 +428,7 @@ fn orient2d_adapt<'a>(pa: &[f64], pb: &[f64], pc: &[f64], detsum: f64, bump: &'a
         return det;
     }
 
-    let errbound = B.ccwerrboundC * detsum + B.resulterrbound * det.abs();
+    let errbound = B.ccw_err_boundc * detsum + B.result_err_bound * det.abs();
     det += (acx * bcytail + bcy * acxtail) - (acy * bcxtail + bcx * acytail);
     if (det >= errbound) || (-det >= errbound) {
         return det;
@@ -477,7 +475,7 @@ pub fn orien2d<'a>(pa: &[f64], pb: &[f64], pc: &[f64], bump: &'a Bump) -> f64 {
         return det;
     }
 
-    let errbound = B.ccwerrboundA * detsum;
+    let errbound = B.ccw_err_bounda * detsum;
     if (det >= errbound) || (-det >= errbound) {
         return det;
     }
@@ -525,7 +523,7 @@ fn orient3d_adapt<'a>(
     let mut fin = fast_expansion_sum_zeroelim(&abdet, &cdet, bump);
 
     let mut det = estimate(&fin);
-    let errbound = B.o3derrboundB * permanent;
+    let errbound = B.o3d_err_boundb * permanent;
     if (det >= errbound) || (-det >= errbound) {
         return det;
     }
@@ -553,7 +551,7 @@ fn orient3d_adapt<'a>(
         return det;
     }
 
-    let errbound = B.o3derrboundC * permanent + B.resulterrbound * det.abs();
+    let errbound = B.o3d_err_boundc * permanent + B.result_err_bound * det.abs();
     det += (adz * ((bdx * cdytail + cdy * bdxtail) - (bdy * cdxtail + cdx * bdytail))
         + adztail * (bdx * cdy - bdy * cdx))
         + (bdz * ((cdx * adytail + ady * cdxtail) - (cdy * adxtail + adx * cdytail))
@@ -749,7 +747,7 @@ pub fn orient3d(
     let permanent = (bdxcdy.abs() + cdxbdy.abs()) * adz.abs()
         + (cdxady.abs() + adxcdy.abs()) * bdz.abs()
         + (adxbdy.abs() + bdxady.abs()) * cdz.abs();
-    let err_bound = B.o3derrboundA * permanent;
+    let err_bound = B.o3d_err_bounda * permanent;
     if (det > err_bound) || (-det > err_bound) {
         return det;
     }
@@ -806,7 +804,7 @@ fn incircle_adapt<'a>(
     let mut fin = fast_expansion_sum_zeroelim(&abdet, &cdet, bump);
 
     let mut det = estimate(&fin);
-    let errbound = B.iccerrboundB * permanent;
+    let errbound = B.icc_err_boundb * permanent;
     if (det >= errbound) || (-det >= errbound) {
         return det;
     }
@@ -827,7 +825,7 @@ fn incircle_adapt<'a>(
         return det;
     }
 
-    let errbound = B.iccerrboundC * permanent + B.resulterrbound * det.abs();
+    let errbound = B.icc_err_boundc * permanent + B.result_err_bound * det.abs();
     det += ((adx * adx + ady * ady)
         * ((bdx * cdytail + cdy * bdxtail) - (bdy * cdxtail + cdx * bdytail))
         + 2.0 * (adx * adxtail + ady * adytail) * (bdx * cdy - bdy * cdx))
@@ -1043,7 +1041,7 @@ pub fn incircle(pa: &[f64], pb: &[f64], pc: &[f64], pd: &[f64], bump: &Bump) -> 
     let permanent = (bdxcdy.abs() + cdxbdy.abs()) * alift
         + (cdxady.abs() + adxcdy.abs()) * blift
         + (adxbdy.abs() + bdxady.abs()) * clift;
-    let errbound = B.iccerrboundA * permanent;
+    let errbound = B.icc_err_bounda * permanent;
     if (det > errbound) || (-det > errbound) {
         return det;
     }
@@ -1353,7 +1351,7 @@ fn insphere_adapt(
     let fin1 = fast_expansion_sum_zeroelim(&abdet, &cddet, bump);
 
     let mut det = estimate(&fin1);
-    let errbound = B.isperrboundB * permanent;
+    let errbound = B.isp_err_boundb * permanent;
     if (det >= errbound) || (-det >= errbound) {
         return det;
     }
@@ -1386,7 +1384,7 @@ fn insphere_adapt(
         return det;
     }
 
-    let errbound = B.isperrboundC * permanent + B.resulterrbound * det.abs();
+    let errbound = B.isp_err_boundc * permanent + B.result_err_bound * det.abs();
     let abeps = (aex * beytail + bey * aextail) - (aey * bextail + bex * aeytail);
     let bceps = (bex * ceytail + cey * bextail) - (bey * cextail + cex * beytail);
     let cdeps = (cex * deytail + dey * cextail) - (cey * dextail + dex * ceytail);
@@ -1778,7 +1776,7 @@ fn orient4d_adapt(
     let fin1 = fast_expansion_sum_zeroelim(&abdet, &cddet, bump);
 
     let mut det = estimate(&fin1);
-    let errbound = B.isperrboundB * permanent;
+    let errbound = B.isp_err_boundb * permanent;
     if (det >= errbound) || (-det >= errbound) {
         return det;
     }
@@ -1819,7 +1817,7 @@ fn orient4d_adapt(
         return det;
     }
 
-    let errbound = B.isperrboundC * permanent + B.resulterrbound * det.abs();
+    let errbound = B.isp_err_boundc * permanent + B.result_err_bound * det.abs();
     let abeps = (aex * beytail + bey * aextail) - (aey * bextail + bex * aeytail);
     let bceps = (bex * ceytail + cey * bextail) - (bey * cextail + cex * beytail);
     let cdeps = (cex * deytail + dey * cextail) - (cey * dextail + dex * ceytail);
@@ -1940,7 +1938,7 @@ pub fn orient4d(
             + (cexaeyplus + aexceyplus) * bezplus
             + (aexbeyplus + bexaeyplus) * cezplus)
             * deheight.abs();
-    let errbound = B.isperrboundA * permanent;
+    let errbound = B.isp_err_bounda * permanent;
     if (det > errbound) || (-det > errbound) {
         return det;
     }
