@@ -307,6 +307,7 @@ impl<'a> Iterator for TwoArr<'a> {
                 self.first_advance();
             } else if !self.arr2.is_empty() {
                 item = self.second();
+                self.second_advance();
             } else {
                 return None;
             }
