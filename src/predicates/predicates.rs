@@ -3,7 +3,6 @@
 use bumpalo::{collections::Vec, Bump};
 
 struct Bound {
-    epsilon: f64,
     splitter: f64,
     resulterrbound: f64,
     ccwerrboundA: f64,
@@ -60,8 +59,7 @@ const fn exact_init() -> Bound {
     let isperrboundA = (16.0 + 224.0 * epsilon) * epsilon;
     let isperrboundB = (5.0 + 72.0 * epsilon) * epsilon;
     let isperrboundC = (71.0 + 1408.0 * epsilon) * epsilon * epsilon;
-    return Bound {
-        epsilon,
+    Bound {
         splitter,
         resulterrbound,
         ccwerrboundA,
@@ -76,7 +74,7 @@ const fn exact_init() -> Bound {
         isperrboundA,
         isperrboundB,
         isperrboundC,
-    };
+    }
 }
 
 const B: Bound = exact_init();
@@ -1519,4 +1517,435 @@ pub fn insphere(
     }
 
     insphere_adapt(pa, pb, pc, pd, pe, permanent, bump)
+}
+
+fn orient4d_exact(
+    pa: &[f64],
+    pb: &[f64],
+    pc: &[f64],
+    pd: &[f64],
+    pe: &[f64],
+    aheight: f64,
+    bheight: f64,
+    cheight: f64,
+    dheight: f64,
+    eheight: f64,
+    bump: &Bump,
+) -> f64 {
+    let (axby1, axby0) = two_product(pa[0], pb[1]);
+    let (bxay1, bxay0) = two_product(pb[0], pa[1]);
+    let mut ab = bumpalo::vec![in bump; 0.0; 4];
+    (ab[3], ab[2], ab[1], ab[0]) = two_two_diff(axby1, axby0, bxay1, bxay0);
+
+    let (bxcy1, bxcy0) = two_product(pb[0], pc[1]);
+    let (cxby1, cxby0) = two_product(pc[0], pb[1]);
+    let mut bc = bumpalo::vec![in bump; 0.0; 4];
+    (bc[3], bc[2], bc[1], bc[0]) = two_two_diff(bxcy1, bxcy0, cxby1, cxby0);
+
+    let (cxdy1, cxdy0) = two_product(pc[0], pd[1]);
+    let (dxcy1, dxcy0) = two_product(pd[0], pc[1]);
+    let mut cd = bumpalo::vec![in bump; 0.0; 4];
+    (cd[3], cd[2], cd[1], cd[0]) = two_two_diff(cxdy1, cxdy0, dxcy1, dxcy0);
+
+    let (dxey1, dxey0) = two_product(pd[0], pe[1]);
+    let (exdy1, exdy0) = two_product(pe[0], pd[1]);
+    let mut de = bumpalo::vec![in bump; 0.0; 4];
+    (de[3], de[2], de[1], de[0]) = two_two_diff(dxey1, dxey0, exdy1, exdy0);
+
+    let (exay1, exay0) = two_product(pe[0], pa[1]);
+    let (axey1, axey0) = two_product(pa[0], pe[1]);
+    let mut ea = bumpalo::vec![in bump; 0.0; 4];
+    (ea[3], ea[2], ea[1], ea[0]) = two_two_diff(exay1, exay0, axey1, axey0);
+
+    let (axcy1, axcy0) = two_product(pa[0], pc[1]);
+    let (cxay1, cxay0) = two_product(pc[0], pa[1]);
+    let mut ac = bumpalo::vec![in bump; 0.0; 4];
+    (ac[3], ac[2], ac[1], ac[0]) = two_two_diff(axcy1, axcy0, cxay1, cxay0);
+
+    let (bxdy1, bxdy0) = two_product(pb[0], pd[1]);
+    let (dxby1, dxby0) = two_product(pd[0], pb[1]);
+    let mut bd = bumpalo::vec![in bump; 0.0; 4];
+    (bd[3], bd[2], bd[1], bd[0]) = two_two_diff(bxdy1, bxdy0, dxby1, dxby0);
+
+    let (cxey1, cxey0) = two_product(pc[0], pe[1]);
+    let (excy1, excy0) = two_product(pe[0], pc[1]);
+    let mut ce = bumpalo::vec![in bump; 0.0; 4];
+    (ce[3], ce[2], ce[1], ce[0]) = two_two_diff(cxey1, cxey0, excy1, excy0);
+
+    let (dxay1, dxay0) = two_product(pd[0], pa[1]);
+    let (axdy1, axdy0) = two_product(pa[0], pd[1]);
+    let mut da = bumpalo::vec![in bump; 0.0; 4];
+    (da[3], da[2], da[1], da[0]) = two_two_diff(dxay1, dxay0, axdy1, axdy0);
+
+    let (exby1, exby0) = two_product(pe[0], pb[1]);
+    let (bxey1, bxey0) = two_product(pb[0], pe[1]);
+    let mut eb = bumpalo::vec![in bump; 0.0; 4];
+    (eb[3], eb[2], eb[1], eb[0]) = two_two_diff(exby1, exby0, bxey1, bxey0);
+
+    let temp8a = scale_expansion_zeroelim(&bc, pa[2], bump);
+    let temp8b = scale_expansion_zeroelim(&ac, -pb[2], bump);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
+    let temp8a = scale_expansion_zeroelim(&ab, pc[2], bump);
+    let abc = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+
+    let temp8a = scale_expansion_zeroelim(&cd, pb[2], bump);
+    let temp8b = scale_expansion_zeroelim(&bd, -pc[2], bump);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
+    let temp8a = scale_expansion_zeroelim(&bc, pd[2], bump);
+    let bcd = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+
+    let temp8a = scale_expansion_zeroelim(&de, pc[2], bump);
+    let temp8b = scale_expansion_zeroelim(&ce, -pd[2], bump);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
+    let temp8a = scale_expansion_zeroelim(&cd, pe[2], bump);
+    let cde = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+
+    let temp8a = scale_expansion_zeroelim(&ea, pd[2], bump);
+    let temp8b = scale_expansion_zeroelim(&da, -pe[2], bump);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
+    let temp8a = scale_expansion_zeroelim(&de, pa[2], bump);
+    let dea = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+
+    let temp8a = scale_expansion_zeroelim(&ab, pe[2], bump);
+    let temp8b = scale_expansion_zeroelim(&eb, -pa[2], bump);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
+    let temp8a = scale_expansion_zeroelim(&ea, pb[2], bump);
+    let eab = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+
+    let temp8a = scale_expansion_zeroelim(&bd, pa[2], bump);
+    let temp8b = scale_expansion_zeroelim(&da, pb[2], bump);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
+    let temp8a = scale_expansion_zeroelim(&ab, pd[2], bump);
+    let abd = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+
+    let temp8a = scale_expansion_zeroelim(&ce, pb[2], bump);
+    let temp8b = scale_expansion_zeroelim(&eb, pc[2], bump);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
+    let temp8a = scale_expansion_zeroelim(&bc, pe[2], bump);
+    let bce = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+
+    let temp8a = scale_expansion_zeroelim(&da, pc[2], bump);
+    let temp8b = scale_expansion_zeroelim(&ac, pd[2], bump);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
+    let temp8a = scale_expansion_zeroelim(&cd, pa[2], bump);
+    let cda = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+
+    let temp8a = scale_expansion_zeroelim(&eb, pd[2], bump);
+    let temp8b = scale_expansion_zeroelim(&bd, pe[2], bump);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
+    let temp8a = scale_expansion_zeroelim(&de, pb[2], bump);
+    let deb = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+
+    let temp8a = scale_expansion_zeroelim(&ac, pe[2], bump);
+    let temp8b = scale_expansion_zeroelim(&ce, pa[2], bump);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
+    let temp8a = scale_expansion_zeroelim(&ea, pc[2], bump);
+    let eac = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+
+    let temp48a = fast_expansion_sum_zeroelim(&cde, &bce, bump);
+    let mut temp48b = fast_expansion_sum_zeroelim(&deb, &bcd, bump);
+    expansion_invert(&mut temp48b);
+
+    let bcde = fast_expansion_sum_zeroelim(&temp48a, &temp48b, bump);
+    let adet = scale_expansion_zeroelim(&bcde, aheight, bump);
+
+    let temp48a = fast_expansion_sum_zeroelim(&dea, &cda, bump);
+    temp48b = fast_expansion_sum_zeroelim(&eac, &cde, bump);
+    expansion_invert(&mut temp48b);
+    let cdea = fast_expansion_sum_zeroelim(&temp48a, &temp48b, bump);
+    let bdet = scale_expansion_zeroelim(&cdea, bheight, bump);
+
+    let temp48a = fast_expansion_sum_zeroelim(&eab, &deb, bump);
+    temp48b = fast_expansion_sum_zeroelim(&abd, &dea, bump);
+    expansion_invert(&mut temp48b);
+
+    let deab = fast_expansion_sum_zeroelim(&temp48a, &temp48b, bump);
+    let cdet = scale_expansion_zeroelim(&deab, cheight, bump);
+
+    let temp48a = fast_expansion_sum_zeroelim(&abc, &eac, bump);
+    temp48b = fast_expansion_sum_zeroelim(&bce, &eab, bump);
+    expansion_invert(&mut temp48b);
+
+    let eabc = fast_expansion_sum_zeroelim(&temp48a, &temp48b, bump);
+    let ddet = scale_expansion_zeroelim(&eabc, dheight, bump);
+
+    let temp48a = fast_expansion_sum_zeroelim(&bcd, &abd, bump);
+    temp48b = fast_expansion_sum_zeroelim(&cda, &abc, bump);
+    expansion_invert(&mut temp48b);
+
+    let abcd = fast_expansion_sum_zeroelim(&temp48a, &temp48b, bump);
+    let edet = scale_expansion_zeroelim(&abcd, eheight, bump);
+
+    let abdet = fast_expansion_sum_zeroelim(&adet, &bdet, bump);
+    let cddet = fast_expansion_sum_zeroelim(&cdet, &ddet, bump);
+    let cdedet = fast_expansion_sum_zeroelim(&cddet, &edet, bump);
+    let deter = fast_expansion_sum_zeroelim(&abdet, &cdedet, bump);
+
+    *deter.last().unwrap()
+}
+
+fn orient4d_adapt(
+    pa: &[f64],
+    pb: &[f64],
+    pc: &[f64],
+    pd: &[f64],
+    pe: &[f64],
+    aheight: f64,
+    bheight: f64,
+    cheight: f64,
+    dheight: f64,
+    eheight: f64,
+    permanent: f64,
+    bump: &Bump,
+) -> f64 {
+    let aex = pa[0] - pe[0];
+    let bex = pb[0] - pe[0];
+    let cex = pc[0] - pe[0];
+    let dex = pd[0] - pe[0];
+    let aey = pa[1] - pe[1];
+    let bey = pb[1] - pe[1];
+    let cey = pc[1] - pe[1];
+    let dey = pd[1] - pe[1];
+    let aez = pa[2] - pe[2];
+    let bez = pb[2] - pe[2];
+    let cez = pc[2] - pe[2];
+    let dez = pd[2] - pe[2];
+    let aeheight = aheight - eheight;
+    let beheight = bheight - eheight;
+    let ceheight = cheight - eheight;
+    let deheight = dheight - eheight;
+
+    let (aexbey1, aexbey0) = two_product(aex, bey);
+    let (bexaey1, bexaey0) = two_product(bex, aey);
+    let mut ab = bumpalo::vec![in bump; 0.0; 4];
+    (ab[3], ab[2], ab[1], ab[0]) = two_two_diff(aexbey1, aexbey0, bexaey1, bexaey0);
+
+    let (bexcey1, bexcey0) = two_product(bex, cey);
+    let (cexbey1, cexbey0) = two_product(cex, bey);
+    let mut bc = bumpalo::vec![in bump; 0.0; 4];
+    (bc[3], bc[2], bc[1], bc[0]) = two_two_diff(bexcey1, bexcey0, cexbey1, cexbey0);
+
+    let (cexdey1, cexdey0) = two_product(cex, dey);
+    let (dexcey1, dexcey0) = two_product(dex, cey);
+    let mut cd = bumpalo::vec![in bump; 0.0; 4];
+    (cd[3], cd[2], cd[1], cd[0]) = two_two_diff(cexdey1, cexdey0, dexcey1, dexcey0);
+
+    let (dexaey1, dexaey0) = two_product(dex, aey);
+    let (aexdey1, aexdey0) = two_product(aex, dey);
+    let mut da = bumpalo::vec![in bump; 0.0; 4];
+    (da[3], da[2], da[1], da[0]) = two_two_diff(dexaey1, dexaey0, aexdey1, aexdey0);
+
+    let (aexcey1, aexcey0) = two_product(aex, cey);
+    let (cexaey1, cexaey0) = two_product(cex, aey);
+    let mut ac = bumpalo::vec![in bump; 0.0; 4];
+    (ac[3], ac[2], ac[1], ac[0]) = two_two_diff(aexcey1, aexcey0, cexaey1, cexaey0);
+
+    let (bexdey1, bexdey0) = two_product(bex, dey);
+    let (dexbey1, dexbey0) = two_product(dex, bey);
+    let mut bd = bumpalo::vec![in bump; 0.0; 4];
+    (bd[3], bd[2], bd[1], bd[0]) = two_two_diff(bexdey1, bexdey0, dexbey1, dexbey0);
+
+    let temp8a = scale_expansion_zeroelim(&cd, bez, bump);
+    let temp8b = scale_expansion_zeroelim(&bd, -cez, bump);
+    let temp8c = scale_expansion_zeroelim(&bc, dez, bump);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
+    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, bump);
+    let adet = scale_expansion_zeroelim(&temp24, -aeheight, bump);
+
+    let temp8a = scale_expansion_zeroelim(&da, cez, bump);
+    let temp8b = scale_expansion_zeroelim(&ac, dez, bump);
+    let temp8c = scale_expansion_zeroelim(&cd, aez, bump);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
+    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, bump);
+    let bdet = scale_expansion_zeroelim(&temp24, beheight, bump);
+
+    let temp8a = scale_expansion_zeroelim(&ab, dez, bump);
+    let temp8b = scale_expansion_zeroelim(&bd, aez, bump);
+    let temp8c = scale_expansion_zeroelim(&da, bez, bump);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
+    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, bump);
+    let cdet = scale_expansion_zeroelim(&temp24, -ceheight, bump);
+
+    let temp8a = scale_expansion_zeroelim(&bc, aez, bump);
+    let temp8b = scale_expansion_zeroelim(&ac, -bez, bump);
+    let temp8c = scale_expansion_zeroelim(&ab, cez, bump);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
+    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, bump);
+    let ddet = scale_expansion_zeroelim(&temp24, deheight, bump);
+
+    let abdet = fast_expansion_sum_zeroelim(&adet, &bdet, bump);
+    let cddet = fast_expansion_sum_zeroelim(&cdet, &ddet, bump);
+    let fin1 = fast_expansion_sum_zeroelim(&abdet, &cddet, bump);
+
+    let mut det = estimate(&fin1);
+    let errbound = B.isperrboundB * permanent;
+    if (det >= errbound) || (-det >= errbound) {
+        return det;
+    }
+
+    let aextail = two_diff_tail(pa[0], pe[0], aex);
+    let aeytail = two_diff_tail(pa[1], pe[1], aey);
+    let aeztail = two_diff_tail(pa[2], pe[2], aez);
+    let aeheighttail = two_diff_tail(aheight, eheight, aeheight);
+    let bextail = two_diff_tail(pb[0], pe[0], bex);
+    let beytail = two_diff_tail(pb[1], pe[1], bey);
+    let beztail = two_diff_tail(pb[2], pe[2], bez);
+    let beheighttail = two_diff_tail(bheight, eheight, beheight);
+    let cextail = two_diff_tail(pc[0], pe[0], cex);
+    let ceytail = two_diff_tail(pc[1], pe[1], cey);
+    let ceztail = two_diff_tail(pc[2], pe[2], cez);
+    let ceheighttail = two_diff_tail(cheight, eheight, ceheight);
+    let dextail = two_diff_tail(pd[0], pe[0], dex);
+    let deytail = two_diff_tail(pd[1], pe[1], dey);
+    let deztail = two_diff_tail(pd[2], pe[2], dez);
+    let deheighttail = two_diff_tail(dheight, eheight, deheight);
+    if (aextail == 0.0)
+        && (aeytail == 0.0)
+        && (aeztail == 0.0)
+        && (bextail == 0.0)
+        && (beytail == 0.0)
+        && (beztail == 0.0)
+        && (cextail == 0.0)
+        && (ceytail == 0.0)
+        && (ceztail == 0.0)
+        && (dextail == 0.0)
+        && (deytail == 0.0)
+        && (deztail == 0.0)
+        && (aeheighttail == 0.0)
+        && (beheighttail == 0.0)
+        && (ceheighttail == 0.0)
+        && (deheighttail == 0.0)
+    {
+        return det;
+    }
+
+    let errbound = B.isperrboundC * permanent + B.resulterrbound * det.abs();
+    let abeps = (aex * beytail + bey * aextail) - (aey * bextail + bex * aeytail);
+    let bceps = (bex * ceytail + cey * bextail) - (bey * cextail + cex * beytail);
+    let cdeps = (cex * deytail + dey * cextail) - (cey * dextail + dex * ceytail);
+    let daeps = (dex * aeytail + aey * dextail) - (dey * aextail + aex * deytail);
+    let aceps = (aex * ceytail + cey * aextail) - (aey * cextail + cex * aeytail);
+    let bdeps = (bex * deytail + dey * bextail) - (bey * dextail + dex * beytail);
+    det += ((beheight
+        * ((cez * daeps + dez * aceps + aez * cdeps)
+            + (ceztail * da[3] + deztail * ac[3] + aeztail * cd[3]))
+        + deheight
+            * ((aez * bceps - bez * aceps + cez * abeps)
+                + (aeztail * bc[3] - beztail * ac[3] + ceztail * ab[3])))
+        - (aeheight
+            * ((bez * cdeps - cez * bdeps + dez * bceps)
+                + (beztail * cd[3] - ceztail * bd[3] + deztail * bc[3]))
+            + ceheight
+                * ((dez * abeps + aez * bdeps + bez * daeps)
+                    + (deztail * ab[3] + aeztail * bd[3] + beztail * da[3]))))
+        + ((beheighttail * (cez * da[3] + dez * ac[3] + aez * cd[3])
+            + deheighttail * (aez * bc[3] - bez * ac[3] + cez * ab[3]))
+            - (aeheighttail * (bez * cd[3] - cez * bd[3] + dez * bc[3])
+                + ceheighttail * (dez * ab[3] + aez * bd[3] + bez * da[3])));
+    if (det >= errbound) || (-det >= errbound) {
+        return det;
+    }
+
+    orient4d_exact(
+        pa, pb, pc, pd, pe, aheight, bheight, cheight, dheight, eheight, bump,
+    )
+}
+
+pub fn orient4d(
+    pa: &[f64],
+    pb: &[f64],
+    pc: &[f64],
+    pd: &[f64],
+    pe: &[f64],
+    bump: &Bump,
+    aheight: f64,
+    bheight: f64,
+    cheight: f64,
+    dheight: f64,
+    eheight: f64,
+) -> f64 {
+    let aex = pa[0] - pe[0];
+    let bex = pb[0] - pe[0];
+    let cex = pc[0] - pe[0];
+    let dex = pd[0] - pe[0];
+    let aey = pa[1] - pe[1];
+    let bey = pb[1] - pe[1];
+    let cey = pc[1] - pe[1];
+    let dey = pd[1] - pe[1];
+    let aez = pa[2] - pe[2];
+    let bez = pb[2] - pe[2];
+    let cez = pc[2] - pe[2];
+    let dez = pd[2] - pe[2];
+    let aeheight = aheight - eheight;
+    let beheight = bheight - eheight;
+    let ceheight = cheight - eheight;
+    let deheight = dheight - eheight;
+
+    let aexbey = aex * bey;
+    let bexaey = bex * aey;
+    let ab = aexbey - bexaey;
+    let bexcey = bex * cey;
+    let cexbey = cex * bey;
+    let bc = bexcey - cexbey;
+    let cexdey = cex * dey;
+    let dexcey = dex * cey;
+    let cd = cexdey - dexcey;
+    let dexaey = dex * aey;
+    let aexdey = aex * dey;
+    let da = dexaey - aexdey;
+
+    let aexcey = aex * cey;
+    let cexaey = cex * aey;
+    let ac = aexcey - cexaey;
+    let bexdey = bex * dey;
+    let dexbey = dex * bey;
+    let bd = bexdey - dexbey;
+
+    let abc = aez * bc - bez * ac + cez * ab;
+    let bcd = bez * cd - cez * bd + dez * bc;
+    let cda = cez * da + dez * ac + aez * cd;
+    let dab = dez * ab + aez * bd + bez * da;
+
+    let det = (deheight * abc - ceheight * dab) + (beheight * cda - aeheight * bcd);
+
+    let aezplus = aez.abs();
+    let bezplus = bez.abs();
+    let cezplus = cez.abs();
+    let dezplus = dez.abs();
+    let aexbeyplus = aexbey.abs();
+    let bexaeyplus = bexaey.abs();
+    let bexceyplus = bexcey.abs();
+    let cexbeyplus = cexbey.abs();
+    let cexdeyplus = cexdey.abs();
+    let dexceyplus = dexcey.abs();
+    let dexaeyplus = dexaey.abs();
+    let aexdeyplus = aexdey.abs();
+    let aexceyplus = aexcey.abs();
+    let cexaeyplus = cexaey.abs();
+    let bexdeyplus = bexdey.abs();
+    let dexbeyplus = dexbey.abs();
+    let permanent = ((cexdeyplus + dexceyplus) * bezplus
+        + (dexbeyplus + bexdeyplus) * cezplus
+        + (bexceyplus + cexbeyplus) * dezplus)
+        * aeheight.abs()
+        + ((dexaeyplus + aexdeyplus) * cezplus
+            + (aexceyplus + cexaeyplus) * dezplus
+            + (cexdeyplus + dexceyplus) * aezplus)
+            * beheight.abs()
+        + ((aexbeyplus + bexaeyplus) * dezplus
+            + (bexdeyplus + dexbeyplus) * aezplus
+            + (dexaeyplus + aexdeyplus) * bezplus)
+            * ceheight.abs()
+        + ((bexceyplus + cexbeyplus) * aezplus
+            + (cexaeyplus + aexceyplus) * bezplus
+            + (aexbeyplus + bexaeyplus) * cezplus)
+            * deheight.abs();
+    let errbound = B.isperrboundA * permanent;
+    if (det > errbound) || (-det > errbound) {
+        return det;
+    }
+
+    return orient4d_adapt(
+        pa, pb, pc, pd, pe, aheight, bheight, cheight, dheight, eheight, permanent, bump,
+    );
 }
