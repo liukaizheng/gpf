@@ -28,7 +28,7 @@ const fn exact_init() -> Bound {
     /*   the previous sum, for machines that round up instead of using exact */
     /*   rounding.  Not that this library will work on such machines anyway. */
     loop {
-        let lastcheck = check;
+        let last_check = check;
         epsilon *= half;
 
         if every_other {
@@ -37,7 +37,7 @@ const fn exact_init() -> Bound {
 
         every_other = !every_other;
         check = 1.0 + epsilon;
-        if check != 1.0 && check != lastcheck {
+        if check == 1.0 || check == last_check {
             break;
         }
     }
@@ -402,7 +402,7 @@ pub fn estimate(arr: &[f64]) -> f64 {
     arr.iter().sum()
 }
 
-fn orient2d_adapt<'a>(pa: &[f64], pb: &[f64], pc: &[f64], detsum: f64, bump: &'a Bump) -> f64 {
+fn orient2d_adapt(pa: &[f64], pb: &[f64], pc: &[f64], detsum: f64, bump: &Bump) -> f64 {
     let acx = pa[0] - pc[0];
     let bcx = pb[0] - pc[0];
     let acy = pa[1] - pc[1];
@@ -453,7 +453,7 @@ fn orient2d_adapt<'a>(pa: &[f64], pb: &[f64], pc: &[f64], detsum: f64, bump: &'a
     *d.last().unwrap()
 }
 
-pub fn orien2d<'a>(pa: &[f64], pb: &[f64], pc: &[f64], bump: &'a Bump) -> f64 {
+pub fn orient2d(pa: &[f64], pb: &[f64], pc: &[f64], bump: &Bump) -> f64 {
     let detleft = (pa[0] - pc[0]) * (pb[1] - pc[1]);
     let detright = (pa[1] - pc[1]) * (pb[0] - pc[0]);
     let det = detleft - detright;
@@ -483,13 +483,13 @@ pub fn orien2d<'a>(pa: &[f64], pb: &[f64], pc: &[f64], bump: &'a Bump) -> f64 {
     orient2d_adapt(pa, pb, pc, detsum, bump)
 }
 
-fn orient3d_adapt<'a>(
+fn orient3d_adapt(
     pa: &[f64],
     pb: &[f64],
     pc: &[f64],
     pd: &[f64],
     permanent: f64,
-    bump: &'a Bump,
+    bump: &Bump,
 ) -> f64 {
     let adx = pa[0] - pd[0];
     let bdx = pb[0] - pd[0];
@@ -755,13 +755,13 @@ pub fn orient3d(
     orient3d_adapt(pa, pb, pc, pd, permanent, bump)
 }
 
-fn incircle_adapt<'a>(
+fn incircle_adapt(
     pa: &[f64],
     pb: &[f64],
     pc: &[f64],
     pd: &[f64],
     permanent: f64,
-    bump: &'a Bump,
+    bump: &Bump,
 ) -> f64 {
     let adx = pa[0] - pd[0];
     let bdx = pb[0] - pd[0];
