@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use gpf::mesh::{HalfedgeData, Mesh, MeshData, SurfaceMesh};
+use gpf::mesh::{HalfedgeData, MeshData, SurfaceMesh};
 
 #[test]
 fn build_mesh_data() {
@@ -13,12 +13,8 @@ fn build_mesh_data() {
         vec![0, 6, 4],
     ])));
     {
-        let halfedge_data = Rc::new(RefCell::new(HalfedgeData::<f64, SurfaceMesh>::new(
-            Rc::downgrade(&mesh),
-        )));
+        let halfedge_data = HalfedgeData::<f64, SurfaceMesh>::new(Rc::downgrade(&mesh));
         assert_eq!(halfedge_data.borrow().len(), 18);
-        mesh.borrow_mut()
-            .add_halfedges_data(Rc::downgrade(&halfedge_data));
         assert_eq!(mesh.borrow().halfedges_data.len(), 1);
     }
     assert_eq!(mesh.borrow_mut().halfedges_data.len(), 0);

@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Weak};
+use std::{cell::RefCell, rc::{Weak, Rc}};
 
 use super::{ElementId, HalfedgeId, Mesh};
 
@@ -8,19 +8,23 @@ pub trait MeshData {
     fn len(&self) -> usize;
 }
 
-pub struct HalfedgeData<T: Default + Clone, M: Mesh> {
+pub struct HalfedgeData<T: Default + Clone + 'static, M: Mesh> {
     data: Vec<T>,
     mesh: Weak<RefCell<M>>,
 }
 
-impl<T: Default + Clone, M: Mesh> HalfedgeData<T, M> {
+impl<T: Default + Clone + 'static, M: Mesh> HalfedgeData<T, M> {
     #[inline]
-    pub fn new(mesh: Weak<RefCell<M>>) -> Self {
+    pub fn new(mesh: Weak<RefCell<M>>) -> Rc<RefCell<Self>> {
         let n_halfedges = mesh.upgrade().map_or(0, |m| m.borrow().n_halfedges());
-        Self {
+        let data = Rc::new(RefCell::new(Self {
             data: vec![T::default(); n_halfedges],
-            mesh,
+            mesh: mesh.clone()
+        }));
+        if let Some(mesh) = mesh.upgrade() {
+            mesh.borrow_mut().add_halfedges_data(Rc::downgrade(&data));
         }
+        data
     }
 }
 

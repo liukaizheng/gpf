@@ -1,8 +1,8 @@
-use std::ops::{Add, Deref};
+use std::ops::{Add, Deref, Sub};
 
 use bumpalo::{collections::vec::Vec, Bump};
 
-use super::fast_expansion_sum_zeroelim;
+use super::{fast_expansion_sum_zeroelim, fast_expansion_diff_zeroelim};
 
 #[derive(Clone)]
 struct ExpansionNumOwn<'b> {
@@ -51,6 +51,11 @@ fn add<'b, T1: ExpansionNum<'b>, T2: ExpansionNum<'b>>(t1: T1, t2: T2) -> Vec<'b
     fast_expansion_sum_zeroelim(&t1, &t2, t1.bump())
 }
 
+#[inline]
+fn sub<'b, T1: ExpansionNum<'b>, T2: ExpansionNum<'b>>(t1: T1, t2: T2) -> Vec<'b, f64> {
+    fast_expansion_diff_zeroelim(&t1, &t2, t1.bump())
+}
+
 impl<'b, RHS: ExpansionNum<'b>> Add<RHS> for ExpansionNumOwn<'b> {
     type Output = ExpansionNumOwn<'b>;
 
@@ -60,6 +65,37 @@ impl<'b, RHS: ExpansionNum<'b>> Add<RHS> for ExpansionNumOwn<'b> {
         }
     }
 }
+
+impl<'b, RHS: ExpansionNum<'b>> Add<RHS> for ExpansionNumRef<'_, 'b> {
+    type Output = ExpansionNumOwn<'b>;
+
+    fn add(self, rhs: RHS) -> Self::Output {
+        Self::Output {
+            vec: add(self, rhs),
+        }
+    }
+}
+
+impl<'b, RHS: ExpansionNum<'b>> Sub<RHS> for ExpansionNumOwn<'b> {
+    type Output = ExpansionNumOwn<'b>;
+
+    fn sub(self, rhs: RHS) -> Self::Output {
+        Self::Output {
+            vec: sub(self, rhs),
+        }
+    }
+}
+
+impl<'b, RHS: ExpansionNum<'b>> Sub<RHS> for ExpansionNumRef<'_, 'b> {
+    type Output = ExpansionNumOwn<'b>;
+
+    fn sub(self, rhs: RHS) -> Self::Output {
+        Self::Output {
+            vec: add(self, rhs),
+        }
+    }
+}
+
 
 #[test]
 fn test_expansion_operations() {

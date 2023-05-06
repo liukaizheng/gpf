@@ -391,6 +391,37 @@ pub fn scale_expansion_zeroelim<'a>(earr: &[f64], b: f64, bump: &'a Bump) -> Vec
     harr
 }
 
+#[inline]
+fn mul_expansion_zeroelim_imp<'a>(earr: &[f64], farr: &[f64], bump: &'a Bump) -> Vec<'a, f64> {
+    let init = scale_expansion_zeroelim(&farr, earr[0], bump);
+    earr[1..]
+        .iter()
+        .scan(init, |res, &s| {
+            Some(fast_expansion_sum_zeroelim(
+                &scale_expansion_zeroelim(&farr, s, bump),
+                &res,
+                bump,
+            ))
+        })
+        .last()
+        .unwrap()
+}
+
+#[inline]
+pub fn mul_expansion_zeroelim<'a>(earr: &[f64], farr: &[f64], bump: &'a Bump) -> Vec<'a, f64> {
+    if earr.len() == 1 {
+        scale_expansion_zeroelim(farr, earr[0], bump)
+    } else if farr.len() == 1 {
+        scale_expansion_zeroelim(earr, farr[0], bump)
+    } else {
+        if earr.len() < farr.len() {
+            mul_expansion_zeroelim_imp(earr, farr, bump)
+        } else {
+            mul_expansion_zeroelim_imp(farr, earr, bump)
+        }
+    }
+}
+
 #[inline(always)]
 pub fn expansion_invert(arr: &mut [f64]) {
     for a in arr {
@@ -1947,4 +1978,13 @@ pub fn orient4d(
     return orient4d_adapt(
         pa, pb, pc, pd, pe, aheight, bheight, cheight, dheight, eheight, permanent, bump,
     );
+}
+
+#[test]
+fn test_two_arr_mul() {
+    let a = [100.0, 0.0000000001];
+    let b = a.clone();
+    let bump = Bump::new();
+    let pro = mul_expansion_zeroelim(&a, &b, &bump);
+    assert_eq!(pro.last().unwrap().round(), 10000.0);
 }
