@@ -1986,5 +1986,5 @@ fn test_two_arr_mul() {
     let b = a.clone();
     let bump = Bump::new();
     let pro = mul_expansion_zeroelim(&a, &b, &bump);
-    assert_eq!(pro.last().unwrap().round(), 10000.0);
+    assert_eq!(estimate(&pro), 10000.000000020002 - 8.0374068511808128e-13 + 3.1019272970715786e-25);
 }

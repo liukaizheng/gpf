@@ -1,8 +1,8 @@
-use std::ops::{Add, Deref, Sub};
+use std::ops::{Add, Deref, Sub, Mul};
 
 use bumpalo::{collections::vec::Vec, Bump};
 
-use super::{fast_expansion_sum_zeroelim, fast_expansion_diff_zeroelim};
+use super::{fast_expansion_sum_zeroelim, fast_expansion_diff_zeroelim, mul_expansion_zeroelim};
 
 #[derive(Clone)]
 struct ExpansionNumOwn<'b> {
@@ -56,45 +56,40 @@ fn sub<'b, T1: ExpansionNum<'b>, T2: ExpansionNum<'b>>(t1: T1, t2: T2) -> Vec<'b
     fast_expansion_diff_zeroelim(&t1, &t2, t1.bump())
 }
 
-impl<'b, RHS: ExpansionNum<'b>> Add<RHS> for ExpansionNumOwn<'b> {
-    type Output = ExpansionNumOwn<'b>;
-
-    fn add(self, rhs: RHS) -> Self::Output {
-        Self::Output {
-            vec: add(self, rhs),
-        }
-    }
+#[inline]
+fn mul<'b, T1: ExpansionNum<'b>, T2: ExpansionNum<'b>>(t1: T1, t2: T2) -> Vec<'b, f64> {
+    mul_expansion_zeroelim(&t1, &t2, t1.bump())
 }
 
-impl<'b, RHS: ExpansionNum<'b>> Add<RHS> for ExpansionNumRef<'_, 'b> {
-    type Output = ExpansionNumOwn<'b>;
+macro_rules! impl_op {
+    (trait $op: ident, $func: ident) => {
+        impl<'b, RHS: ExpansionNum<'b>> $op<RHS> for ExpansionNumOwn<'b> {
+            type Output = ExpansionNumOwn<'b>;
 
-    fn add(self, rhs: RHS) -> Self::Output {
-        Self::Output {
-            vec: add(self, rhs),
+            #[inline]
+            fn $func(self, rhs: RHS) -> Self::Output {
+                Self::Output {
+                    vec: $func(self, rhs),
+                }
+            }
         }
-    }
+
+        impl<'b, RHS: ExpansionNum<'b>> $op<RHS> for ExpansionNumRef<'_, 'b> {
+            type Output = ExpansionNumOwn<'b>;
+
+            #[inline]
+            fn $func(self, rhs: RHS) -> Self::Output {
+                Self::Output {
+                    vec: $func(self, rhs),
+                }
+            }
+        }
+    };
 }
 
-impl<'b, RHS: ExpansionNum<'b>> Sub<RHS> for ExpansionNumOwn<'b> {
-    type Output = ExpansionNumOwn<'b>;
-
-    fn sub(self, rhs: RHS) -> Self::Output {
-        Self::Output {
-            vec: sub(self, rhs),
-        }
-    }
-}
-
-impl<'b, RHS: ExpansionNum<'b>> Sub<RHS> for ExpansionNumRef<'_, 'b> {
-    type Output = ExpansionNumOwn<'b>;
-
-    fn sub(self, rhs: RHS) -> Self::Output {
-        Self::Output {
-            vec: add(self, rhs),
-        }
-    }
-}
+impl_op!(trait Add, add);
+impl_op!(trait Sub, sub);
+impl_op!(trait Mul, mul);
 
 
 #[test]
