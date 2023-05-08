@@ -735,19 +735,7 @@ fn orient3d_adapt(
     *fin.last().unwrap()
 }
 
-pub struct StaticFilter {
-    o3d: f64,
-    isp: f64,
-}
-
-pub fn orient3d(
-    pa: &[f64],
-    pb: &[f64],
-    pc: &[f64],
-    pd: &[f64],
-    filters: &StaticFilter,
-    bump: &Bump,
-) -> f64 {
+pub fn orient3d(pa: &[f64], pb: &[f64], pc: &[f64], pd: &[f64], bump: &Bump) -> f64 {
     let adx = pa[0] - pd[0];
     let ady = pa[1] - pd[1];
     let adz = pa[2] - pd[2];
@@ -768,13 +756,6 @@ pub fn orient3d(
     let bdxady = bdx * ady;
 
     let det = adz * (bdxcdy - cdxbdy) + bdz * (cdxady - adxcdy) + cdz * (adxbdy - bdxady);
-
-    if det > filters.o3d {
-        return det;
-    }
-    if det < -filters.o3d {
-        return det;
-    }
 
     let permanent = (bdxcdy.abs() + cdxbdy.abs()) * adz.abs()
         + (cdxady.abs() + adxcdy.abs()) * bdz.abs()
@@ -1451,15 +1432,7 @@ fn insphere_adapt(
     insphere_exact(pa, pb, pc, pd, pe, bump)
 }
 
-pub fn insphere(
-    pa: &[f64],
-    pb: &[f64],
-    pc: &[f64],
-    pd: &[f64],
-    pe: &[f64],
-    filters: &StaticFilter,
-    bump: &Bump,
-) -> f64 {
+pub fn insphere(pa: &[f64], pb: &[f64], pc: &[f64], pd: &[f64], pe: &[f64], bump: &Bump) -> f64 {
     let aex = pa[0] - pe[0];
     let bex = pb[0] - pe[0];
     let cex = pc[0] - pe[0];
@@ -1505,7 +1478,25 @@ pub fn insphere(
 
     let det = (dlift * abc - clift * dab) + (blift * cda - alift * bcd);
 
-    if det.abs() > filters.isp {
+    let max_var = aex
+        .abs()
+        .max(bex.abs())
+        .max(cex.abs())
+        .max(dex.abs())
+        .max(aey.abs())
+        .max(bey.abs())
+        .max(cey.abs())
+        .max(dey.abs())
+        .max(aez.abs())
+        .max(bez.abs())
+        .max(cez.abs())
+        .max(dez.abs());
+    let mut epsilon = max_var;
+    epsilon *= epsilon;
+    epsilon *= epsilon;
+    epsilon *= max_var;
+    epsilon *= 1.145750161413163e-13;
+    if (det > epsilon) || (-det > epsilon) {
         return det;
     }
 
@@ -1541,10 +1532,6 @@ pub fn insphere(
             + (cexaeyplus + aexceyplus) * bezplus
             + (aexbeyplus + bexaeyplus) * cezplus)
             * dlift;
-    let errbound = filters.isp * permanent;
-    if (det > errbound) || (-det > errbound) {
-        return det;
-    }
 
     insphere_adapt(pa, pb, pc, pd, pe, permanent, bump)
 }
@@ -1986,5 +1973,8 @@ fn test_two_arr_mul() {
     let b = a.clone();
     let bump = Bump::new();
     let pro = mul_expansion_zeroelim(&a, &b, &bump);
-    assert_eq!(estimate(&pro), 10000.000000020002 - 8.0374068511808128e-13 + 3.1019272970715786e-25);
+    assert_eq!(
+        estimate(&pro),
+        10000.000000020002 - 8.0374068511808128e-13 + 3.1019272970715786e-25
+    );
 }
