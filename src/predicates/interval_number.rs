@@ -36,6 +36,12 @@ impl From<f64> for IntervalNumber {
     }
 }
 
+impl IntervalNumber {
+    pub fn not_zero(&self) -> bool {
+        self.low < 0.0 || self.high < 0.0
+    }
+}
+
 impl PartialEq for IntervalNumber {
     #[inline(always)]
     fn eq(&self, other: &Self) -> bool {

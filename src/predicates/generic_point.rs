@@ -1,9 +1,9 @@
 use std::{
-    cell::RefCell,
+    cell::{Ref, RefCell},
     ops::{Add, Deref, Mul, Sub},
 };
 
-use super::{ExpansionNum, IntervalNumber};
+use super::{ExpansionNum, GenericNum, IntervalNumber};
 
 pub struct ExplicitPoint3D {
     pub data: [f64; 3],
@@ -26,6 +26,7 @@ pub struct Implicit3DCache<T> {
 
 pub trait ImplicitPoint3D {
     fn static_filter(&self) -> Option<&(Implicit3DCache<f64>, f64)>;
+    fn dynamic_filter(&self) -> Option<&Implicit3DCache<IntervalNumber>>;
 }
 
 /// A point in 3D space representing the intersection of a line and a plane.
@@ -40,7 +41,7 @@ pub struct ImplicitPointLPI<'b> {
 
     ssfilter: RefCell<Option<(Implicit3DCache<f64>, f64)>>,
     dfilter: RefCell<Option<Implicit3DCache<IntervalNumber>>>,
-    lambda: RefCell<Option<Implicit3DCache<ExpansionNum<'b>>>>,
+    exact: RefCell<Option<Implicit3DCache<ExpansionNum<'b>>>>,
 }
 
 impl<'b> ImplicitPointLPI<'b> {
@@ -59,7 +60,7 @@ impl<'b> ImplicitPointLPI<'b> {
             t,
             ssfilter: RefCell::new(None),
             dfilter: RefCell::new(None),
-            lambda: RefCell::new(None),
+            exact: RefCell::new(None),
         }
     }
 }
@@ -141,48 +142,38 @@ fn lpi_ssfilter(
     }
 }
 
-fn my_add<'b, 'a: 'b, T: 'static + Add<Output = T>>(a: &'a T, b: &'a T) -> T
-where
-    T: Add<&'b T, Output = T>,
-    &'b T: Add<&'b T, Output = T>,
-{
+/*fn lpi_lambda<T>(
+    px: T,
+    py: T,
+    pz: T,
+    qx: T,
+    qy: T,
+    qz: T,
+    rx: T,
+    ry: T,
+    rz: T,
+    sx: T,
+    sy: T,
+    sz: T,
+    tx: T,
+    ty: T,
+    tz: T,
+) -> (Implicit3DCache<T>, Option<T>)
+ where
+  T: GenericNum,
+  for <'a> &'a T: Add<Output = T> + Sub<Output = T> + Mul<Output = T>,
+//   for <'a> &'a T: Add<T, Output = T> + Sub<T, Output = T> + Mul<T, Output = T>,
+  {
 
-    let c = a + b;
-    let d = &c + b;
-    d + c
-}
-
-fn lpi_lambda<'a, T>(
-    px: &'a T,
-    py: &'a T,
-    pz: &'a T,
-    qx: &'a T,
-    qy: &'a T,
-    qz: &'a T,
-    rx: &'a T,
-    ry: &'a T,
-    rz: &'a T,
-    sx: &'a T,
-    sy: &'a T,
-    sz: &'a T,
-    tx: &'a T,
-    ty: &'a T,
-    tz: &'a T,
-) -> Option<Implicit3DCache<T>>
-where
-    T: Add<Output = T> + Sub<Output = T> + Mul<Output = T>,
-    T: Add<&'a T, Output = T> + Sub<&'a T, Output = T> + Mul<&'a T, Output = T>,
-    &'a T: Add<Output = T> + Sub<Output = T> + Mul<Output = T>,
-{
-    let a11 = px - qx;
-    let a12 = py - qy;
-    let a13 = pz - qz;
-    let a21 = sx - rx;
-    let a22 = sy - ry;
-    let a23 = sz - rz;
-    let a31 = tx - rx;
-    let a32 = ty - ry;
-    let a33 = tz - rz;
+    let a11 = &px - &qx;
+    let a12 = &py - &qy;
+    let a13 = &pz - &qz;
+    let a21 = sx - &rx;
+    let a22 = sy - &ry;
+    let a23 = sz - &rz;
+    let a31 = tx - &rx;
+    let a32 = ty - &ry;
+    let a33 = tz - &rz;
     let tv1 = &a22 * &a33;
     let tv2 = &a23 * &a32;
     let a2233 = tv1 - tv2;
@@ -199,9 +190,9 @@ where
 
     let d = tt1 + tv9;
 
-    let px_rx = px - rx;
-    let py_ry = py - ry;
-    let pz_rz = pz - rz;
+    let px_rx = &px - &rx;
+    let py_ry = &py - &ry;
+    let pz_rz = &pz - &rz;
     let tt2 = py_ry * &a2133;
     let tt3 = px_rx * &a2233;
     let tt4 = pz_rz * &a2132;
@@ -210,18 +201,18 @@ where
     let ax = &a11 * &n;
     let ay = &a12 * &n;
     let az = &a13 * &n;
-    let dpx = &d * &px;
-    let dpy = &d * &py;
+    let dpx = &d * px;
+    let dpy = &d * py;
     let dpz = &d * pz;
     let x = dpx - ax;
     let y = dpy - ay;
     let z = dpz - az;
-    None
-}
+    (Implicit3DCache { x, y, z, d }, None)
+}*/
 
 impl<'b> ImplicitPoint3D for ImplicitPointLPI<'b> {
     fn static_filter(&self) -> Option<&(Implicit3DCache<f64>, f64)> {
-        let filter_option = self.ssfilter.borrow().as_ref();
+        let filter_option = Ref::leak(self.ssfilter.borrow()).as_ref();
         if let Some(filter) = filter_option {
             if filter.1 == 0.0 {
                 return None;
@@ -249,9 +240,13 @@ impl<'b> ImplicitPoint3D for ImplicitPointLPI<'b> {
                 return None;
             } else {
                 self.ssfilter.replace(filter);
-                return self.ssfilter.borrow().as_ref();
+                return Ref::leak(self.ssfilter.borrow()).as_ref();
             }
         }
+    }
+
+    fn dynamic_filter(&self) -> Option<&Implicit3DCache<IntervalNumber>> {
+        None
     }
 }
 
@@ -272,7 +267,7 @@ pub struct ImplicitPointTPI<'b> {
 
     ssfilter: RefCell<Option<Implicit3DCache<f64>>>,
     dfilter: RefCell<Option<Implicit3DCache<IntervalNumber>>>,
-    lambda: RefCell<Option<Implicit3DCache<ExpansionNum<'b>>>>,
+    exact: RefCell<Option<Implicit3DCache<ExpansionNum<'b>>>>,
 }
 
 impl<'b> ImplicitPointTPI<'b> {
@@ -299,7 +294,7 @@ impl<'b> ImplicitPointTPI<'b> {
             u3,
             ssfilter: RefCell::new(None),
             dfilter: RefCell::new(None),
-            lambda: RefCell::new(None),
+            exact: RefCell::new(None),
         }
     }
 }

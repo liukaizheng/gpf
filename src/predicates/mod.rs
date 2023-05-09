@@ -1,15 +1,14 @@
-
-mod predicates;
-mod interval_number;
 mod expansion_number;
 mod generic_point;
+mod interval_number;
 mod orient2d;
+mod predicates;
 
-use std::{ops::{Add, Sub, Mul}};
+use std::ops::{Add, Mul, Sub};
 
-pub use interval_number::*;
 pub use expansion_number::*;
 pub use generic_point::*;
+pub use interval_number::*;
 pub use orient2d::*;
 
 pub enum Orientation {
@@ -20,11 +19,11 @@ pub enum Orientation {
 
 #[inline(always)]
 fn double_to_sign(x: f64) -> Orientation {
-	if x > 0.0 {
-		Orientation::Positive
-	} else if x < 0.0 {
-		Orientation::Negative
-	} else {
-		Orientation::Zero
-	}
+    if x > 0.0 {
+        Orientation::Positive
+    } else if x < 0.0 {
+        Orientation::Negative
+    } else {
+        Orientation::Zero
+    }
 }

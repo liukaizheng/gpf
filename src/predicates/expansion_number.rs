@@ -25,6 +25,15 @@ impl<'b> Deref for ExpansionNum<'b> {
     }
 }
 
+impl <'b> From<Vec<'b, f64>> for ExpansionNum<'b> {
+    #[inline(always)]
+    fn from(vec: Vec<'b, f64>) -> Self {
+        Self {
+            vec
+        }
+    }
+}
+
 
 #[inline]
 fn add<'b>(a: &[f64], b: &[f64], bump: &'b Bump) -> Vec<'b, f64> {
