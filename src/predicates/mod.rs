@@ -1,7 +1,7 @@
 mod expansion_number;
 mod generic_point;
 mod interval_number;
-mod orient2d;
+pub mod orient2d;
 mod predicates;
 
 use bumpalo::collections::Vec;
@@ -16,6 +16,7 @@ pub enum Orientation {
     Positive,
     Negative,
     Zero,
+    Undefined,
 }
 
 trait GenericNum = Sized + Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self>
@@ -47,5 +48,14 @@ fn double_to_sign(x: f64) -> Orientation {
         Orientation::Negative
     } else {
         Orientation::Zero
+    }
+}
+
+#[inline(always)]
+fn sign_reverse(ori: Orientation) -> Orientation {
+    match ori {
+        Orientation::Positive => Orientation::Negative,
+        Orientation::Negative => Orientation::Positive,
+        ori => ori,
     }
 }

@@ -37,8 +37,19 @@ impl From<f64> for IntervalNumber {
 }
 
 impl IntervalNumber {
+    #[inline(always)]
     pub fn not_zero(&self) -> bool {
         self.low < 0.0 || self.high < 0.0
+    }
+
+    #[inline(always)]
+    pub fn positive(&self) -> bool {
+        self.low < 0.0
+    }
+
+    #[inline(always)]
+    pub fn negative(&self) -> bool {
+        self.high < 0.0
     }
 }
 
@@ -51,66 +62,58 @@ impl PartialEq for IntervalNumber {
 
 #[inline(always)]
 fn add(a: &IntervalNumber, b: &IntervalNumber) -> IntervalNumber {
-        IntervalNumber {
-            low: (a.low + b.low).next_up(),
-            high: (a.high + b.high).next_up(),
-        }
+    IntervalNumber {
+        low: (a.low + b.low).next_up(),
+        high: (a.high + b.high).next_up(),
+    }
 }
 
 #[inline(always)]
 fn sub(a: &IntervalNumber, b: &IntervalNumber) -> IntervalNumber {
-        IntervalNumber {
-            low: (a.low + b.high).next_up(),
-            high: (a.high + b.low).next_up(),
-        }
+    IntervalNumber {
+        low: (a.low + b.high).next_up(),
+        high: (a.high + b.low).next_up(),
+    }
 }
 
 fn mul(a: &IntervalNumber, b: &IntervalNumber) -> IntervalNumber {
-        let signs: (bool, bool, bool, bool) = (
-            a.low.is_sign_negative() & (a.low != 0.0),
-            a.high.is_sign_negative() & (a.high != 0.0),
-            b.low.is_sign_negative() & (b.low != 0.0),
-            b.high.is_sign_negative() & (b.high != 0.0),
-        );
-        match signs {
-            (true, false, true, false) => IntervalNumber::new(
-                (a.low * (-b.low)).next_up(),
-                (a.high * b.high).next_up(),
-            ),
-            (true, false, false, true) => IntervalNumber::new(
-                (a.high * b.low).next_up(),
-                ((-a.low) * b.high).next_up(),
-            ),
-            (true, false, false, false) => IntervalNumber::new(
-                (a.high * b.low).next_up(),
-                (a.high * b.high).next_up(),
-            ),
-            (false, true, true, false) => IntervalNumber::new(
-                (a.low * b.high).next_up(),
-                (a.high * (-b.low)).next_up(),
-            ),
-            (false, true, false, true) => IntervalNumber::new(
-                ((-a.high) * b.high).next_up(),
-                (a.low * b.low).next_up(),
-            ),
-            (false, true, false, false) => IntervalNumber::new(
-                (a.low * b.high).next_up(),
-                (a.low * b.low).next_up(),
-            ),
-            (false, false, true, false) => IntervalNumber::new(
-                (a.low * b.high).next_up(),
-                (a.high * b.high).next_up(),
-            ),
-            (false, false, false, true) => IntervalNumber::new(
-                (a.high * b.low).next_up(),
-                (a.low * b.low).next_up(),
-            ),
-            (false, false, false, false) => IntervalNumber::new(
-                ((a.low * b.high).max(a.high * b.low)).next_up(),
-                ((a.low * b.low).max(a.high * b.high)).next_up(),
-            ),
-            _ => IntervalNumber::default(),
+    let signs: (bool, bool, bool, bool) = (
+        a.low.is_sign_negative() & (a.low != 0.0),
+        a.high.is_sign_negative() & (a.high != 0.0),
+        b.low.is_sign_negative() & (b.low != 0.0),
+        b.high.is_sign_negative() & (b.high != 0.0),
+    );
+    match signs {
+        (true, false, true, false) => {
+            IntervalNumber::new((a.low * (-b.low)).next_up(), (a.high * b.high).next_up())
         }
+        (true, false, false, true) => {
+            IntervalNumber::new((a.high * b.low).next_up(), ((-a.low) * b.high).next_up())
+        }
+        (true, false, false, false) => {
+            IntervalNumber::new((a.high * b.low).next_up(), (a.high * b.high).next_up())
+        }
+        (false, true, true, false) => {
+            IntervalNumber::new((a.low * b.high).next_up(), (a.high * (-b.low)).next_up())
+        }
+        (false, true, false, true) => {
+            IntervalNumber::new(((-a.high) * b.high).next_up(), (a.low * b.low).next_up())
+        }
+        (false, true, false, false) => {
+            IntervalNumber::new((a.low * b.high).next_up(), (a.low * b.low).next_up())
+        }
+        (false, false, true, false) => {
+            IntervalNumber::new((a.low * b.high).next_up(), (a.high * b.high).next_up())
+        }
+        (false, false, false, true) => {
+            IntervalNumber::new((a.high * b.low).next_up(), (a.low * b.low).next_up())
+        }
+        (false, false, false, false) => IntervalNumber::new(
+            ((a.low * b.high).max(a.high * b.low)).next_up(),
+            ((a.low * b.low).max(a.high * b.high)).next_up(),
+        ),
+        _ => IntervalNumber::default(),
+    }
 }
 
 macro_rules! impl_op {
@@ -152,7 +155,6 @@ macro_rules! impl_op {
 impl_op!(trait Add, add);
 impl_op!(trait Sub, sub);
 impl_op!(trait Mul, mul);
-
 
 #[test]
 fn interval_number_operation() {
