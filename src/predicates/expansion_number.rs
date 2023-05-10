@@ -34,6 +34,12 @@ impl <'b> From<Vec<'b, f64>> for ExpansionNum<'b> {
     }
 }
 
+impl <'b> ExpansionNum<'b> {
+    pub fn not_zero(&self) -> bool {
+        *self.last().unwrap() != 0.0
+    }
+}
+
 
 #[inline]
 fn add<'b>(a: &[f64], b: &[f64], bump: &'b Bump) -> Vec<'b, f64> {

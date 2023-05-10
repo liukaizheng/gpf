@@ -1,9 +1,11 @@
 use std::{
     cell::{Ref, RefCell},
-    ops::{Add, Deref, Mul, Sub},
+    ops::Deref,
 };
 
-use super::{ExpansionNum, GenericNum, IntervalNumber};
+use bumpalo::{collections::Vec, vec, Bump};
+
+use super::{abs_max, dummy_asb_max, ExpansionNum, GenericNum, IntervalNumber};
 
 pub struct ExplicitPoint3D {
     pub data: [f64; 3],
@@ -18,15 +20,16 @@ impl Deref for ExplicitPoint3D {
 }
 
 pub struct Implicit3DCache<T> {
-    x: T,
-    y: T,
-    z: T,
-    d: T,
+    pub x: T,
+    pub y: T,
+    pub z: T,
+    pub d: T,
 }
 
-pub trait ImplicitPoint3D {
+pub trait ImplicitPoint3D<'b> {
     fn static_filter(&self) -> Option<&(Implicit3DCache<f64>, f64)>;
     fn dynamic_filter(&self) -> Option<&Implicit3DCache<IntervalNumber>>;
+    fn exact(&self) -> Option<&Implicit3DCache<ExpansionNum<'b>>>;
 }
 
 /// A point in 3D space representing the intersection of a line and a plane.
@@ -39,8 +42,10 @@ pub struct ImplicitPointLPI<'b> {
     s: ExplicitPoint3D,
     t: ExplicitPoint3D,
 
-    ssfilter: RefCell<Option<(Implicit3DCache<f64>, f64)>>,
-    dfilter: RefCell<Option<Implicit3DCache<IntervalNumber>>>,
+    bump: &'b Bump,
+
+    ss_filter: RefCell<Option<(Implicit3DCache<f64>, f64)>>,
+    d_filter: RefCell<Option<Implicit3DCache<IntervalNumber>>>,
     exact: RefCell<Option<Implicit3DCache<ExpansionNum<'b>>>>,
 }
 
@@ -51,6 +56,7 @@ impl<'b> ImplicitPointLPI<'b> {
         r: ExplicitPoint3D,
         s: ExplicitPoint3D,
         t: ExplicitPoint3D,
+        bump: &'b Bump,
     ) -> Self {
         Self {
             p,
@@ -58,91 +64,15 @@ impl<'b> ImplicitPointLPI<'b> {
             r,
             s,
             t,
-            ssfilter: RefCell::new(None),
-            dfilter: RefCell::new(None),
+            ss_filter: RefCell::new(None),
+            d_filter: RefCell::new(None),
             exact: RefCell::new(None),
+            bump,
         }
     }
 }
 
-fn lpi_ssfilter(
-    p: &[f64],
-    q: &[f64],
-    r: &[f64],
-    s: &[f64],
-    t: &[f64],
-) -> Option<(Implicit3DCache<f64>, f64)> {
-    let a11 = p[0] - q[0];
-    let a12 = p[1] - q[1];
-    let a13 = p[2] - q[2];
-    let a21 = s[0] - r[0];
-    let a22 = s[1] - r[1];
-    let a23 = s[2] - r[2];
-    let a31 = t[0] - r[0];
-    let a32 = t[1] - r[1];
-    let a33 = t[2] - r[2];
-    let tv1 = a22 * a33;
-    let tv2 = a23 * a32;
-    let a2233 = tv1 - tv2;
-    let tv3 = a21 * a33;
-    let tv4 = a23 * a31;
-    let a2133 = tv3 - tv4;
-    let tv5 = a21 * a32;
-    let tv6 = a22 * a31;
-    let a2132 = tv5 - tv6;
-    let tv7 = a11 * a2233;
-    let tv8 = a12 * a2133;
-    let tv9 = a13 * a2132;
-    let tt1 = tv7 - tv8;
-
-    let d = tt1 + tv9;
-
-    let px_rx = p[0] - r[0];
-    let py_ry = p[1] - r[1];
-    let pz_rz = p[2] - r[2];
-    let tt2 = py_ry * a2133;
-    let tt3 = px_rx * a2233;
-    let tt4 = pz_rz * a2132;
-    let tt5 = tt3 + tt4;
-    let n = tt5 - tt2;
-    let ax = a11 * n;
-    let ay = a12 * n;
-    let az = a13 * n;
-    let dpx = d * p[0];
-    let dpy = d * p[1];
-    let dpz = d * p[2];
-    let x = dpx - ax;
-    let y = dpy - ay;
-    let z = dpz - az;
-
-    let max_var = p[0]
-        .abs()
-        .max(p[1].abs())
-        .max(p[2].abs())
-        .max(a11.abs())
-        .max(a12.abs())
-        .max(a13.abs())
-        .max(a21.abs())
-        .max(a22.abs())
-        .max(a23.abs())
-        .max(a31.abs())
-        .max(a32.abs())
-        .max(a33.abs())
-        .max(px_rx.abs())
-        .max(py_ry.abs())
-        .max(pz_rz.abs());
-    let mut lambda_d_eps = max_var;
-    lambda_d_eps *= lambda_d_eps;
-    lambda_d_eps *= max_var;
-    lambda_d_eps *= 4.884981308350689e-15;
-    if d > lambda_d_eps || d < -lambda_d_eps {
-        Some((Implicit3DCache { x, y, z, d }, max_var))
-    } else {
-        None
-    }
-}
-
-/*fn lpi_lambda<T>(
+fn lpi_lambda<'b, const NEED_MAX: bool, T: GenericNum + 'b, F>(
     px: T,
     py: T,
     pz: T,
@@ -158,13 +88,12 @@ fn lpi_ssfilter(
     tx: T,
     ty: T,
     tz: T,
+    abs_max: F,
+    bump: &'b Bump,
 ) -> (Implicit3DCache<T>, Option<T>)
- where
-  T: GenericNum,
-  for <'a> &'a T: Add<Output = T> + Sub<Output = T> + Mul<Output = T>,
-//   for <'a> &'a T: Add<T, Output = T> + Sub<T, Output = T> + Mul<T, Output = T>,
-  {
-
+where
+    F: FnOnce(Vec<'b, T>) -> Option<T>,
+{
     let a11 = &px - &qx;
     let a12 = &py - &qy;
     let a13 = &pz - &qz;
@@ -193,26 +122,36 @@ fn lpi_ssfilter(
     let px_rx = &px - &rx;
     let py_ry = &py - &ry;
     let pz_rz = &pz - &rz;
-    let tt2 = py_ry * &a2133;
-    let tt3 = px_rx * &a2233;
-    let tt4 = pz_rz * &a2132;
+    let tt2 = &py_ry * &a2133;
+    let tt3 = &px_rx * &a2233;
+    let tt4 = &pz_rz * &a2132;
     let tt5 = tt3 + tt4;
     let n = tt5 - tt2;
     let ax = &a11 * &n;
     let ay = &a12 * &n;
     let az = &a13 * &n;
-    let dpx = &d * px;
-    let dpy = &d * py;
-    let dpz = &d * pz;
+    let dpx = &d * &px;
+    let dpy = &d * &py;
+    let dpz = &d * &pz;
     let x = dpx - ax;
     let y = dpy - ay;
     let z = dpz - az;
-    (Implicit3DCache { x, y, z, d }, None)
-}*/
+    let max_var = if NEED_MAX {
+        abs_max(vec![
+            in bump;
+            px, py, pz,
+            a11, a12, a13, a21, a22, a23, a31, a32, a33,
+            px_rx, py_ry, pz_rz
+        ])
+    } else {
+        None
+    };
+    (Implicit3DCache { x, y, z, d }, max_var)
+}
 
-impl<'b> ImplicitPoint3D for ImplicitPointLPI<'b> {
+impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
     fn static_filter(&self) -> Option<&(Implicit3DCache<f64>, f64)> {
-        let filter_option = Ref::leak(self.ssfilter.borrow()).as_ref();
+        let filter_option = Ref::leak(self.ss_filter.borrow()).as_ref();
         if let Some(filter) = filter_option {
             if filter.1 == 0.0 {
                 return None;
@@ -220,15 +159,35 @@ impl<'b> ImplicitPoint3D for ImplicitPointLPI<'b> {
                 return filter_option;
             }
         } else {
-            let filter = lpi_ssfilter(
-                &self.p.data,
-                &self.q.data,
-                &self.r.data,
-                &self.s.data,
-                &self.t.data,
+            let (filter, max_var) = lpi_lambda::<'_, true, _, _>(
+                self.p.data[0],
+                self.p.data[1],
+                self.p.data[2],
+                self.q.data[0],
+                self.q.data[1],
+                self.q.data[2],
+                self.r.data[0],
+                self.r.data[1],
+                self.r.data[2],
+                self.s.data[0],
+                self.s.data[1],
+                self.s.data[2],
+                self.t.data[0],
+                self.t.data[1],
+                self.t.data[2],
+                abs_max,
+                &self.bump,
             );
-            if filter.is_none() {
-                self.ssfilter.replace(Some((
+            let max_var = max_var.unwrap();
+            let mut lambda_d_eps = max_var;
+            lambda_d_eps *= lambda_d_eps;
+            lambda_d_eps *= max_var;
+            lambda_d_eps *= 4.884981308350689e-15;
+            if filter.d > lambda_d_eps || filter.d < -lambda_d_eps {
+                self.ss_filter.replace(Some((filter, max_var)));
+                return Ref::leak(self.ss_filter.borrow()).as_ref();
+            } else {
+                self.ss_filter.replace(Some((
                     Implicit3DCache {
                         x: 0.0,
                         y: 0.0,
@@ -238,15 +197,82 @@ impl<'b> ImplicitPoint3D for ImplicitPointLPI<'b> {
                     0.0,
                 )));
                 return None;
-            } else {
-                self.ssfilter.replace(filter);
-                return Ref::leak(self.ssfilter.borrow()).as_ref();
             }
         }
     }
 
     fn dynamic_filter(&self) -> Option<&Implicit3DCache<IntervalNumber>> {
-        None
+        let filter_option = Ref::leak(self.d_filter.borrow()).as_ref();
+        if let Some(filter) = filter_option {
+            if filter.d.not_zero() {
+                return filter_option;
+            } else {
+                return None;
+            }
+        } else {
+            let (filter, _) = lpi_lambda::<'_, false, _, _>(
+                self.p.data[0].into(),
+                self.p.data[1].into(),
+                self.p.data[2].into(),
+                self.q.data[0].into(),
+                self.q.data[1].into(),
+                self.q.data[2].into(),
+                self.r.data[0].into(),
+                self.r.data[1].into(),
+                self.r.data[2].into(),
+                self.s.data[0].into(),
+                self.s.data[1].into(),
+                self.s.data[2].into(),
+                self.t.data[0].into(),
+                self.t.data[1].into(),
+                self.t.data[2].into(),
+                dummy_asb_max,
+                &self.bump,
+            );
+            self.d_filter.replace(Some(filter));
+            if self.d_filter.borrow().as_ref().unwrap().d.not_zero() {
+                return Ref::leak(self.d_filter.borrow()).as_ref();
+            } else {
+                return None;
+            }
+        }
+    }
+
+    fn exact(&self) -> Option<&Implicit3DCache<ExpansionNum<'b>>> {
+        let exact_option = Ref::leak(self.exact.borrow()).as_ref();
+        if let Some(exact) = exact_option {
+            if exact.d.not_zero() {
+                return exact_option;
+            } else {
+                return None;
+            }
+        } else {
+            let (exact, _) = lpi_lambda::<'_, false, _, _>(
+                vec![in self.bump; self.p.data[0]].into(),
+                vec![in self.bump; self.p.data[1]].into(),
+                vec![in self.bump; self.p.data[2]].into(),
+                vec![in self.bump; self.q.data[0]].into(),
+                vec![in self.bump; self.q.data[1]].into(),
+                vec![in self.bump; self.q.data[2]].into(),
+                vec![in self.bump; self.r.data[0]].into(),
+                vec![in self.bump; self.r.data[1]].into(),
+                vec![in self.bump; self.r.data[2]].into(),
+                vec![in self.bump; self.s.data[0]].into(),
+                vec![in self.bump; self.s.data[1]].into(),
+                vec![in self.bump; self.s.data[2]].into(),
+                vec![in self.bump; self.t.data[0]].into(),
+                vec![in self.bump; self.t.data[1]].into(),
+                vec![in self.bump; self.t.data[2]].into(),
+                dummy_asb_max,
+                &self.bump,
+            );
+            self.exact.replace(Some(exact));
+            if self.exact.borrow().as_ref().unwrap().d.not_zero() {
+                return Ref::leak(self.exact.borrow()).as_ref();
+            } else {
+                return None;
+            }
+        }
     }
 }
 
@@ -265,9 +291,11 @@ pub struct ImplicitPointTPI<'b> {
     u2: ExplicitPoint3D,
     u3: ExplicitPoint3D,
 
-    ssfilter: RefCell<Option<Implicit3DCache<f64>>>,
-    dfilter: RefCell<Option<Implicit3DCache<IntervalNumber>>>,
+    ss_filter: RefCell<Option<(Implicit3DCache<f64>, f64)>>,
+    d_filter: RefCell<Option<Implicit3DCache<IntervalNumber>>>,
     exact: RefCell<Option<Implicit3DCache<ExpansionNum<'b>>>>,
+
+    bump: &'b Bump,
 }
 
 impl<'b> ImplicitPointTPI<'b> {
@@ -281,6 +309,7 @@ impl<'b> ImplicitPointTPI<'b> {
         u1: ExplicitPoint3D,
         u2: ExplicitPoint3D,
         u3: ExplicitPoint3D,
+        bump: &'b Bump,
     ) -> Self {
         Self {
             v1,
@@ -292,9 +321,333 @@ impl<'b> ImplicitPointTPI<'b> {
             u1,
             u2,
             u3,
-            ssfilter: RefCell::new(None),
-            dfilter: RefCell::new(None),
+            ss_filter: RefCell::new(None),
+            d_filter: RefCell::new(None),
             exact: RefCell::new(None),
+            bump,
+        }
+    }
+}
+
+fn tpi_lambda<'b, const NEED_MAX: bool, T: GenericNum + 'b, F>(
+    ov1x: T,
+    ov1y: T,
+    ov1z: T,
+    ov2x: T,
+    ov2y: T,
+    ov2z: T,
+    ov3x: T,
+    ov3y: T,
+    ov3z: T,
+    ow1x: T,
+    ow1y: T,
+    ow1z: T,
+    ow2x: T,
+    ow2y: T,
+    ow2z: T,
+    ow3x: T,
+    ow3y: T,
+    ow3z: T,
+    ou1x: T,
+    ou1y: T,
+    ou1z: T,
+    ou2x: T,
+    ou2y: T,
+    ou2z: T,
+    ou3x: T,
+    ou3y: T,
+    ou3z: T,
+    abs_max: F,
+    bump: &'b Bump,
+) -> (Implicit3DCache<T>, Option<T>)
+where
+    F: FnOnce(Vec<'b, T>) -> Option<T>,
+{
+    let v3x = ov3x - &ov2x;
+    let v3y = ov3y - &ov2y;
+    let v3z = ov3z - &ov2z;
+    let v2x = ov2x - &ov1x;
+    let v2y = ov2y - &ov1y;
+    let v2z = ov2z - &ov1z;
+    let w3x = ow3x - &ow2x;
+    let w3y = ow3y - &ow2y;
+    let w3z = ow3z - &ow2z;
+    let w2x = ow2x - &ow1x;
+    let w2y = ow2y - &ow1y;
+    let w2z = ow2z - &ow1z;
+    let u3x = ou3x - &ou2x;
+    let u3y = ou3y - &ou2y;
+    let u3z = ou3z - &ou2z;
+    let u2x = ou2x - &ou1x;
+    let u2y = ou2y - &ou1y;
+    let u2z = ou2z - &ou1z;
+    let nvx1 = &v2y * &v3z;
+    let nvx2 = &v2z * &v3y;
+    let nvx = nvx1 - nvx2;
+    let nvy1 = &v3x * &v2z;
+    let nvy2 = &v3z * &v2x;
+    let nvy = nvy1 - nvy2;
+    let nvz1 = &v2x * &v3y;
+    let nvz2 = &v2y * &v3x;
+    let nvz = nvz1 - nvz2;
+    let nwx1 = &w2y * &w3z;
+    let nwx2 = &w2z * &w3y;
+    let nwx = nwx1 - nwx2;
+    let nwy1 = &w3x * &w2z;
+    let nwy2 = &w3z * &w2x;
+    let nwy = nwy1 - nwy2;
+    let nwz1 = &w2x * &w3y;
+    let nwz2 = &w2y * &w3x;
+    let nwz = nwz1 - nwz2;
+    let nux1 = &u2y * &u3z;
+    let nux2 = &u2z * &u3y;
+    let nux = nux1 - nux2;
+    let nuy1 = &u3x * &u2z;
+    let nuy2 = &u3z * &u2x;
+    let nuy = nuy1 - nuy2;
+    let nuz1 = &u2x * &u3y;
+    let nuz2 = &u2y * &u3x;
+    let nuz = nuz1 - nuz2;
+    let nwyuz1 = &nwy * &nuz;
+    let nwyuz2 = &nwz * &nuy;
+    let nwyuz = nwyuz1 - nwyuz2;
+    let nwxuz1 = &nwx * &nuz;
+    let nwxuz2 = &nwz * &nux;
+    let nwxuz = nwxuz1 - nwxuz2;
+    let nwxuy1 = &nwx * &nuy;
+    let nwxuy2 = &nwy * &nux;
+    let nwxuy = nwxuy1 - nwxuy2;
+    let nvyuz1 = &nvy * &nuz;
+    let nvyuz2 = &nvz * &nuy;
+    let nvyuz = nvyuz1 - nvyuz2;
+    let nvxuz1 = &nvx * &nuz;
+    let nvxuz2 = &nvz * &nux;
+    let nvxuz = nvxuz1 - nvxuz2;
+    let nvxuy1 = &nvx * &nuy;
+    let nvxuy2 = &nvy * &nux;
+    let nvxuy = nvxuy1 - nvxuy2;
+    let nvywz1 = &nvy * &nwz;
+    let nvywz2 = &nvz * &nwy;
+    let nvywz = nvywz1 - nvywz2;
+    let nvxwz1 = &nvx * &nwz;
+    let nvxwz2 = &nvz * &nwx;
+    let nvxwz = nvxwz1 - nvxwz2;
+    let nvxwy1 = &nvx * &nwy;
+    let nvxwy2 = &nvy * &nwx;
+    let nvxwy = nvxwy1 - nvxwy2;
+    let p1a = &nvx * &ov1x;
+    let p1b = &nvy * &ov1y;
+    let p1c = &nvz * &ov1z;
+    let p1ab = p1a + p1b;
+    let p1 = p1ab + p1c;
+    let p2a = nwx * &ow1x;
+    let p2b = nwy * &ow1y;
+    let p2c = nwz * &ow1z;
+    let p2ab = p2a + p2b;
+    let p2 = p2ab + p2c;
+    let p3a = nux * &ou1x;
+    let p3b = nuy * &ou1y;
+    let p3c = nuz * &ou1z;
+    let p3ab = p3a + p3b;
+    let p3 = p3ab + p3c;
+    let lxa = &p1 * &nwyuz;
+    let lxb = &p3 * nvywz;
+    let lxc = &p2 * nvyuz;
+    let lxab = lxa + lxb;
+    let x = lxab - lxc;
+    let lya = &p2 * nvxuz;
+    let lyb = &p3 * nvxwz;
+    let lyc = &p1 * &nwxuz;
+    let lybc = lyc + lyb;
+    let y = lya - lybc;
+    let lza = p3 * nvxwy;
+    let lzb = p1 * &nwxuy;
+    let lzc = p2 * nvxuy;
+    let lzab = lza + lzb;
+    let z = lzab - lzc;
+    let da = nvx * nwyuz;
+    let db = nvz * nwxuy;
+    let dc = nvy * nwxuz;
+    let dab = da + db;
+    let d = dab - dc;
+
+    let max_var = if NEED_MAX {
+        abs_max(vec![
+            in bump;
+            ov1x, ov1y, ov1z,
+            ow1x, ow1y, ow1z,
+            ou1x, ou1y, ou1z,
+            v3x, v3y, v3z, v2x, v2y, v2z,
+            w3x, w3y, w3z, w2x, w2y, w2z,
+            u3x, u3y, u3z, u2x, u2y, u2z,
+        ])
+    } else {
+        None
+    };
+    (Implicit3DCache { x, y, z, d }, max_var)
+}
+
+impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
+    fn static_filter(&self) -> Option<&(Implicit3DCache<f64>, f64)> {
+        let filter_option = Ref::leak(self.ss_filter.borrow()).as_ref();
+        if let Some(filter) = filter_option {
+            if filter.1 == 0.0 {
+                return None;
+            } else {
+                return filter_option;
+            }
+        } else {
+            let (filter, max_var) = tpi_lambda::<'_, true, _, _>(
+                self.v1.data[0],
+                self.v1.data[1],
+                self.v1.data[2],
+                self.v2.data[0],
+                self.v2.data[1],
+                self.v2.data[2],
+                self.v3.data[0],
+                self.v3.data[1],
+                self.v3.data[2],
+                self.w1.data[0],
+                self.w1.data[1],
+                self.w1.data[2],
+                self.w2.data[0],
+                self.w2.data[1],
+                self.w2.data[2],
+                self.w3.data[0],
+                self.w3.data[1],
+                self.w3.data[2],
+                self.u1.data[0],
+                self.u1.data[1],
+                self.u1.data[2],
+                self.u2.data[0],
+                self.u2.data[1],
+                self.u2.data[2],
+                self.u3.data[0],
+                self.u3.data[1],
+                self.u3.data[2],
+                abs_max,
+                self.bump,
+            );
+            let max_var = max_var.unwrap();
+            let mut lambda_d_eps = max_var;
+            lambda_d_eps *= lambda_d_eps;
+            lambda_d_eps *= lambda_d_eps;
+            lambda_d_eps *= max_var;
+            lambda_d_eps *= max_var;
+            lambda_d_eps *= 8.704148513061234e-14;
+            if filter.d > lambda_d_eps || filter.d < -lambda_d_eps {
+                self.ss_filter.replace(Some((filter, max_var)));
+                return Ref::leak(self.ss_filter.borrow()).as_ref();
+            } else {
+                self.ss_filter.replace(Some((
+                    Implicit3DCache {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                        d: 0.0,
+                    },
+                    0.0,
+                )));
+                return None;
+            }
+        }
+    }
+
+    fn dynamic_filter(&self) -> Option<&Implicit3DCache<IntervalNumber>> {
+        let filter_option = Ref::leak(self.d_filter.borrow()).as_ref();
+        if let Some(filter) = filter_option {
+            if filter.d.not_zero() {
+                return filter_option;
+            } else {
+                return None;
+            }
+        } else {
+            let (filter, _) = tpi_lambda::<'_, false, _, _>(
+                self.v1.data[0].into(),
+                self.v1.data[1].into(),
+                self.v1.data[2].into(),
+                self.v2.data[0].into(),
+                self.v2.data[1].into(),
+                self.v2.data[2].into(),
+                self.v3.data[0].into(),
+                self.v3.data[1].into(),
+                self.v3.data[2].into(),
+                self.w1.data[0].into(),
+                self.w1.data[1].into(),
+                self.w1.data[2].into(),
+                self.w2.data[0].into(),
+                self.w2.data[1].into(),
+                self.w2.data[2].into(),
+                self.w3.data[0].into(),
+                self.w3.data[1].into(),
+                self.w3.data[2].into(),
+                self.u1.data[0].into(),
+                self.u1.data[1].into(),
+                self.u1.data[2].into(),
+                self.u2.data[0].into(),
+                self.u2.data[1].into(),
+                self.u2.data[2].into(),
+                self.u3.data[0].into(),
+                self.u3.data[1].into(),
+                self.u3.data[2].into(),
+                dummy_asb_max,
+                &self.bump,
+            );
+            self.d_filter.replace(Some(filter));
+            if self.d_filter.borrow().as_ref().unwrap().d.not_zero() {
+                return Ref::leak(self.d_filter.borrow()).as_ref();
+            } else {
+                return None;
+            }
+        }
+    }
+
+    fn exact(&self) -> Option<&Implicit3DCache<ExpansionNum<'b>>> {
+        let exact_option = Ref::leak(self.exact.borrow()).as_ref();
+        if let Some(exact) = exact_option {
+            if exact.d.not_zero() {
+                return exact_option;
+            } else {
+                return None;
+            }
+        } else {
+            let (exact, _) = tpi_lambda::<'_, false, _, _>(
+                vec![in self.bump; self.v1.data[0]].into(),
+                vec![in self.bump; self.v1.data[1]].into(),
+                vec![in self.bump; self.v1.data[2]].into(),
+                vec![in self.bump; self.v2.data[0]].into(),
+                vec![in self.bump; self.v2.data[1]].into(),
+                vec![in self.bump; self.v2.data[2]].into(),
+                vec![in self.bump; self.v3.data[0]].into(),
+                vec![in self.bump; self.v3.data[1]].into(),
+                vec![in self.bump; self.v3.data[2]].into(),
+                vec![in self.bump; self.w1.data[0]].into(),
+                vec![in self.bump; self.w1.data[1]].into(),
+                vec![in self.bump; self.w1.data[2]].into(),
+                vec![in self.bump; self.w2.data[0]].into(),
+                vec![in self.bump; self.w2.data[1]].into(),
+                vec![in self.bump; self.w2.data[2]].into(),
+                vec![in self.bump; self.w3.data[0]].into(),
+                vec![in self.bump; self.w3.data[1]].into(),
+                vec![in self.bump; self.w3.data[2]].into(),
+                vec![in self.bump; self.u1.data[0]].into(),
+                vec![in self.bump; self.u1.data[1]].into(),
+                vec![in self.bump; self.u1.data[2]].into(),
+                vec![in self.bump; self.u2.data[0]].into(),
+                vec![in self.bump; self.u2.data[1]].into(),
+                vec![in self.bump; self.u2.data[2]].into(),
+                vec![in self.bump; self.u3.data[0]].into(),
+                vec![in self.bump; self.u3.data[1]].into(),
+                vec![in self.bump; self.u3.data[2]].into(),
+                dummy_asb_max,
+                &self.bump,
+            );
+            self.exact.replace(Some(exact));
+            if self.exact.borrow().as_ref().unwrap().d.not_zero() {
+                return Ref::leak(self.exact.borrow()).as_ref();
+            } else {
+                return None;
+            }
         }
     }
 }
