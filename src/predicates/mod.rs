@@ -1,7 +1,7 @@
 mod expansion_number;
 mod generic_point;
 mod interval_number;
-pub mod orient2d;
+mod orient2d;
 mod predicates;
 
 use bumpalo::collections::Vec;
@@ -10,6 +10,7 @@ use std::ops::{Add, Mul, Sub};
 pub use expansion_number::*;
 pub use generic_point::*;
 pub use interval_number::*;
+pub use orient2d::*;
 pub use predicates::*;
 
 pub enum Orientation {
