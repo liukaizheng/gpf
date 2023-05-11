@@ -1,15 +1,9 @@
 use bumpalo::{collections::Vec, vec, Bump};
 
 use super::{
-    abs_max, double_to_sign, dummy_asb_max, predicates, sign_reverse, ExplicitPoint3D, GenericNum,
+    abs_max, double_to_sign, dummy_abs_max, predicates, sign_reverse, ExplicitPoint3D, GenericNum,
     ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI, Orientation, Point3D,
 };
-
-/// Computes the orientation of the 3D points `pa`, `pb`, `pc` and `pd`.
-/// If `pd` is above the plane defined by `pa`, `pb` and `pc`, then the
-/// orientation is negative. If `pd` is below the plane, then the
-/// orientation is positive. If `pd` is coplanar with `pa`, `pb` and `pc`,
-/// then the orientation is zero.
 
 /// Compute the orientation of the 3D points `pa`, `pb` and `pc`.
 /// If `pc` is above the line defined by `pa` and `pb`, then the
@@ -594,7 +588,7 @@ fn orient2d_iee<'a, 'b: 'a, const AXIS: u32, IP: ImplicitPoint3D<'b>, F: FnOnce(
                 p2.data[1].into(),
                 p3.data[0].into(),
                 p3.data[1].into(),
-                dummy_asb_max,
+                dummy_abs_max,
                 bump,
             )
         } else if AXIS == 1 {
@@ -606,7 +600,7 @@ fn orient2d_iee<'a, 'b: 'a, const AXIS: u32, IP: ImplicitPoint3D<'b>, F: FnOnce(
                 p2.data[0].into(),
                 p3.data[2].into(),
                 p3.data[0].into(),
-                dummy_asb_max,
+                dummy_abs_max,
                 bump,
             )
         } else {
@@ -618,7 +612,7 @@ fn orient2d_iee<'a, 'b: 'a, const AXIS: u32, IP: ImplicitPoint3D<'b>, F: FnOnce(
                 p2.data[2].into(),
                 p3.data[1].into(),
                 p3.data[2].into(),
-                dummy_asb_max,
+                dummy_abs_max,
                 bump,
             )
         };
@@ -641,7 +635,7 @@ fn orient2d_iee<'a, 'b: 'a, const AXIS: u32, IP: ImplicitPoint3D<'b>, F: FnOnce(
                 vec![in bump; p2.data[1]].into(),
                 vec![in bump; p3.data[0]].into(),
                 vec![in bump; p3.data[1]].into(),
-                dummy_asb_max,
+                dummy_abs_max,
                 bump,
             )
         } else if AXIS == 1 {
@@ -653,7 +647,7 @@ fn orient2d_iee<'a, 'b: 'a, const AXIS: u32, IP: ImplicitPoint3D<'b>, F: FnOnce(
                 vec![in bump; p2.data[0]].into(),
                 vec![in bump; p3.data[2]].into(),
                 vec![in bump; p3.data[0]].into(),
-                dummy_asb_max,
+                dummy_abs_max,
                 bump,
             )
         } else {
@@ -665,7 +659,7 @@ fn orient2d_iee<'a, 'b: 'a, const AXIS: u32, IP: ImplicitPoint3D<'b>, F: FnOnce(
                 vec![in bump; p2.data[2]].into(),
                 vec![in bump; p3.data[1]].into(),
                 vec![in bump; p3.data[2]].into(),
-                dummy_asb_max,
+                dummy_abs_max,
                 bump,
             )
         };
@@ -831,7 +825,7 @@ fn orient2d_iie<
                 &p2_dynamic.d,
                 p3.data[0].into(),
                 p3.data[1].into(),
-                dummy_asb_max,
+                dummy_abs_max,
                 bump,
             )
         } else if AXIS == 1 {
@@ -844,7 +838,7 @@ fn orient2d_iie<
                 &p2_dynamic.d,
                 p3.data[2].into(),
                 p3.data[0].into(),
-                dummy_asb_max,
+                dummy_abs_max,
                 bump,
             )
         } else {
@@ -857,7 +851,7 @@ fn orient2d_iie<
                 &p2_dynamic.d,
                 p3.data[1].into(),
                 p3.data[2].into(),
-                dummy_asb_max,
+                dummy_abs_max,
                 bump,
             )
         };
@@ -881,7 +875,7 @@ fn orient2d_iie<
                 &p2_exact.d,
                 vec![in bump; p3.data[0]].into(),
                 vec![in bump; p3.data[1]].into(),
-                dummy_asb_max,
+                dummy_abs_max,
                 bump,
             )
         } else if AXIS == 1 {
@@ -894,7 +888,7 @@ fn orient2d_iie<
                 &p2_exact.d,
                 vec![in bump; p3.data[2]].into(),
                 vec![in bump; p3.data[0]].into(),
-                dummy_asb_max,
+                dummy_abs_max,
                 bump,
             )
         } else {
@@ -907,7 +901,7 @@ fn orient2d_iie<
                 &p2_exact.d,
                 vec![in bump; p3.data[1]].into(),
                 vec![in bump; p3.data[2]].into(),
-                dummy_asb_max,
+                dummy_abs_max,
                 bump,
             )
         };

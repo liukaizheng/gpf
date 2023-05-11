@@ -2,6 +2,7 @@ mod expansion_number;
 mod generic_point;
 mod interval_number;
 mod orient2d;
+pub mod orient3d;
 mod predicates;
 
 use bumpalo::collections::Vec;
@@ -37,7 +38,7 @@ fn abs_max(vec: Vec<'_, f64>) -> Option<f64> {
 }
 
 #[inline(always)]
-fn dummy_asb_max<T>(_: Vec<'_, T>) -> Option<T> {
+fn dummy_abs_max<T>(_: Vec<'_, T>) -> Option<T> {
     None
 }
 
