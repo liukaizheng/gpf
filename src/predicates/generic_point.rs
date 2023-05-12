@@ -5,7 +5,7 @@ use std::{
 
 use bumpalo::{collections::Vec, vec, Bump};
 
-use super::{abs_max, dummy_asb_max, ExpansionNum, GenericNum, IntervalNumber};
+use super::{abs_max, dummy_abs_max, ExpansionNum, GenericNum, IntervalNumber};
 
 pub struct ExplicitPoint3D {
     pub data: [f64; 3],
@@ -226,7 +226,7 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
                 self.t.data[0].into(),
                 self.t.data[1].into(),
                 self.t.data[2].into(),
-                dummy_asb_max,
+                dummy_abs_max,
                 &self.bump,
             );
             self.d_filter.replace(Some(filter));
@@ -263,7 +263,7 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
                 vec![in self.bump; self.t.data[0]].into(),
                 vec![in self.bump; self.t.data[1]].into(),
                 vec![in self.bump; self.t.data[2]].into(),
-                dummy_asb_max,
+                dummy_abs_max,
                 &self.bump,
             );
             self.exact.replace(Some(exact));
@@ -590,7 +590,7 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
                 self.u3.data[0].into(),
                 self.u3.data[1].into(),
                 self.u3.data[2].into(),
-                dummy_asb_max,
+                dummy_abs_max,
                 &self.bump,
             );
             self.d_filter.replace(Some(filter));
@@ -639,7 +639,7 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
                 vec![in self.bump; self.u3.data[0]].into(),
                 vec![in self.bump; self.u3.data[1]].into(),
                 vec![in self.bump; self.u3.data[2]].into(),
-                dummy_asb_max,
+                dummy_abs_max,
                 &self.bump,
             );
             self.exact.replace(Some(exact));

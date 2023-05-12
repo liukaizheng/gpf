@@ -5,5 +5,6 @@
 
 pub mod mesh;
 pub mod predicates;
+pub mod triangle;
 
 const INVALID_IND: usize = usize::MAX;
