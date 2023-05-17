@@ -9,4 +9,4 @@ edition = "2021"
 bumpalo = {version = "3.12.1", features = ["collections"]}
 
 [dev-dependencies]
-rand = "0.8.5"
+rand = {version = "0.8.5", features = ["small_rng"]}
