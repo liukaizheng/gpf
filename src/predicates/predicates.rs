@@ -768,6 +768,29 @@ pub fn orient3d(pa: &[f64], pb: &[f64], pc: &[f64], pd: &[f64], bump: &Bump) -> 
     orient3d_adapt(pa, pb, pc, pd, permanent, bump)
 }
 
+pub fn orient3d_fast(pa: &[f64], pb: &[f64], pc: &[f64], pd: &[f64]) -> f64 {
+    let adx = pa[0] - pd[0];
+    let ady = pa[1] - pd[1];
+    let adz = pa[2] - pd[2];
+    let bdx = pb[0] - pd[0];
+    let bdy = pb[1] - pd[1];
+    let bdz = pb[2] - pd[2];
+    let cdx = pc[0] - pd[0];
+    let cdy = pc[1] - pd[1];
+    let cdz = pc[2] - pd[2];
+
+    let bdxcdy = bdx * cdy;
+    let cdxbdy = cdx * bdy;
+
+    let cdxady = cdx * ady;
+    let adxcdy = adx * cdy;
+
+    let adxbdy = adx * bdy;
+    let bdxady = bdx * ady;
+
+    adz * (bdxcdy - cdxbdy) + bdz * (cdxady - adxcdy) + cdz * (adxbdy - bdxady)
+}
+
 fn incircle_adapt(
     pa: &[f64],
     pb: &[f64],

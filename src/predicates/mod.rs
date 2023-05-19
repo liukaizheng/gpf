@@ -14,6 +14,7 @@ pub use interval_number::*;
 pub use orient2d::*;
 pub use predicates::*;
 
+#[derive(PartialEq, Eq)]
 pub enum Orientation {
     Positive,
     Negative,
@@ -43,7 +44,7 @@ fn dummy_abs_max<T>(_: Vec<'_, T>) -> Option<T> {
 }
 
 #[inline(always)]
-fn double_to_sign(x: f64) -> Orientation {
+pub fn double_to_sign(x: f64) -> Orientation {
     if x > 0.0 {
         Orientation::Positive
     } else if x < 0.0 {
@@ -54,7 +55,7 @@ fn double_to_sign(x: f64) -> Orientation {
 }
 
 #[inline(always)]
-fn sign_reverse(ori: Orientation) -> Orientation {
+pub fn sign_reverse(ori: Orientation) -> Orientation {
     match ori {
         Orientation::Positive => Orientation::Negative,
         Orientation::Negative => Orientation::Positive,

@@ -7,6 +7,6 @@ edition = "2021"
 
 [dependencies]
 bumpalo = {version = "3.12.1", features = ["collections"]}
+rand = {version = "0.8.5", features = ["small_rng"]}
 
 [dev-dependencies]
-rand = {version = "0.8.5", features = ["small_rng"]}

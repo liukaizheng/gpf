@@ -3,6 +3,7 @@
 #![feature(cell_leak)]
 #![feature(trait_alias)]
 
+pub mod math;
 pub mod mesh;
 pub mod predicates;
 pub mod triangle;
