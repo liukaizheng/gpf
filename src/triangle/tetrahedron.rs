@@ -38,27 +38,27 @@ impl TriFace {
 
     #[inline(always)]
     fn eprev_self(&mut self) {
-        self.ver = eprevtbl[self.ver];
+        self.ver = EPREV_TBL[self.ver];
     }
 
     #[inline(always)]
     fn enext_self(&mut self) {
-        self.ver = enexttbl[self.ver];
+        self.ver = ENEXT_TBL[self.ver];
     }
 
     #[inline(always)]
     fn esym_self(&mut self) {
-        self.ver = esymtbl[self.ver];
+        self.ver = ESYM_TBL[self.ver];
     }
 
     #[inline(always)]
     fn eprev_esym_self(&mut self) {
-        self.ver = eprevesymtbl[self.ver];
+        self.ver = EPREV_ESYM_TBL[self.ver];
     }
 
     #[inline(always)]
     fn enext_esym_self(&mut self) {
-        self.ver = enextesymtbl[self.ver];
+        self.ver = ENEXT_ESYM_TBL[self.ver];
     }
 }
 
@@ -120,22 +120,22 @@ impl<'a, 'b: 'a> TetMesh<'a, 'b> {
 
     #[inline(always)]
     fn org(&self, f: &TriFace) -> usize {
-        self.tets[f.tet].data[orgpivot[f.ver]]
+        self.tets[f.tet].data[ORG_PIVOT[f.ver]]
     }
 
     #[inline(always)]
     fn dest(&self, f: &TriFace) -> usize {
-        self.tets[f.tet].data[destpivot[f.ver]]
+        self.tets[f.tet].data[DEST_PIVOT[f.ver]]
     }
 
     #[inline(always)]
     fn apex(&self, f: &TriFace) -> usize {
-        self.tets[f.tet].data[apexpivot[f.ver]]
+        self.tets[f.tet].data[APEX_PIVOT[f.ver]]
     }
 
     #[inline(always)]
     fn oppo(&self, f: &TriFace) -> usize {
-        self.tets[f.tet].data[oppopivot[f.ver]]
+        self.tets[f.tet].data[OPPO_PIVOT[f.ver]]
     }
 
     #[inline(always)]
@@ -168,32 +168,32 @@ impl<'a, 'b: 'a> TetMesh<'a, 'b> {
     fn bond(&mut self, t1: &TriFace, t2: &TriFace) {
         let f1 = &mut self.tets[t1.tet].nei[t1.ver & 3];
         f1.tet = t2.tet;
-        f1.ver = bondtbl[t1.ver][t2.ver];
+        f1.ver = BOND_TBL[t1.ver][t2.ver];
 
         let f2 = &mut self.tets[t2.tet].nei[t2.ver & 3];
         f2.tet = t1.tet;
-        f2.ver = bondtbl[t2.ver][t1.ver];
+        f2.ver = BOND_TBL[t2.ver][t1.ver];
     }
 
     #[inline(always)]
     fn fsym(&self, t1: &TriFace, t2: &mut TriFace) {
         let nf = &self.tets[t1.tet].nei[t1.ver & 3];
         t2.tet = nf.tet;
-        t2.ver = fsymtbl[t1.ver][nf.ver];
+        t2.ver = FSYM_TBL[t1.ver][nf.ver];
     }
 
     #[inline(always)]
     fn fsym_self(&self, t: &mut TriFace) {
         let nf = &self.tets[t.tet].nei[t.ver & 3];
         t.tet = nf.tet;
-        t.ver = fsymtbl[t.ver][nf.ver];
+        t.ver = FSYM_TBL[t.ver][nf.ver];
     }
 
     #[inline(always)]
     fn fnext_self(&self, t: &mut TriFace) {
-        let nf = &self.tets[t.tet].nei[facepivot1[t.ver]];
+        let nf = &self.tets[t.tet].nei[FACE_PIVOT1[t.ver]];
         t.tet = nf.tet;
-        t.ver = facepivot2[t.ver][nf.ver];
+        t.ver = FACE_PIVOT2[t.ver][nf.ver];
     }
 
     #[inline(always)]
@@ -359,56 +359,56 @@ const fn trailing_set_bits_mod3() -> [usize; 8] {
     tsb_1mod3
 }
 
-const enexttbl: [usize; 12] = enext_table();
-const eprevtbl: [usize; 12] = eprev_table();
-const esymtbl: [usize; 12] = [9, 6, 11, 4, 3, 7, 1, 5, 10, 0, 8, 2];
-const enextesymtbl: [usize; 12] = enext_esym_table(&esymtbl, &enexttbl);
-const eprevesymtbl: [usize; 12] = eprev_esym_table(&esymtbl, &eprevtbl);
-const bondtbl: [[usize; 12]; 12] = bond_table();
-const fsymtbl: [[usize; 12]; 12] = fsym_table();
-const facepivot1: [usize; 12] = face_pivot1(&esymtbl);
-const facepivot2: [[usize; 12]; 12] = face_pivot2(&fsymtbl, &esymtbl);
-const orgpivot: [usize; 12] = [3, 3, 1, 1, 2, 0, 0, 2, 1, 2, 3, 0];
-const destpivot: [usize; 12] = [2, 0, 0, 2, 1, 2, 3, 0, 3, 3, 1, 1];
-const apexpivot: [usize; 12] = [1, 2, 3, 0, 3, 3, 1, 1, 2, 0, 0, 2];
-const oppopivot: [usize; 12] = [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3];
-const vpivot: [usize; 4] = [11, 8, 9, 10];
-const transgc: [[[usize; 8]; 3]; 8] = gray_code();
-const tsb1mod3: [usize; 8] = trailing_set_bits_mod3();
+const ENEXT_TBL: [usize; 12] = enext_table();
+const EPREV_TBL: [usize; 12] = eprev_table();
+const ESYM_TBL: [usize; 12] = [9, 6, 11, 4, 3, 7, 1, 5, 10, 0, 8, 2];
+const ENEXT_ESYM_TBL: [usize; 12] = enext_esym_table(&ESYM_TBL, &ENEXT_TBL);
+const EPREV_ESYM_TBL: [usize; 12] = eprev_esym_table(&ESYM_TBL, &EPREV_TBL);
+const BOND_TBL: [[usize; 12]; 12] = bond_table();
+const FSYM_TBL: [[usize; 12]; 12] = fsym_table();
+const FACE_PIVOT1: [usize; 12] = face_pivot1(&ESYM_TBL);
+const FACE_PIVOT2: [[usize; 12]; 12] = face_pivot2(&FSYM_TBL, &ESYM_TBL);
+const ORG_PIVOT: [usize; 12] = [3, 3, 1, 1, 2, 0, 0, 2, 1, 2, 3, 0];
+const DEST_PIVOT: [usize; 12] = [2, 0, 0, 2, 1, 2, 3, 0, 3, 3, 1, 1];
+const APEX_PIVOT: [usize; 12] = [1, 2, 3, 0, 3, 3, 1, 1, 2, 0, 0, 2];
+const OPPO_PIVOT: [usize; 12] = [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3];
+const TRANS_GC: [[[usize; 8]; 3]; 8] = gray_code();
+const TSB1_MOD3: [usize; 8] = trailing_set_bits_mod3();
+const VPIVOT: [usize; 4] = [11, 8, 9, 10];
 const epivot: [usize; 12] = [4, 5, 2, 11, 4, 5, 2, 11, 4, 5, 2, 11];
 
 /// prev edge
 #[inline(always)]
 fn eprev(t1: &TriFace, t2: &mut TriFace) {
     t2.tet = t1.tet;
-    t2.ver = eprevtbl[t1.ver];
+    t2.ver = EPREV_TBL[t1.ver];
 }
 
 /// next edge
 fn enext(t1: &TriFace, t2: &mut TriFace) {
     t2.tet = t1.tet;
-    t2.ver = enexttbl[t1.ver];
+    t2.ver = ENEXT_TBL[t1.ver];
 }
 
 /// symmetric edge
 #[inline(always)]
 fn esym(t1: &TriFace, t2: &mut TriFace) {
     t2.tet = t1.tet;
-    t2.ver = esymtbl[t1.ver];
+    t2.ver = ESYM_TBL[t1.ver];
 }
 
 /// prev sym edge
 #[inline(always)]
 fn eprev_esym(t1: &TriFace, t2: &mut TriFace) {
     t2.tet = t1.tet;
-    t2.ver = eprevesymtbl[t1.ver];
+    t2.ver = EPREV_ESYM_TBL[t1.ver];
 }
 
 /// next sym edge
 #[inline(always)]
 fn enext_esym(t1: &TriFace, t2: &mut TriFace) {
     t2.tet = t1.tet;
-    t2.ver = enextesymtbl[t1.ver];
+    t2.ver = ENEXT_ESYM_TBL[t1.ver];
 }
 
 #[inline(always)]
@@ -492,18 +492,18 @@ fn hilbert_sort(
     d: usize,
     depth: usize,
 ) {
-    let mid = hilbert_split(points, indices, transgc[e][d][3], transgc[e][d][4], bbox);
+    let mid = hilbert_split(points, indices, TRANS_GC[e][d][3], TRANS_GC[e][d][4], bbox);
     let (left, right) = indices.split_at_mut(mid);
 
-    let l_mid = hilbert_split(points, left, transgc[e][d][1], transgc[e][d][2], bbox);
+    let l_mid = hilbert_split(points, left, TRANS_GC[e][d][1], TRANS_GC[e][d][2], bbox);
     let (l_left, l_right) = left.split_at_mut(l_mid);
-    let ll_mid = hilbert_split(points, l_left, transgc[e][d][0], transgc[e][d][1], bbox);
-    let rl_mid = hilbert_split(points, l_right, transgc[e][d][2], transgc[e][d][3], bbox);
+    let ll_mid = hilbert_split(points, l_left, TRANS_GC[e][d][0], TRANS_GC[e][d][1], bbox);
+    let rl_mid = hilbert_split(points, l_right, TRANS_GC[e][d][2], TRANS_GC[e][d][3], bbox);
 
-    let r_mid = hilbert_split(points, right, transgc[e][d][5], transgc[e][d][6], bbox);
+    let r_mid = hilbert_split(points, right, TRANS_GC[e][d][5], TRANS_GC[e][d][6], bbox);
     let (r_left, r_right) = right.split_at_mut(r_mid);
-    let lr_mid = hilbert_split(points, r_left, transgc[e][d][4], transgc[e][d][5], bbox);
-    let rr_mid = hilbert_split(points, r_right, transgc[e][d][6], transgc[e][d][7], bbox);
+    let lr_mid = hilbert_split(points, r_left, TRANS_GC[e][d][4], TRANS_GC[e][d][5], bbox);
+    let rr_mid = hilbert_split(points, r_right, TRANS_GC[e][d][6], TRANS_GC[e][d][7], bbox);
 
     if option.hilbert_order > 0 {
         if depth + 1 == option.hilbert_order {
@@ -538,15 +538,15 @@ fn hilbert_sort(
                 d_w = 0;
             } else {
                 d_w = if (w % 2) == 0 {
-                    tsb1mod3[w - 1]
+                    TSB1_MOD3[w - 1]
                 } else {
-                    tsb1mod3[w]
+                    TSB1_MOD3[w]
                 };
             }
             let di = (d + d_w + 1) % N;
             // Calculate the bounding box of the sub-box.
             let mut sbox = [0.0; 6];
-            if (transgc[e][d][w] & 1) != 0 {
+            if (TRANS_GC[e][d][w] & 1) != 0 {
                 // x-axis
                 sbox[0] = (bbox[0] + bbox[3]) * 0.5;
                 sbox[3] = bbox[3];
@@ -554,7 +554,7 @@ fn hilbert_sort(
                 sbox[0] = bbox[0];
                 sbox[3] = (bbox[0] + bbox[3]) * 0.5;
             }
-            if (transgc[e][d][w] & 2) != 0 {
+            if (TRANS_GC[e][d][w] & 2) != 0 {
                 // y-axis
                 sbox[1] = (bbox[1] + bbox[4]) * 0.5;
                 sbox[4] = bbox[4];
@@ -562,7 +562,7 @@ fn hilbert_sort(
                 sbox[1] = bbox[1];
                 sbox[4] = (bbox[1] + bbox[4]) * 0.5;
             }
-            if (transgc[e][d][w] & 4) != 0 {
+            if (TRANS_GC[e][d][w] & 4) != 0 {
                 // z-axis
                 sbox[2] = (bbox[2] + bbox[5]) * 0.5;
                 sbox[5] = bbox[5];
@@ -902,12 +902,12 @@ fn insert_vertex_bw(
         idx += 1;
     }
 
-    const row_v08_tbl: [usize; 12] = [8, 9, 10, 11, 0, 1, 2, 3, 4, 5, 6, 7];
-    const row_v11_tbl: [usize; 12] = [8, 9, 10, 11, 0, 1, 2, 3, 4, 5, 6, 7];
-    const col_v01_tbl: [usize; 12] = [1, 1, 1, 1, 5, 5, 5, 5, 9, 9, 9, 9];
-    const col_v02_tbl: [usize; 12] = [2, 2, 2, 2, 6, 6, 6, 6, 10, 10, 10, 10];
-    const col_v08_tbl: [usize; 12] = [8, 8, 8, 8, 0, 0, 0, 0, 4, 4, 4, 4];
-    const col_v11_tbl: [usize; 12] = [11, 11, 11, 11, 3, 3, 3, 3, 7, 7, 7, 7];
+    const ROW_V08_TBL: [usize; 12] = [8, 9, 10, 11, 0, 1, 2, 3, 4, 5, 6, 7];
+    const ROW_V11_TBL: [usize; 12] = [8, 9, 10, 11, 0, 1, 2, 3, 4, 5, 6, 7];
+    const COL_V01_TBL: [usize; 12] = [1, 1, 1, 1, 5, 5, 5, 5, 9, 9, 9, 9];
+    const COL_V02_TBL: [usize; 12] = [2, 2, 2, 2, 6, 6, 6, 6, 10, 10, 10, 10];
+    const COL_V08_TBL: [usize; 12] = [8, 8, 8, 8, 0, 0, 0, 0, 4, 4, 4, 4];
+    const COL_V11_TBL: [usize; 12] = [11, 11, 11, 11, 3, 3, 3, 3, 7, 7, 7, 7];
 
     let f_out = cave_bdry_list.len();
     let v_out = (f_out + 4) >> 1;
@@ -936,7 +936,7 @@ fn insert_vertex_bw(
             make_tet(tets, &mut newtet, verts[1], verts[0], pid, verts[2]);
             tets.tets[newtet.tet].nei[2] = neightet.clone();
             tets.tets[neightet.tet].nei[neightet.ver & 3]
-                .set(newtet.tet, col_v02_tbl[neightet.ver]);
+                .set(newtet.tet, COL_V02_TBL[neightet.ver]);
 
             bw_face_map.insert((verts[0], verts[1]), TriFace::new(newtet.tet, 11));
             bw_face_map.insert((verts[1], verts[2]), TriFace::new(newtet.tet, 1));
@@ -956,9 +956,9 @@ fn insert_vertex_bw(
                 let j = tets.org(&neightet);
                 let k = tets.dest(&neightet);
                 let neineitet = bw_face_map.get(&(j, k)).unwrap();
-                tets.tets[neightet.tet].nei[3].set(neineitet.tet, row_v11_tbl[neineitet.ver]);
+                tets.tets[neightet.tet].nei[3].set(neineitet.tet, ROW_V11_TBL[neineitet.ver]);
                 tets.tets[neineitet.tet].nei[neineitet.ver & 3]
-                    .set(neightet.tet, col_v11_tbl[neineitet.ver]);
+                    .set(neightet.tet, COL_V11_TBL[neineitet.ver]);
             }
             if tets.tets[neightet.tet].nei[1].tet == INVALID_IND {
                 neightet.ver = 1;
@@ -967,16 +967,16 @@ fn insert_vertex_bw(
                 let neineitet = bw_face_map.get(&(j, k)).unwrap();
                 tets.tets[neightet.tet].nei[1].set(neineitet.tet, neineitet.ver);
                 tets.tets[neineitet.tet].nei[neineitet.ver & 3]
-                    .set(neightet.tet, col_v01_tbl[neineitet.ver]);
+                    .set(neightet.tet, COL_V01_TBL[neineitet.ver]);
             }
             if tets.tets[neightet.tet].nei[0].tet == INVALID_IND {
                 neightet.ver = 8;
                 let j = tets.org(&neightet);
                 let k = tets.dest(&neightet);
                 let neineitet = bw_face_map.get(&(j, k)).unwrap();
-                tets.tets[neightet.tet].nei[0].set(neineitet.tet, row_v08_tbl[neineitet.ver]);
+                tets.tets[neightet.tet].nei[0].set(neineitet.tet, ROW_V08_TBL[neineitet.ver]);
                 tets.tets[neineitet.tet].nei[neineitet.ver & 3]
-                    .set(neightet.tet, col_v08_tbl[neineitet.ver]);
+                    .set(neightet.tet, COL_V08_TBL[neineitet.ver]);
             }
         }
     } else {
@@ -1000,7 +1000,7 @@ fn insert_vertex_bw(
 
             tets.tets[newtet.tet].nei[2].set(neightet.tet, neightet.ver);
             tets.tets[neightet.tet].nei[neightet.ver & 3]
-                .set(newtet.tet, col_v02_tbl[neightet.ver]);
+                .set(newtet.tet, COL_V02_TBL[neightet.ver]);
         }
 
         // randomly pick a new tet
@@ -1057,7 +1057,7 @@ pub fn tetrahedralize<'a, 'b: 'a>(points: &'a [f64], bump: &'b Bump) -> TetMesh<
     ];
     let mut mesh = TetMesh::new(points, bump);
     let mut sorted_pt_inds = Vec::from_iter_in(0..mesh.n_points, bump);
-    // sorted_pt_inds.shuffle(&mut rand::thread_rng());
+    sorted_pt_inds.shuffle(&mut rand::thread_rng());
     const SORT_OPTION: SortOption = SortOption {
         threshold: 64,
         hilbert_order: 52,
@@ -1168,7 +1168,7 @@ pub fn tetrahedralize<'a, 'b: 'a>(points: &'a [f64], bump: &'b Bump) -> TetMesh<
         }
     }
 
-    let mut count =  0;
+    let mut count = 0;
     let mut tet_map = vec![in bump; 0; mesh.tets.len()];
     for i in 0..tet_map.len() {
         let t = &mesh.tets[i];
