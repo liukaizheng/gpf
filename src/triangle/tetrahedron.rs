@@ -62,7 +62,7 @@ impl TriFace {
     }
 }
 
-struct Tet {
+pub struct Tet {
     data: [usize; 4],
     nei: [TriFace; 4],
     mask: usize,
@@ -103,8 +103,8 @@ impl Tet {
 pub struct TetMesh<'a, 'b: 'a> {
     points: &'a [f64],
     n_points: usize,
-    tets: Vec<'b, Tet>,
-    p2t: Vec<'b, usize>,
+    pub tets: Vec<'b, Tet>,
+    pub p2t: Vec<'b, usize>,
 }
 
 impl<'a, 'b: 'a> TetMesh<'a, 'b> {
@@ -176,7 +176,7 @@ impl<'a, 'b: 'a> TetMesh<'a, 'b> {
     }
 
     #[inline(always)]
-    fn fsym(&self, t1: &TriFace, t2: &TriFace) {
+    fn fsym(&self, t1: &TriFace, t2: &mut TriFace) {
         let nf = &self.tets[t1.tet].nei[t1.ver & 3];
         t2.tet = nf.tet;
         t2.ver = fsymtbl[t1.ver][nf.ver];
@@ -311,7 +311,7 @@ const fn gray_code() -> [[[usize; 8]; 3]; 8] {
     let mut gc = [0usize; 8];
     const N1: usize = 3;
     const N2: usize = 8;
-    const mask: usize = 7;
+    const MASK: usize = 7;
 
     let mut i = 0;
     while i < N2 {
@@ -328,7 +328,7 @@ const fn gray_code() -> [[[usize; 8]; 3]; 8] {
             i = 0;
             while i < N2 {
                 let k = gc[i] * (travel_bit << 1);
-                let g = (k | (k / N2)) & mask;
+                let g = (k | (k / N2)) & MASK;
                 trans_gc[e][d][i] = g ^ e;
                 i += 1;
             }
@@ -827,7 +827,7 @@ fn insert_vertex_bw(
     tets: &mut TetMesh,
     pid: usize,
     searchtet: &mut TriFace,
-    bw_faces: &mut [TriFace],
+    bw_face_map: &mut HashMap<(usize, usize), TriFace>,
 ) -> bool {
     let bump = tets.tets.bump();
     let mut cave_oldtet_list = Vec::new_in(bump);
@@ -868,7 +868,6 @@ fn insert_vertex_bw(
         for ver in 0..4 {
             neightid = tets.tets[cavetid].nei[ver].tet;
             if tets.infected(neightid) {
-                idx += 1;
                 continue;
             }
             let mut enqflag = false;
@@ -913,15 +912,13 @@ fn insert_vertex_bw(
     let f_out = cave_bdry_list.len();
     let v_out = (f_out + 4) >> 1;
 
-    let mut bw_face_map = HashMap::new();
+    bw_face_map.clear();
 
-    let mut local_vcount = 0;
     if v_out < 1024 {
         // pid to local vertex id
-        let mut pmap = HashMap::new();
         for oldtet in &mut cave_bdry_list {
             // Get the tet outside the cavity.
-            let neightet = &tets.tets[oldtet.tet].nei[oldtet.ver];
+            let mut neightet = tets.tets[oldtet.tet].nei[oldtet.ver].clone();
             tets.unmark_test(neightet.tet);
 
             if tets.is_hull_tet(oldtet.tet) {
@@ -930,67 +927,119 @@ fn insert_vertex_bw(
             }
 
             // Create a new tet in the cavity.
-            let verts = [tets.dest(neightet), tets.org(neightet), tets.apex(neightet)];
+            let verts = [
+                tets.dest(&neightet),
+                tets.org(&neightet),
+                tets.apex(&neightet),
+            ];
             let mut newtet = TriFace::default();
             make_tet(tets, &mut newtet, verts[1], verts[0], pid, verts[2]);
             tets.tets[newtet.tet].nei[2] = neightet.clone();
             tets.tets[neightet.tet].nei[neightet.ver & 3]
                 .set(newtet.tet, col_v02_tbl[neightet.ver]);
 
-            let mut sidx = [0, 0, 0];
-            // Fill the adjacency matrix, and count v_out.
-            let mut sidx = Vec::from_iter_in(
-                verts.iter().map(|&vid| {
-                    let tid = tets.p2t[vid];
-                    if tets.tets[tid].data[2] != pid {
-                        pmap.insert(vid, local_vcount);
-                        local_vcount += 1;
-                        tets.p2t[vid] = newtet.tet;
-                    }
-                    *pmap.get(&vid).unwrap()
-                }),
-                bump,
-            );
+            bw_face_map.insert((verts[0], verts[1]), TriFace::new(newtet.tet, 11));
+            bw_face_map.insert((verts[1], verts[2]), TriFace::new(newtet.tet, 1));
+            bw_face_map.insert((verts[2], verts[0]), TriFace::new(newtet.tet, 8));
 
-            bw_face_map.insert((sidx[1], sidx[0]), TriFace::new(newtet.tet, 11));
-            bw_face_map.insert((sidx[2], sidx[1]), TriFace::new(newtet.tet, 1));
-            bw_face_map.insert((sidx[0], sidx[2]), TriFace::new(newtet.tet, 8));
-
-            *oldtet = newtet.clone();
+            *oldtet = newtet;
         }
 
         // randomly pick a new tet
-        // searchtet = cave_bdry_list[f_out >> 1];
-        // tets.p2t[pid] = searchtet.tet;
+        *searchtet = cave_bdry_list[f_out >> 1].clone();
+        tets.p2t[pid] = searchtet.tet;
 
-        // for (uint32_t i = 0; i < f_out; i++) {
-        //     TriFace neightet = cave_bdry_list[i];
-        //     if (tets.tets[neightet.tet].nei[3].tet == INVALID) {
-        //         neightet.ver = 11;
-        //         const uint32_t j = pmap[tets.org(neightet)];
-        //         const uint32_t k = pmap[tets.dest(neightet)];
-        //         const TriFace& neineitet = tmp_bw_faces[(k << shiftbits) | j];
-        //         tets.tets[neightet.tet].nei[3].set(neineitet.tet, row_v11_tbl[neineitet.ver]);
-        //         tets.tets[neineitet.tet].nei[neineitet.ver & 3].set(neightet.tet, col_v11_tbl[neineitet.ver]);
-        //     }
-        //     if (tets.tets[neightet.tet].nei[1].tet == INVALID) {
-        //         neightet.ver = 1;
-        //         const uint32_t j = pmap[tets.org(neightet)];
-        //         const uint32_t k = pmap[tets.dest(neightet)];
-        //         const TriFace& neineitet = tmp_bw_faces[(k << shiftbits) | j];
-        //         tets.tets[neightet.tet].nei[1].set(neineitet.tet, neineitet.ver);
-        //         tets.tets[neineitet.tet].nei[neineitet.ver & 3].set(neightet.tet, col_v01_tbl[neineitet.ver]);
-        //     }
-        //     if (tets.tets[neightet.tet].nei[0].tet == INVALID) {
-        //         neightet.ver = 8;
-        //         const uint32_t j = pmap[tets.org(neightet)];
-        //         const uint32_t k = pmap[tets.dest(neightet)];
-        //         const TriFace& neineitet = tmp_bw_faces[(k << shiftbits) | j];
-        //         tets.tets[neightet.tet].nei[0].set(neineitet.tet, row_v08_tbl[neineitet.ver]);
-        //         tets.tets[neineitet.tet].nei[neineitet.ver & 3].set(neightet.tet, col_v08_tbl[neineitet.ver]);
-        //     }
-        // }
+        for mut neightet in cave_bdry_list {
+            // TriFace neightet = cave_bdry_list[i];
+            if tets.tets[neightet.tet].nei[3].tet == INVALID_IND {
+                neightet.ver = 11;
+                let j = tets.org(&neightet);
+                let k = tets.dest(&neightet);
+                let neineitet = bw_face_map.get(&(j, k)).unwrap();
+                tets.tets[neightet.tet].nei[3].set(neineitet.tet, row_v11_tbl[neineitet.ver]);
+                tets.tets[neineitet.tet].nei[neineitet.ver & 3]
+                    .set(neightet.tet, col_v11_tbl[neineitet.ver]);
+            }
+            if tets.tets[neightet.tet].nei[1].tet == INVALID_IND {
+                neightet.ver = 1;
+                let j = tets.org(&neightet);
+                let k = tets.dest(&neightet);
+                let neineitet = bw_face_map.get(&(j, k)).unwrap();
+                tets.tets[neightet.tet].nei[1].set(neineitet.tet, neineitet.ver);
+                tets.tets[neineitet.tet].nei[neineitet.ver & 3]
+                    .set(neightet.tet, col_v01_tbl[neineitet.ver]);
+            }
+            if tets.tets[neightet.tet].nei[0].tet == INVALID_IND {
+                neightet.ver = 8;
+                let j = tets.org(&neightet);
+                let k = tets.dest(&neightet);
+                let neineitet = bw_face_map.get(&(j, k)).unwrap();
+                tets.tets[neightet.tet].nei[0].set(neineitet.tet, row_v08_tbl[neineitet.ver]);
+                tets.tets[neineitet.tet].nei[neineitet.ver & 3]
+                    .set(neightet.tet, col_v08_tbl[neineitet.ver]);
+            }
+        }
+    } else {
+        // Fill a very large cavity with original neighboring searching method.
+        for oldtet in &cave_bdry_list {
+            let mut neightet = tets.tets[oldtet.tet].nei[oldtet.ver].clone();
+
+            tets.unmark_test(neightet.tet);
+            if tets.is_hull_tet(oldtet.tet) {
+                // neightet.tet may be also a hull tet (=> oldtet is a hull edge).
+                neightet.ver = epivot[neightet.ver];
+            }
+
+            let v = [
+                tets.dest(&neightet),
+                tets.org(&neightet),
+                tets.apex(&neightet),
+            ];
+            let mut newtet = TriFace::default();
+            make_tet(tets, &mut newtet, v[1], v[0], pid, v[2]);
+
+            tets.tets[newtet.tet].nei[2].set(neightet.tet, neightet.ver);
+            tets.tets[neightet.tet].nei[neightet.ver & 3]
+                .set(newtet.tet, col_v02_tbl[neightet.ver]);
+        }
+
+        // randomly pick a new tet
+        *searchtet = cave_bdry_list[f_out >> 1].clone();
+        tets.p2t[pid] = searchtet.tet;
+
+        for mut oldtet in cave_bdry_list {
+            let mut neightet = TriFace::default();
+            let mut newtet = TriFace::default();
+            tets.fsym(&oldtet, &mut neightet);
+            tets.fsym(&neightet, &mut newtet);
+            // Oldtet and newtet must be at the same directed edge.
+            // Connect the three other faces of this newtet.
+            for _ in 0..3 {
+                esym(&newtet, &mut neightet); // Go to the face.
+                if tets.tets[neightet.tet].nei[neightet.ver & 3].tet == INVALID_IND {
+                    // Find the adjacent face of this newtet.
+                    let mut spintet = oldtet.clone();
+                    loop {
+                        tets.fnext_self(&mut spintet);
+                        if !tets.infected(spintet.tet) {
+                            break;
+                        }
+                    }
+                    let mut neineitet = TriFace::default();
+                    tets.fsym(&spintet, &mut neineitet);
+                    neineitet.esym_self();
+                    tets.bond(&neightet, &neineitet);
+                }
+                newtet.enext_self();
+                oldtet.enext_self();
+            }
+        }
     }
+
+    for tid in cave_oldtet_list {
+        tets.tets[tid].mask = !0;
+    }
+
     return true;
 }
 
@@ -1008,7 +1057,7 @@ pub fn tetrahedralize<'a, 'b: 'a>(points: &'a [f64], bump: &'b Bump) -> TetMesh<
     ];
     let mut mesh = TetMesh::new(points, bump);
     let mut sorted_pt_inds = Vec::from_iter_in(0..mesh.n_points, bump);
-    sorted_pt_inds.shuffle(&mut rand::thread_rng());
+    // sorted_pt_inds.shuffle(&mut rand::thread_rng());
     const SORT_OPTION: SortOption = SortOption {
         threshold: 64,
         hilbert_order: 52,
@@ -1107,6 +1156,43 @@ pub fn tetrahedralize<'a, 'b: 'a>(points: &'a [f64], bump: &'b Bump) -> TetMesh<
         sorted_pt_inds[2],
         sorted_pt_inds[3],
     );
+    let mut bw_face_map = HashMap::new();
+    for i in 4..mesh.n_points {
+        if !insert_vertex_bw(
+            &mut mesh,
+            sorted_pt_inds[i],
+            &mut search_tet,
+            &mut bw_face_map,
+        ) {
+            break;
+        }
+    }
+
+    let mut count =  0;
+    let mut tet_map = vec![in bump; 0; mesh.tets.len()];
+    for i in 0..tet_map.len() {
+        let t = &mesh.tets[i];
+        if t.mask != !0 {
+            tet_map[i] = count;
+            count += 1;
+        }
+    }
+
+    mesh.tets.retain(|t| t.mask != !0);
+
+    // update neighbors
+    for tet in &mut mesh.tets {
+        for nei in &mut tet.nei {
+            nei.tet = tet_map[nei.tet];
+        }
+    }
+    // make p2t[i] not be a ghost
+    for i in 0..mesh.n_points {
+        mesh.p2t[i] = tet_map[mesh.p2t[i]];
+        if mesh.is_hull_tet(mesh.p2t[i]) {
+            mesh.p2t[i] = mesh.tets[mesh.p2t[i]].nei[3].tet;
+        }
+    }
 
     mesh
 }
