@@ -5,7 +5,7 @@ use std::{
 
 use bumpalo::{collections::Vec, vec, Bump};
 
-use super::{abs_max, dummy_abs_max, ExpansionNum, GenericNum, IntervalNumber};
+use super::{abs_max, dummy_abs_max, estimate, ExpansionNum, GenericNum, IntervalNumber};
 
 pub struct ExplicitPoint3D {
     pub data: [f64; 3],
@@ -16,6 +16,34 @@ impl Deref for ExplicitPoint3D {
 
     fn deref(&self) -> &Self::Target {
         &self.data
+    }
+}
+
+#[inline(always)]
+fn get_exponent(x: f64) -> i32 {
+    if x == 0.0 {
+        0
+    } else {
+        x.to_bits().wrapping_shr(52) as i32 - 1023
+    }
+}
+
+#[inline(always)]
+fn normalize_lambda3d(x: &mut [f64], y: &mut [f64], z: &mut [f64], d: &mut [f64]) {
+    let data = [x, y, z, d];
+    let max_val = data
+        .iter()
+        .map(|arr| estimate(arr))
+        .max_by(|x, y| x.abs().total_cmp(&y.abs()))
+        .unwrap();
+    let e = get_exponent(max_val);
+    if e != 0 {
+        let s = 2.0f64.powi(-e);
+        for arr in data {
+            for val in arr {
+                *val *= s;
+            }
+        }
     }
 }
 
@@ -247,7 +275,7 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
                 return None;
             }
         } else {
-            let (exact, _) = lpi_lambda::<'_, false, _, _>(
+            let (mut exact, _) = lpi_lambda::<'_, false, ExpansionNum<'_>, _>(
                 vec![in self.bump; self.p.data[0]].into(),
                 vec![in self.bump; self.p.data[1]].into(),
                 vec![in self.bump; self.p.data[2]].into(),
@@ -266,6 +294,8 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
                 dummy_abs_max,
                 &self.bump,
             );
+            normalize_lambda3d(&mut exact.x, &mut exact.y, &mut exact.z, &mut exact.d);
+
             self.exact.replace(Some(exact));
             if self.exact.borrow().as_ref().unwrap().d.not_zero() {
                 return Ref::leak(self.exact.borrow()).as_ref();
@@ -611,7 +641,7 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
                 return None;
             }
         } else {
-            let (exact, _) = tpi_lambda::<'_, false, _, _>(
+            let (mut exact, _) = tpi_lambda::<'_, false, ExpansionNum<'_>, _>(
                 vec![in self.bump; self.v1.data[0]].into(),
                 vec![in self.bump; self.v1.data[1]].into(),
                 vec![in self.bump; self.v1.data[2]].into(),
@@ -642,6 +672,8 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
                 dummy_abs_max,
                 &self.bump,
             );
+            normalize_lambda3d(&mut exact.x, &mut exact.y, &mut exact.z, &mut exact.d);
+
             self.exact.replace(Some(exact));
             if self.exact.borrow().as_ref().unwrap().d.not_zero() {
                 return Ref::leak(self.exact.borrow()).as_ref();

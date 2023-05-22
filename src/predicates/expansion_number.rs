@@ -1,21 +1,22 @@
-use std::ops::{Add, Deref, Sub, Mul};
+use std::ops::{Add, Deref, DerefMut, Mul, Sub};
 
 use bumpalo::{collections::vec::Vec, Bump};
 
-use super::{predicates::{fast_expansion_sum_zeroelim, fast_expansion_diff_zeroelim, mul_expansion_zeroelim}};
+use super::predicates::{
+    fast_expansion_diff_zeroelim, fast_expansion_sum_zeroelim, mul_expansion_zeroelim,
+};
 
 #[derive(Clone)]
 pub struct ExpansionNum<'b> {
     vec: Vec<'b, f64>,
 }
 
-impl <'b> ExpansionNum<'b> {
+impl<'b> ExpansionNum<'b> {
     #[inline]
     pub fn bump(&self) -> &'b Bump {
         self.vec.bump()
     }
 }
-
 
 impl<'b> Deref for ExpansionNum<'b> {
     type Target = [f64];
@@ -25,21 +26,24 @@ impl<'b> Deref for ExpansionNum<'b> {
     }
 }
 
-impl <'b> From<Vec<'b, f64>> for ExpansionNum<'b> {
-    #[inline(always)]
-    fn from(vec: Vec<'b, f64>) -> Self {
-        Self {
-            vec
-        }
+impl<'b> DerefMut for ExpansionNum<'b> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.vec
     }
 }
 
-impl <'b> ExpansionNum<'b> {
+impl<'b> From<Vec<'b, f64>> for ExpansionNum<'b> {
+    #[inline(always)]
+    fn from(vec: Vec<'b, f64>) -> Self {
+        Self { vec }
+    }
+}
+
+impl<'b> ExpansionNum<'b> {
     pub fn not_zero(&self) -> bool {
         *self.last().unwrap() != 0.0
     }
 }
-
 
 #[inline]
 fn add<'b>(a: &[f64], b: &[f64], bump: &'b Bump) -> Vec<'b, f64> {
@@ -110,8 +114,12 @@ impl_op!(trait Mul, mul);
 #[test]
 fn test_expansion_operations() {
     let bump = Bump::new();
-    let v1 = ExpansionNum{ vec: bumpalo::vec![in &bump; 2.0; 1]};
-    let v2 = ExpansionNum { vec: bumpalo::vec![in &bump; 1.0; 1] };
+    let v1 = ExpansionNum {
+        vec: bumpalo::vec![in &bump; 2.0; 1],
+    };
+    let v2 = ExpansionNum {
+        vec: bumpalo::vec![in &bump; 1.0; 1],
+    };
     let v3 = v1 + &v2;
     assert_eq!(v3[0], 3.0);
     let v4 = v3 + v2;

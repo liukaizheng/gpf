@@ -1,10 +1,10 @@
 #![feature(test)]
 
 use bumpalo::{collections::Vec, Bump};
-use gpf::triangle::{triangulate, tetrahedralize};
+use gpf::triangle::{tetrahedralize, triangulate};
 use rand::{distributions::Uniform, rngs::SmallRng, Rng, SeedableRng};
 use std::fs::File;
-use std::io::{Write, BufReader, BufRead};
+use std::io::{BufRead, BufReader, Write};
 use std::time::Instant;
 extern crate test;
 
