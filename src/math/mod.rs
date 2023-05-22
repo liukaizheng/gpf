@@ -13,6 +13,15 @@ pub fn norm(a: &[f64]) -> f64 {
 }
 
 #[inline(always)]
+pub fn dot<T: Copy + Add<Output = T> + Mul<Output = T>>(a: &[T], b: &[T]) -> T {
+    let mut ret = a[0] * b[0];
+    for i in 0..a.len() {
+        ret = ret + a[i] * b[i];
+    }
+    ret
+}
+
+#[inline(always)]
 pub fn cross<T: Copy + Add<Output = T> + Sub<Output = T> + Mul<Output = T>>(
     a: &[T],
     b: &[T],

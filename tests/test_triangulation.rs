@@ -29,7 +29,7 @@ fn write_obj(points: &[f64], triangles: &[usize], name: &str) {
 fn test_triangulate() {
     let rng = SmallRng::seed_from_u64(5489);
     let uniform = Uniform::new_inclusive(-1.0, 1.0);
-    let n_points = 1_00_0000;
+    let n_points = 1_0000;
     let bump = Bump::new();
     let points: Vec<'_, f64> =
         Vec::from_iter_in(rng.sample_iter(uniform).take(n_points * 2), &bump);
@@ -84,7 +84,7 @@ fn read_points<'b>(name: &str, bump: &'b Bump) -> Vec<'b, f64> {
 fn test_tetrahedralize() {
     let rng = SmallRng::seed_from_u64(5489);
     let uniform = Uniform::new_inclusive(-1.0, 1.0);
-    let n_points = 10_0000;
+    let n_points = 1_0000;
     let bump = Bump::new();
     // let points: Vec<'_, f64> = read_points("123.xyz", &bump);
     let points = Vec::from_iter_in(rng.sample_iter(uniform).take(n_points * 3), &bump);

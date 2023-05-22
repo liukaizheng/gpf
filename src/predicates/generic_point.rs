@@ -5,7 +5,7 @@ use std::{
 
 use bumpalo::{collections::Vec, vec, Bump};
 
-use super::{abs_max, dummy_abs_max, estimate, ExpansionNum, GenericNum, IntervalNumber};
+use super::{abs_max, dummy_abs_max, estimate, ExpansionNum, GenericNum, IntervalNumber, get_exponent};
 
 pub struct ExplicitPoint3D {
     pub data: [f64; 3],
@@ -16,15 +16,6 @@ impl Deref for ExplicitPoint3D {
 
     fn deref(&self) -> &Self::Target {
         &self.data
-    }
-}
-
-#[inline(always)]
-fn get_exponent(x: f64) -> i32 {
-    if x == 0.0 {
-        0
-    } else {
-        x.to_bits().wrapping_shr(52) as i32 - 1023
     }
 }
 

@@ -1,5 +1,8 @@
+use std::collections::HashMap;
+
 use bumpalo::{collections::Vec, vec, Bump};
 
+use crate::math::{dot, sub};
 use crate::{predicates, INVALID_IND};
 
 pub fn triangulate<'b>(points: &[f64], segments: &[usize], bump: &'b Bump) -> Vec<'b, usize> {
@@ -80,6 +83,36 @@ pub fn triangulate<'b>(points: &[f64], segments: &[usize], bump: &'b Bump) -> Ve
             .flatten(),
         bump,
     )
+}
+
+#[inline]
+pub fn triangulate_polygon<'b>(
+    points: &[f64],
+    segments: &[usize],
+    o: &[f64],
+    x: &[f64],
+    y: &[f64],
+    bump: &'b Bump,
+) -> Vec<'b, usize> {
+    let [new_segments, new_to_ori_map] = unique_indices(segments, bump);
+    let point3 = |idx: usize| -> &[f64] {
+        let start = idx * 3;
+        &points[start..(start + 3)]
+    };
+
+    let points_2d = Vec::from_iter_in(
+        new_to_ori_map
+            .into_iter()
+            .map(|idx| {
+                let p = point3(idx);
+                let mut v = vec![in bump; 0.0; 3];
+                sub(p, o, &mut v);
+                [dot(&v, x), dot(&v, y)]
+            })
+            .flatten(),
+        bump,
+    );
+    triangulate(&points_2d, &new_segments, bump)
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -1111,4 +1144,26 @@ fn form_skeleton(m: &mut Mesh, ghost: &[bool], segment: &[usize], bump: &Bump) {
             insert_segment(m, &mut vertex_map, ghost, seg[0], seg[1], i, bump);
         }
     }
+}
+
+fn unique_indices<'b>(indices: &[usize], bump: &'b Bump) -> [Vec<'b, usize>; 2] {
+    let mut count = 0;
+    let mut map = HashMap::new();
+    map.reserve(indices.len());
+    let mut result = Vec::new_in(bump);
+    result.reserve(indices.len());
+    for old in indices {
+        if let Some(&now) = map.get(old) {
+            result.push(now);
+        } else {
+            map.insert(*old, count);
+            result.push(count);
+            count += 1;
+        }
+    }
+    let mut new_to_ori_map = vec![in bump; 0; map.len()];
+    for (k, v) in map {
+        new_to_ori_map[v] = k;
+    }
+    [result, new_to_ori_map]
 }
