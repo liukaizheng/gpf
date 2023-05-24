@@ -5,7 +5,9 @@ use std::{
 
 use bumpalo::{collections::Vec, vec, Bump};
 
-use super::{abs_max, dummy_abs_max, estimate, ExpansionNum, GenericNum, IntervalNumber, get_exponent};
+use super::{
+    abs_max, dummy_abs_max, estimate, get_exponent, ExpansionNum, GenericNum, IntervalNumber,
+};
 
 pub struct ExplicitPoint3D {
     pub data: [f64; 3],

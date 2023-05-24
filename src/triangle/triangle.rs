@@ -104,8 +104,8 @@ pub fn triangulate_polygon<'b>(
 
     let points_2d = Vec::from_iter_in(
         new_to_ori_map
-            .into_iter()
-            .map(|idx| {
+            .iter()
+            .map(|&idx| {
                 let p = point3(points, idx);
                 let mut v = vec![in bump; 0.0; 3];
                 sub(p, o, &mut v);
@@ -114,7 +114,12 @@ pub fn triangulate_polygon<'b>(
             .flatten(),
         bump,
     );
-    triangulate(&points_2d, &new_segments, bump)
+    Vec::from_iter_in(
+        triangulate(&points_2d, &new_segments, bump)
+            .into_iter()
+            .map(|idx| new_to_ori_map[idx]),
+        bump,
+    )
 }
 
 #[inline]

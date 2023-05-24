@@ -2,7 +2,12 @@ mod conforming_mesh;
 
 use bumpalo::{collections::Vec, Bump};
 
-use crate::{predicates::get_exponent, triangle::triangulate_polygon_soup};
+use crate::{
+    predicates::get_exponent,
+    triangle::{tetrahedralize, triangulate_polygon_soup},
+};
+
+use self::conforming_mesh::Constraints;
 
 fn point(points: &[f64], idx: usize) -> &[f64] {
     let start = idx * 3;
@@ -52,6 +57,13 @@ pub fn remove_duplicates<'b>(
     )
 }
 
+fn make_mesh_for_triangles<'a, 'b: 'a>(points: &'a [f64], triangles: Vec<'b, usize>) {
+    let bump = triangles.bump();
+    let mut constraints = Constraints::new(triangles);
+    let tet_mesh = tetrahedralize(points, bump);
+    constraints.place_virtual_constraints(&tet_mesh);
+}
+
 pub fn make_polyhedra_mesh<'b>(
     point_data: &[f64],
     axis_data: &[f64],
@@ -81,5 +93,5 @@ pub fn make_polyhedra_mesh<'b>(
         bump,
     );
     let (triangles, tri_parents) = triangulate_polygon_soup(&points, &face_edges, axis_data, bump);
-    let a = 2;
+    make_mesh_for_triangles(&points, triangles);
 }

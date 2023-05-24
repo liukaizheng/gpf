@@ -8,7 +8,7 @@ use super::predicates::{
 
 #[derive(Clone)]
 pub struct ExpansionNum<'b> {
-    vec: Vec<'b, f64>,
+    pub vec: Vec<'b, f64>,
 }
 
 impl<'b> ExpansionNum<'b> {

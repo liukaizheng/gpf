@@ -63,7 +63,7 @@ impl TriFace {
 }
 
 pub struct Tet {
-    data: [usize; 4],
+    pub data: [usize; 4],
     nei: [TriFace; 4],
     mask: usize,
 }
@@ -101,8 +101,8 @@ impl Tet {
 }
 
 pub struct TetMesh<'a, 'b: 'a> {
-    points: &'a [f64],
-    n_points: usize,
+    pub points: &'a [f64],
+    pub n_points: usize,
     pub tets: Vec<'b, Tet>,
     pub p2t: Vec<'b, usize>,
 }
@@ -202,7 +202,12 @@ impl<'a, 'b: 'a> TetMesh<'a, 'b> {
     }
 
     #[inline(always)]
-    fn orient3d(&self, pa: usize, pb: usize, pc: usize, pd: usize) -> f64 {
+    pub fn point(&self, idx: usize) -> &[f64] {
+        point(self.points, idx)
+    }
+
+    #[inline(always)]
+    pub fn orient3d(&self, pa: usize, pb: usize, pc: usize, pd: usize) -> f64 {
         predicates::orient3d(
             &self.points[(pa * 3)..],
             &self.points[(pb * 3)..],
