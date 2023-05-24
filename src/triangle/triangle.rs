@@ -85,6 +85,12 @@ pub fn triangulate<'b>(points: &[f64], segments: &[usize], bump: &'b Bump) -> Ve
     )
 }
 
+#[inline(always)]
+fn point3(points: &[f64], idx: usize) -> &[f64] {
+    let start = idx * 3;
+    &points[start..(start + 3)]
+}
+
 #[inline]
 pub fn triangulate_polygon<'b>(
     points: &[f64],
@@ -95,16 +101,12 @@ pub fn triangulate_polygon<'b>(
     bump: &'b Bump,
 ) -> Vec<'b, usize> {
     let [new_segments, new_to_ori_map] = unique_indices(segments, bump);
-    let point3 = |idx: usize| -> &[f64] {
-        let start = idx * 3;
-        &points[start..(start + 3)]
-    };
 
     let points_2d = Vec::from_iter_in(
         new_to_ori_map
             .into_iter()
             .map(|idx| {
-                let p = point3(idx);
+                let p = point3(points, idx);
                 let mut v = vec![in bump; 0.0; 3];
                 sub(p, o, &mut v);
                 [dot(&v, x), dot(&v, y)]
@@ -113,6 +115,30 @@ pub fn triangulate_polygon<'b>(
         bump,
     );
     triangulate(&points_2d, &new_segments, bump)
+}
+
+#[inline]
+pub fn triangulate_polygon_soup<'b>(
+    points: &[f64],
+    edges: &[Vec<'b, usize>],
+    axes: &[f64],
+    bump: &'b Bump,
+) -> (Vec<'b, usize>, Vec<'b, usize>) {
+    let mut triangles = Vec::new_in(bump);
+    let mut parents = Vec::new_in(bump);
+    for (idx, (segments, axis_data)) in edges.iter().zip(axes.chunks(9)).enumerate() {
+        let face_triangles = triangulate_polygon(
+            points,
+            segments,
+            &axis_data[0..3],
+            &axis_data[3..6],
+            &axis_data[6..9],
+            bump,
+        );
+        parents.resize(parents.len() + face_triangles.len() / 3, idx);
+        triangles.extend(face_triangles);
+    }
+    (triangles, parents)
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -1141,7 +1167,7 @@ fn form_skeleton(m: &mut Mesh, ghost: &[bool], segment: &[usize], bump: &Bump) {
     let mut vertex_map = make_vertex_map(&m.triangles, ghost, m.points.len() >> 1, bump);
     for (i, seg) in segment.chunks(2).enumerate() {
         if seg[0] != seg[1] {
-            insert_segment(m, &mut vertex_map, ghost, seg[0], seg[1], i, bump);
+            insert_segment(m, &mut vertex_map, ghost, seg[0], seg[1], 1 << i, bump);
         }
     }
 }

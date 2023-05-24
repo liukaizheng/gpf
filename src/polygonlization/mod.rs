@@ -1,8 +1,8 @@
 mod conforming_mesh;
 
-use bumpalo::{collections::Vec, vec, Bump};
+use bumpalo::{collections::Vec, Bump};
 
-use crate::predicates::get_exponent;
+use crate::{predicates::get_exponent, triangle::triangulate_polygon_soup};
 
 fn point(points: &[f64], idx: usize) -> &[f64] {
     let start = idx * 3;
@@ -80,4 +80,6 @@ pub fn make_polyhedra_mesh<'b>(
         }),
         bump,
     );
+    let (triangles, tri_parents) = triangulate_polygon_soup(&points, &face_edges, axis_data, bump);
+    let a = 2;
 }
