@@ -9,9 +9,9 @@ use bumpalo::{collections::Vec, vec, Bump};
 use rand::seq::SliceRandom;
 
 #[derive(Clone)]
-struct TriFace {
-    tet: usize,
-    ver: usize, // version
+pub struct TriFace {
+    pub tet: usize,
+    pub ver: usize, // version
 }
 
 impl Default for TriFace {
@@ -26,45 +26,45 @@ impl Default for TriFace {
 
 impl TriFace {
     #[inline(always)]
-    fn new(tet: usize, ver: usize) -> Self {
+    pub fn new(tet: usize, ver: usize) -> Self {
         Self { tet, ver }
     }
 
     #[inline(always)]
-    fn set(&mut self, t: usize, v: usize) {
+    pub fn set(&mut self, t: usize, v: usize) {
         self.tet = t;
         self.ver = v;
     }
 
     #[inline(always)]
-    fn eprev_self(&mut self) {
+    pub fn eprev_self(&mut self) {
         self.ver = EPREV_TBL[self.ver];
     }
 
     #[inline(always)]
-    fn enext_self(&mut self) {
+    pub fn enext_self(&mut self) {
         self.ver = ENEXT_TBL[self.ver];
     }
 
     #[inline(always)]
-    fn esym_self(&mut self) {
+    pub fn esym_self(&mut self) {
         self.ver = ESYM_TBL[self.ver];
     }
 
     #[inline(always)]
-    fn eprev_esym_self(&mut self) {
+    pub fn eprev_esym_self(&mut self) {
         self.ver = EPREV_ESYM_TBL[self.ver];
     }
 
     #[inline(always)]
-    fn enext_esym_self(&mut self) {
+    pub fn enext_esym_self(&mut self) {
         self.ver = ENEXT_ESYM_TBL[self.ver];
     }
 }
 
 pub struct Tet {
     pub data: [usize; 4],
-    nei: [TriFace; 4],
+    pub nei: [TriFace; 4],
     mask: usize,
 }
 
@@ -98,6 +98,11 @@ impl Tet {
             mask: 0,
         }
     }
+
+    #[inline(always)]
+    pub fn index(&self, vid: usize) -> Option<usize> {
+        self.data.iter().position(|&id| id == vid)
+    }
 }
 
 pub struct TetMesh<'a, 'b: 'a> {
@@ -119,48 +124,48 @@ impl<'a, 'b: 'a> TetMesh<'a, 'b> {
     }
 
     #[inline(always)]
-    fn org(&self, f: &TriFace) -> usize {
+    pub fn org(&self, f: &TriFace) -> usize {
         self.tets[f.tet].data[ORG_PIVOT[f.ver]]
     }
 
     #[inline(always)]
-    fn dest(&self, f: &TriFace) -> usize {
+    pub fn dest(&self, f: &TriFace) -> usize {
         self.tets[f.tet].data[DEST_PIVOT[f.ver]]
     }
 
     #[inline(always)]
-    fn apex(&self, f: &TriFace) -> usize {
+    pub fn apex(&self, f: &TriFace) -> usize {
         self.tets[f.tet].data[APEX_PIVOT[f.ver]]
     }
 
     #[inline(always)]
-    fn oppo(&self, f: &TriFace) -> usize {
+    pub fn oppo(&self, f: &TriFace) -> usize {
         self.tets[f.tet].data[OPPO_PIVOT[f.ver]]
     }
 
     #[inline(always)]
-    fn infect(&mut self, t: usize) {
+    pub fn infect(&mut self, t: usize) {
         self.tets[t].mask |= 1;
     }
     #[inline(always)]
-    fn uninfect(&mut self, t: usize) {
+    pub fn uninfect(&mut self, t: usize) {
         self.tets[t].mask &= !1;
     }
     #[inline(always)]
-    fn infected(&mut self, t: usize) -> bool {
+    pub fn infected(&self, t: usize) -> bool {
         (self.tets[t].mask & 1) != 0
     }
 
     #[inline(always)]
-    fn mark_test(&mut self, t: usize) {
+    pub fn mark_test(&mut self, t: usize) {
         self.tets[t].mask |= 2;
     }
     #[inline(always)]
-    fn unmark_test(&mut self, t: usize) {
+    pub fn unmark_test(&mut self, t: usize) {
         self.tets[t].mask &= !2;
     }
     #[inline(always)]
-    fn mark_tested(&mut self, t: usize) -> bool {
+    pub fn mark_tested(&self, t: usize) -> bool {
         (self.tets[t].mask & 2) != 0
     }
 
@@ -176,28 +181,28 @@ impl<'a, 'b: 'a> TetMesh<'a, 'b> {
     }
 
     #[inline(always)]
-    fn fsym(&self, t1: &TriFace, t2: &mut TriFace) {
+    pub fn fsym(&self, t1: &TriFace, t2: &mut TriFace) {
         let nf = &self.tets[t1.tet].nei[t1.ver & 3];
         t2.tet = nf.tet;
         t2.ver = FSYM_TBL[t1.ver][nf.ver];
     }
 
     #[inline(always)]
-    fn fsym_self(&self, t: &mut TriFace) {
+    pub fn fsym_self(&self, t: &mut TriFace) {
         let nf = &self.tets[t.tet].nei[t.ver & 3];
         t.tet = nf.tet;
         t.ver = FSYM_TBL[t.ver][nf.ver];
     }
 
     #[inline(always)]
-    fn fnext_self(&self, t: &mut TriFace) {
+    pub fn fnext_self(&self, t: &mut TriFace) {
         let nf = &self.tets[t.tet].nei[FACE_PIVOT1[t.ver]];
         t.tet = nf.tet;
         t.ver = FACE_PIVOT2[t.ver][nf.ver];
     }
 
     #[inline(always)]
-    fn is_hull_tet(&self, idx: usize) -> bool {
+    pub fn is_hull_tet(&self, idx: usize) -> bool {
         self.tets[idx].data[3] == self.n_points
     }
 
@@ -215,6 +220,32 @@ impl<'a, 'b: 'a> TetMesh<'a, 'b> {
             &self.points[(pd * 3)..],
             self.tets.bump(),
         )
+    }
+
+    #[inline(always)]
+    pub fn incident(&mut self, vid: usize) -> Vec<'b, usize> {
+        let bump = self.tets.bump();
+        let mut result = bumpalo::vec![in bump; self.p2t[vid]];
+        self.mark_test(result[0]);
+        let idx = 0;
+        while idx < result.len() {
+            let t = result[idx];
+            let pos = self.tets[t].index(vid).unwrap();
+            for i in 0..4 {
+                if i == pos {
+                    continue;
+                }
+                let nei = self.tets[t].nei[i].tet;
+                if !self.mark_tested(nei) || !self.is_hull_tet(nei) {
+                    self.mark_test(nei);
+                    result.push(nei);
+                }
+            }
+        }
+        for &tid in &result {
+            self.unmark_test(tid);
+        }
+        result
     }
 }
 
@@ -379,8 +410,8 @@ const APEX_PIVOT: [usize; 12] = [1, 2, 3, 0, 3, 3, 1, 1, 2, 0, 0, 2];
 const OPPO_PIVOT: [usize; 12] = [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3];
 const TRANS_GC: [[[usize; 8]; 3]; 8] = gray_code();
 const TSB1_MOD3: [usize; 8] = trailing_set_bits_mod3();
-const VPIVOT: [usize; 4] = [11, 8, 9, 10];
-const epivot: [usize; 12] = [4, 5, 2, 11, 4, 5, 2, 11, 4, 5, 2, 11];
+pub const VPIVOT: [usize; 4] = [11, 8, 9, 10];
+const EPIVOT: [usize; 12] = [4, 5, 2, 11, 4, 5, 2, 11, 4, 5, 2, 11];
 
 /// prev edge
 #[inline(always)]
@@ -928,7 +959,7 @@ fn insert_vertex_bw(
 
             if tets.is_hull_tet(oldtet.tet) {
                 // neightet.tet may be also a hull tet (=> oldtet is a hull edge).
-                neightet.ver = epivot[neightet.ver];
+                neightet.ver = EPIVOT[neightet.ver];
             }
 
             // Create a new tet in the cavity.
@@ -992,7 +1023,7 @@ fn insert_vertex_bw(
             tets.unmark_test(neightet.tet);
             if tets.is_hull_tet(oldtet.tet) {
                 // neightet.tet may be also a hull tet (=> oldtet is a hull edge).
-                neightet.ver = epivot[neightet.ver];
+                neightet.ver = EPIVOT[neightet.ver];
             }
 
             let v = [

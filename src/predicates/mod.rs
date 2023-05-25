@@ -199,3 +199,207 @@ pub fn max_comp_in_tri_normal<'b>(ov1: &[f64], ov2: &[f64], ov3: &[f64], bump: &
         )
     }
 }
+
+#[inline]
+pub fn inner_segment_cross_inner_triangle(
+    u1: &[f64],
+    u2: &[f64],
+    v1: &[f64],
+    v2: &[f64],
+    v3: &[f64],
+    bump: &Bump,
+) -> bool {
+    let mut bound = u1[0].min(u2[0]); // min(u1,u2) alogng x-axis
+    if v1[0] <= bound && v2[0] <= bound && v3[0] <= bound {
+        return false;
+    }
+    bound = u1[0].max(u2[0]); // max(u1,u2) alogng x-axis
+    if v1[0] >= bound && v2[0] >= bound && v3[0] >= bound {
+        return false;
+    }
+    bound = u1[1].min(u2[1]); // min(u1,u2) alogng y-axis
+    if v1[1] <= bound && v2[1] <= bound && v3[1] <= bound {
+        return false;
+    }
+    bound = u1[1].max(u2[1]); // max(u1,u2) alogng y-axis
+    if v1[1] >= bound && v2[1] >= bound && v3[1] >= bound {
+        return false;
+    }
+    bound = u1[2].min(u2[2]); // min(u1,u2) alogng z-axis
+    if v1[2] <= bound && v2[2] <= bound && v3[2] <= bound {
+        return false;
+    }
+    bound = u1[2].max(u2[2]); // max(u1,u2) alogng z-axis
+    if v1[2] >= bound && v2[2] >= bound && v3[2] >= bound {
+        return false;
+    }
+
+    let orient_u1_tri = double_to_sign(predicates::orient3d(u1, v1, v2, v3, bump));
+    let orient_u2_tri = double_to_sign(predicates::orient3d(u2, v1, v2, v3, bump));
+
+    // Check if triangle vertices and at least one of the segment endpoints are coplanar:
+    // in this case there is no proper intersection.
+    if orient_u1_tri == Orientation::Zero || orient_u2_tri == Orientation::Zero {
+        return false;
+    }
+
+    // Endpoints of one segment cannot stay both in one of the same half-space defined by the triangle.
+    if orient_u1_tri == orient_u2_tri {
+        return false;
+    }
+
+    // Since now, endpoints are one abouve and one below the triangle-plane.
+
+    // Intersection between segment and triangle sides are not proper.
+    // Check also if segment intersect the triangle-plane outside the triangle.
+    let orient_u_v1v2 = double_to_sign(predicates::orient3d(u1, u2, v1, v2, bump));
+    let orient_u_v2v3 = double_to_sign(predicates::orient3d(u1, u2, v2, v3, bump));
+
+    if orient_u_v1v2 == Orientation::Zero || orient_u_v2v3 == Orientation::Zero {
+        return false;
+    }
+
+    if orient_u_v1v2 != orient_u_v2v3 {
+        return false;
+    }
+
+    let orient_u_v3v1 = double_to_sign(predicates::orient3d(u1, u2, v3, v1, bump));
+
+    if orient_u_v3v1 == Orientation::Zero {
+        return false;
+    }
+    if orient_u_v3v1 != orient_u_v2v3 {
+        return false;
+    }
+
+    // Finally, we have a proper intersection.
+    return true;
+}
+
+fn same_half_plane(p: &[f64], q: &[f64], v1: &[f64], v2: &[f64], bump: &Bump) -> bool {
+    // Projection on (x,y)-plane
+    if double_to_sign(predicates::orient2d(p, v1, v2, bump))
+        != double_to_sign(predicates::orient2d(q, v1, v2, bump))
+    {
+        return false;
+    }
+
+    // Projection on (y,z)-plane
+    if double_to_sign(predicates::orient2d(&p[1..], &v1[1..], &v2[1..], bump))
+        != double_to_sign(predicates::orient2d(&q[1..], &v1[1..], &v2[1..], bump))
+    {
+        return false;
+    }
+
+    // Projection on (x,z)-plane
+    let pxz = [p[0], p[2]];
+    let qxz = [q[0], q[2]];
+    let v1xz = [v1[0], v1[2]];
+    let v2xz = [v2[0], v2[2]];
+    return double_to_sign(predicates::orient2d(&pxz, &v1xz, &v2xz, bump))
+        == double_to_sign(predicates::orient2d(&qxz, &v1xz, &v2xz, bump));
+}
+
+#[inline]
+fn mis_alignment(p: &[f64], q: &[f64], r: &[f64], bump: &Bump) -> bool {
+    // Projection on (x,y)-plane
+    if predicates::orient2d(p, q, r, bump) != 0.0 {
+        return true;
+    }
+
+    // Projection on (y,z)-plane
+    if predicates::orient2d(&p[1..], &q[1..], &r[1..], bump) != 0.0 {
+        return true;
+    }
+
+    // Projection on (x,z)-plane
+    let pxz = [p[0], p[2]];
+    let qxz = [q[0], q[2]];
+    let rxz = [r[0], r[2]];
+    return predicates::orient2d(&pxz, &qxz, &rxz, bump) != 0.0;
+}
+
+#[inline]
+pub fn inner_segments_cross(u1: &[f64], u2: &[f64], v1: &[f64], v2: &[f64], bump: &Bump) -> bool {
+    // The 4 endpoints must be coplanar
+    if predicates::orient3d(u1, u2, v1, v2, bump) != 0.0 {
+        return false;
+    }
+
+    // Endpoints of one segment cannot stay either on the same side of the other one.
+    if same_half_plane(u1, u2, v1, v2, bump) || same_half_plane(v1, v2, u1, u2, bump) {
+        return false;
+    }
+
+    // Each segment endpoint cannot be aligned with the other segment.
+    if !mis_alignment(u1, v1, v2, bump) {
+        return false;
+    };
+    if !mis_alignment(u2, v1, v2, bump) {
+        return false;
+    };
+    if !mis_alignment(v1, u1, u2, bump) {
+        return false;
+    };
+    if !mis_alignment(v2, u1, u2, bump) {
+        return false;
+    };
+
+    // If the segment projected on one coordinate plane cross -> segmant cross.
+    // Projection on (x,y)-plane
+    if predicates::orient2d(u1, u2, v1, bump) != 0.0 {
+        return true;
+    };
+    if predicates::orient2d(v1, v2, u2, bump) != 0.0 {
+        return true;
+    };
+    // Projection on (y,z)-plane
+    if predicates::orient2d(&u1[1..], &u2[1..], &v1[1..], bump) != 0.0 {
+        return true;
+    };
+    if predicates::orient2d(&v1[1..], &v2[1..], &u2[1..], bump) != 0.0 {
+        return true;
+    };
+    // Projection on (z,x)-plane
+    let u1xz = [u1[0], u1[2]];
+    let u2xz = [u2[0], u2[2]];
+    let v1xz = [v1[0], v1[2]];
+    let v2xz = [v2[0], v2[2]];
+    if predicates::orient2d(&u1xz, &u2xz, &v1xz, bump) != 0.0 {
+        return true;
+    };
+    if predicates::orient2d(&v1xz, &v2xz, &u2xz, bump) != 0.0 {
+        return true;
+    };
+
+    return false;
+}
+
+#[inline(always)]
+fn point_in_inner_segment(p: &[f64], v1: &[f64], v2: &[f64], bump: &Bump) -> bool {
+    return !mis_alignment(p, v1, v2, bump)
+        && ((v1[0] < v2[0] && v1[0] < p[0] && p[0] < v2[0])
+            || (v1[0] > v2[0] && v1[0] > p[0] && p[0] > v2[0])
+            || (v1[1] < v2[1] && v1[1] < p[1] && p[1] < v2[1])
+            || (v1[1] > v2[1] && v1[1] > p[1] && p[1] > v2[1])
+            || (v1[2] < v2[2] && v1[2] < p[2] && p[2] < v2[2])
+            || (v1[2] > v2[2] && v1[2] > p[2] && p[2] > v2[2]));
+}
+
+#[inline(always)]
+pub fn inner_segment_cross_triangle(
+    u1: &[f64],
+    u2: &[f64],
+    v1: &[f64],
+    v2: &[f64],
+    v3: &[f64],
+    bump: &Bump,
+) -> bool {
+    return point_in_inner_segment(&v1, &u1, &u2, bump)
+        || point_in_inner_segment(&v2, &u1, &u2, bump)
+        || point_in_inner_segment(&v3, &u1, &u2, bump)
+        || inner_segments_cross(&v2, &v3, &u1, &u2, bump)
+        || inner_segments_cross(&v3, &v1, &u1, &u2, bump)
+        || inner_segments_cross(&v1, &v2, &u1, &u2, bump)
+        || inner_segment_cross_inner_triangle(&u1, &u2, &v1, &v2, &v3, bump);
+}

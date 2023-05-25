@@ -60,8 +60,9 @@ pub fn remove_duplicates<'b>(
 fn make_mesh_for_triangles<'a, 'b: 'a>(points: &'a [f64], triangles: Vec<'b, usize>) {
     let bump = triangles.bump();
     let mut constraints = Constraints::new(triangles);
-    let tet_mesh = tetrahedralize(points, bump);
+    let mut tet_mesh = tetrahedralize(points, bump);
     constraints.place_virtual_constraints(&tet_mesh);
+    constraints.insert_constraints(&mut tet_mesh);
 }
 
 pub fn make_polyhedra_mesh<'b>(
