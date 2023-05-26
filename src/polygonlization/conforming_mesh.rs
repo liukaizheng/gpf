@@ -5,7 +5,7 @@ use bumpalo::{collections::Vec, Bump};
 use crate::{
     predicates::{
         self, double_to_sign, inner_segment_cross_inner_triangle, inner_segment_cross_triangle,
-        max_comp_in_tri_normal,
+        inner_segments_cross, max_comp_in_tri_normal,
     },
     triangle::{TetMesh, TriFace, VPIVOT},
     INVALID_IND,
@@ -196,6 +196,20 @@ fn vert_inner_segment_cross_triangle(mesh: &TetMesh, u1: usize, u2: usize, tri: 
     );
 }
 
+#[inline(always)]
+fn vert_inner_segments_cross(mesh: &TetMesh, u1: usize, u2: usize, v1: usize, v2: usize) -> bool {
+    if u1 == v1 || u1 == v2 || u2 == v1 || u2 == v2 {
+        return false;
+    }
+    return inner_segments_cross(
+        mesh.point(u1),
+        mesh.point(u2),
+        mesh.point(v1),
+        mesh.point(v2),
+        mesh.tets.bump(),
+    );
+}
+
 fn triangle_at_tet<'a, 'b: 'a>(mesh: &mut TetMesh<'a, 'b>, tri: &[usize]) -> TriFace {
     let bump = mesh.tets.bump();
     let mut tets = bumpalo::vec![in bump; mesh.p2t[0]];
@@ -296,6 +310,12 @@ fn constraint_side_intersection_start<'b>(
             oppo_verts[2],
         ) {
             return (tid, oppo_verts);
+        }
+
+        for (&ua, &ub) in oppo_verts.iter().zip(oppo_verts.iter().cycle().skip(1)) {
+            if vert_inner_segments_cross(mesh, va, vb, ua, ub) {
+                return (tid, bumpalo::vec![in bump; ua, ub]);
+            }
         }
     }
     unreachable!("cannot find intersect tet by line segment");

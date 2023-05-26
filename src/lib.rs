@@ -5,8 +5,8 @@
 
 pub mod math;
 pub mod mesh;
+pub mod polygonlization;
 pub mod predicates;
 pub mod triangle;
-pub mod polygonlization;
 
 const INVALID_IND: usize = usize::MAX;
