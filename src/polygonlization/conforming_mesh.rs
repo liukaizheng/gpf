@@ -7,7 +7,7 @@ use crate::{
         self, double_to_sign, inner_segment_cross_inner_triangle, inner_segment_cross_triangle,
         inner_segments_cross, max_comp_in_tri_normal, point_in_inner_segment, same_half_plane,
     },
-    triangle::{TetMesh, TriFace, VPIVOT},
+    triangle::{self, TetMesh, TriFace, VPIVOT},
     INVALID_IND,
 };
 pub struct Constraints<'b> {
@@ -248,6 +248,13 @@ fn vert_point_in_inner_segment(mesh: &TetMesh, u: usize, v1: usize, v2: usize) -
             mesh.tets.bump(),
         );
 }
+
+#[inline(always)]
+fn vert_point_in_triangle(mesh: &TetMesh, p: usize, tri: &[usize]) -> bool {
+    return p == tri[0] || p == tri[1] || p == tri[2] ||
+           point_in_triangle(mesh.point(p), mesh.point(tri[0]), mesh.point(tri[1]), mesh.point(tri[2]));
+}
+
 
 fn triangle_at_tet<'a, 'b: 'a>(mesh: &mut TetMesh<'a, 'b>, tri: &[usize]) -> TriFace {
     let bump = mesh.tets.bump();
@@ -539,4 +546,84 @@ fn triangle_pierced_by_constraint_side<'b>(
 
     // it must be that [ea, eb] pass through v_oppo
     return (next_tid, bumpalo::vec![in bump; v_oppo]);
+}
+
+#[inline(always)]
+
+fn set_improper_intersections(
+    mesh: &TetMesh,
+    cid: usize,
+    triangle: &[usize],
+    tet_marks: &mut [Vec<Vec<usize>>],
+    info: &mut IntersectInfo,
+) {
+    let lookup_ori = |vid: usize, vert_oris: &mut [f64], used_verts: &mut Vec<usize>| -> f64 {
+        let mut ori = vert_oris[vid];
+        if !ori.is_nan() {
+            return ori;
+        } else {
+            ori = mesh.orient3d(triangle[0], triangle[1], triangle[2], vid);
+            vert_oris[vid] = ori;
+            used_verts.push(vid);
+            return ori;
+        }
+    };
+    let bump = mesh.tets.bump();
+    let mut vert_oris = bumpalo::vec![in bump; f64::NAN; mesh.tets.len()];
+    let mut used_verts: Vec<usize> = Vec::new_in(bump);
+
+    for &tid in &info.intersected {
+        let tet = &mesh.tets[tid];
+
+        let mut zero: Vec<usize> = Vec::new_in(bump);
+        let mut pos: Vec<usize> = Vec::new_in(bump);
+        let mut neg: Vec<usize> = Vec::new_in(bump);
+        for &vid in &tet.data {
+            let ori = lookup_ori(vid, &mut vert_oris, &mut used_verts);
+            if ori == 0.0 {
+                zero.push(vid);
+            } else if ori > 0.0 {
+                pos.push(vid);
+            } else {
+                neg.push(vid);
+            }
+
+            match zero.len() {
+                3 => {
+                    let oppo_index = tet
+                        .index(if pos.is_empty() { neg[0] } else { pos[0] })
+                        .unwrap();
+                }
+                2 => {}
+                1 => {}
+                _ => {
+                    info.visited[tid] = true;
+                    tet_marks[4][tid].push(cid);
+                }
+            }
+        }
+    }
+}
+
+fn constraint_intersect_face(
+    mesh: &TetMesh,
+    c: &[usize],
+    t: &[usize]
+) -> bool {
+    if (vert_point_in_triangle(mesh, t[0], c) && vert_point_in_triangle(mesh, t[1], c) &&
+        vert_point_in_triangle(mesh, t[2], c)) {
+        return true;
+    }
+    if (vert_inner_segments_cross(mesh, t[0], t[1], c[0], c[1])) return true;
+    if (vert_inner_segments_cross(mesh, t[0], t[1], c[1], c[2])) return true;
+    if (vert_inner_segments_cross(mesh, t[0], t[1], c[2], c[0])) return true;
+
+    if (vert_inner_segments_cross(mesh, t[1], t[2], c[0], c[1])) return true;
+    if (vert_inner_segments_cross(mesh, t[1], t[2], c[1], c[2])) return true;
+    if (vert_inner_segments_cross(mesh, t[1], t[2], c[2], c[0])) return true;
+
+    if (vert_inner_segments_cross(mesh, t[2], t[0], c[0], c[1])) return true;
+    if (vert_inner_segments_cross(mesh, t[2], t[0], c[1], c[2])) return true;
+    if (vert_inner_segments_cross(mesh, t[2], t[0], c[2], c[0])) return true;
+    return false;
 }

@@ -276,6 +276,11 @@ pub fn inner_segment_cross_inner_triangle(
     return true;
 }
 
+#[inline(always)]
+pub fn same_point(p: &[f64], q: &[f64]) -> bool {
+    p[0] == q[0] && p[1] == q[1] && p[2] == q[2]
+}
+
 pub fn same_half_plane(p: &[f64], q: &[f64], v1: &[f64], v2: &[f64], bump: &Bump) -> bool {
     // Projection on (x,y)-plane
     if double_to_sign(predicates::orient2d(p, v1, v2, bump))
@@ -385,6 +390,10 @@ pub fn point_in_inner_segment(p: &[f64], v1: &[f64], v2: &[f64], bump: &Bump) ->
             || (v1[2] < v2[2] && v1[2] < p[2] && p[2] < v2[2])
             || (v1[2] > v2[2] && v1[2] > p[2] && p[2] > v2[2]));
 }
+#[inline(always)]
+pub fn point_in_segment(p: &[f64], v1: &[f64], v2: &[f64], bump: &Bump) -> bool {
+    return same_point(p, v1) || same_point(p, v2) || point_in_inner_segment(p, v1, v2, bump);
+}
 
 #[inline(always)]
 pub fn inner_segment_cross_triangle(
@@ -402,4 +411,11 @@ pub fn inner_segment_cross_triangle(
         || inner_segments_cross(&v3, &v1, &u1, &u2, bump)
         || inner_segments_cross(&v1, &v2, &u1, &u2, bump)
         || inner_segment_cross_inner_triangle(&u1, &u2, &v1, &v2, &v3, bump);
+}
+#[inline(always)]
+fn point_in_triangle(p: &[f64], v1: &[f64], v2: &[f64], v3: &[f64], bump: &Bump) -> bool {
+    return point_in_segment(p, v1, v2, bump)
+        || point_in_segment(p, v2, v3, bump)
+        || point_in_segment(p, v3, v1, bump);
+    // || point_in_inner_triangle(p, v1, v2, v3, bump);
 }
