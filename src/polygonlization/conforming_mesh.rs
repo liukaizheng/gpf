@@ -5,7 +5,7 @@ use bumpalo::{collections::Vec, Bump};
 use crate::{
     predicates::{
         self, double_to_sign, inner_segment_cross_inner_triangle, inner_segment_cross_triangle,
-        inner_segments_cross, max_comp_in_tri_normal,
+        inner_segments_cross, max_comp_in_tri_normal, point_in_inner_segment, same_half_plane,
     },
     triangle::{TetMesh, TriFace, VPIVOT},
     INVALID_IND,
@@ -144,10 +144,11 @@ impl<'b> Constraints<'b> {
                 let nei = &mesh.tets[tet_face.tet].nei[tet_face.ver & 3];
                 tet_map[nei.ver & 3][nei.tet].push(i);
             }
-            let intersect_info = IntersectInfo {
+            let mut intersect_info = IntersectInfo {
                 intersected: Vec::new_in(bump),
                 visited: bumpalo::vec![in bump; false; mesh.tets.len()],
             };
+            constraint_sides_intersection(mesh, triangle, &mut intersect_info);
         }
         tet_map
     }
@@ -208,6 +209,44 @@ fn vert_inner_segments_cross(mesh: &TetMesh, u1: usize, u2: usize, v1: usize, v2
         mesh.point(v2),
         mesh.tets.bump(),
     );
+}
+
+#[inline(always)]
+fn verts_in_same_half_space(
+    mesh: &TetMesh,
+    u1: usize,
+    u2: usize,
+    v1: usize,
+    v2: usize,
+    v3: usize,
+) -> bool {
+    mesh.orient3d(u1, v1, v2, v3) == mesh.orient3d(u2, v1, v2, v3)
+}
+
+#[inline(always)]
+fn verts_same_half_plane(mesh: &TetMesh, u1: usize, u2: usize, v1: usize, v2: usize) -> bool {
+    if u1 == v1 || u1 == v2 || u2 == v1 || u2 == v2 {
+        return false;
+    }
+    return same_half_plane(
+        mesh.point(u1),
+        mesh.point(u2),
+        mesh.point(v1),
+        mesh.point(v2),
+        mesh.tets.bump(),
+    );
+}
+
+#[inline(always)]
+fn vert_point_in_inner_segment(mesh: &TetMesh, u: usize, v1: usize, v2: usize) -> bool {
+    return u != v1
+        && u != v2
+        && point_in_inner_segment(
+            mesh.point(u),
+            mesh.point(v1),
+            mesh.point(v2),
+            mesh.tets.bump(),
+        );
 }
 
 fn triangle_at_tet<'a, 'b: 'a>(mesh: &mut TetMesh<'a, 'b>, tri: &[usize]) -> TriFace {
@@ -271,12 +310,59 @@ fn triangle_at_tet<'a, 'b: 'a>(mesh: &mut TetMesh<'a, 'b>, tri: &[usize]) -> Tri
 }
 
 /// find all tets which intersect with triangle side
-fn constraint_sides_intersection(mesh: &mut TetMesh, triangle: &[usize]) {}
+fn constraint_sides_intersection<'b>(
+    mesh: &mut TetMesh<'_, 'b>,
+    triangle: &[usize],
+    info: &mut IntersectInfo<'b>,
+) {
+    for i in 0..3 {
+        let (va, vb) = (triangle[(i + 1) % 3], triangle[(i + 2) % 3]);
+        let (mut tid, mut connect_verts) = vert_on_constraint_side(mesh, va, vb, INVALID_IND, info);
+        while connect_verts[0] != vb {
+            match connect_verts.len() {
+                1 => {
+                    (tid, connect_verts) =
+                        vert_on_constraint_side(mesh, connect_verts[0], vb, tid, info);
+                }
+                2 => {
+                    let mut edge =
+                        TriFace::new(tid, VPIVOT[mesh.tets[tid].index(connect_verts[0]).unwrap()]);
+                    // the third must succeed
+                    for _ in 0..2 {
+                        if mesh.dest(&edge) == connect_verts[1] {
+                            break;
+                        }
+                        edge.eprev_esym_self();
+                    }
+                    (tid, connect_verts) =
+                        edge_cross_constraint_side(mesh, edge, va, vb, tid, info);
+                }
+                3 => {
+                    let mut edge =
+                        TriFace::new(tid, VPIVOT[mesh.tets[tid].index(connect_verts[0]).unwrap()]);
+                    for _ in 0..2 {
+                        let (dest, apex) = (mesh.dest(&edge), mesh.apex(&edge));
+                        if (dest == connect_verts[2] && apex == connect_verts[3])
+                            || (dest == connect_verts[3] && apex == connect_verts[2])
+                        {
+                            break;
+                        }
+                        edge.eprev_esym_self();
+                    }
+                    (tid, connect_verts) =
+                        triangle_pierced_by_constraint_side(mesh, edge, va, vb, info);
+                }
+                _ => unreachable!("never"),
+            }
+        }
+    }
+}
 
-fn constraint_side_intersection_start<'b>(
+fn vert_on_constraint_side<'b>(
     mesh: &mut TetMesh<'_, 'b>,
     va: usize,
     vb: usize,
+    prev_tid: usize,
     info: &mut IntersectInfo<'b>,
 ) -> (usize, Vec<'b, usize>) {
     let bump = mesh.tets.bump();
@@ -289,6 +375,9 @@ fn constraint_side_intersection_start<'b>(
     }
 
     for tid in inc_tets {
+        if tid == prev_tid {
+            continue;
+        }
         let tet = &mesh.tets[tid];
         if tet.index(vb).is_some() {
             return (tid, bumpalo::vec![in bump; vb]);
@@ -317,6 +406,137 @@ fn constraint_side_intersection_start<'b>(
                 return (tid, bumpalo::vec![in bump; ua, ub]);
             }
         }
+
+        for vid in oppo_verts {
+            if vert_point_in_inner_segment(mesh, vid, va, vb) {
+                return (tid, bumpalo::vec![in bump; vid]);
+            }
+        }
     }
     unreachable!("cannot find intersect tet by line segment");
+}
+
+fn edge_cross_constraint_side<'b>(
+    mesh: &mut TetMesh<'_, 'b>,
+    edge: TriFace,
+    ea: usize,
+    eb: usize,
+    prev_tid: usize,
+    info: &mut IntersectInfo<'b>,
+) -> (usize, Vec<'b, usize>) {
+    let bump = mesh.tets.bump();
+    let mut spin = edge.clone();
+    mesh.fnext_self(&mut spin);
+    while spin.tet != edge.tet {
+        let tid = spin.tet;
+        if !mesh.is_hull_tet(tid) {
+            if !info.visited[tid] {
+                info.visited[tid] = true;
+                info.intersected.push(tid);
+            }
+        }
+        mesh.fnext_self(&mut spin);
+    }
+
+    // now spin == edge
+    mesh.fnext_self(&mut spin);
+    let (va, vb) = (mesh.org(&edge), mesh.dest(&edge));
+    while spin.tet != edge.tet {
+        let tid = spin.tet;
+        if !mesh.is_hull_tet(tid) {
+            continue;
+        }
+        if tid == prev_tid {
+            continue;
+        }
+
+        let (vc, vd) = (mesh.apex(&spin), mesh.oppo(&spin));
+
+        // segment is one of edges of tet
+        if vc == eb || vd == eb {
+            return (tid, bumpalo::vec![in bump; eb]);
+        }
+
+        // segment and triangle properly intersect
+        if vert_inner_segment_cross_inner_triangle(mesh, ea, eb, vc, vd, va)
+            && verts_in_same_half_space(mesh, vb, ea, vc, vd, va)
+        {
+            return (tid, bumpalo::vec![in bump; vc, vd, va]);
+        }
+        if vert_inner_segment_cross_inner_triangle(mesh, ea, eb, vc, vd, vb)
+            && verts_in_same_half_space(mesh, va, ea, vc, vd, vb)
+        {
+            return (tid, bumpalo::vec![in bump; vc, vd, vb]);
+        }
+
+        // segment and segment properly intersect
+        if vert_inner_segments_cross(mesh, ea, eb, vc, vd)
+            && verts_in_same_half_space(mesh, ea, va, vc, vd, vb)
+        {
+            return (tid, bumpalo::vec![in bump; vc, vd]);
+        }
+
+        // tet vertex on segment
+        if vert_point_in_inner_segment(mesh, vc, ea, eb)
+            && verts_same_half_plane(mesh, vc, eb, va, vb)
+        {
+            return (tid, bumpalo::vec![in bump; vc]);
+        }
+        if vert_point_in_inner_segment(mesh, vd, ea, eb)
+            && verts_same_half_plane(mesh, vd, eb, va, vb)
+        {
+            return (tid, bumpalo::vec![in bump; vd]);
+        }
+
+        // segment and segment properly intersect
+        for v1 in [va, vb] {
+            for v2 in [vc, vd] {
+                if vert_inner_segments_cross(mesh, ea, eb, v1, v2)
+                    && verts_same_half_plane(mesh, v2, eb, va, vb)
+                {
+                    return (tid, bumpalo::vec![in bump; v1, v2]);
+                }
+            }
+        }
+    }
+
+    unreachable!("We cannot find the next tet when cross some tet edge")
+}
+fn triangle_pierced_by_constraint_side<'b>(
+    mesh: &mut TetMesh<'_, 'b>,
+    mut tri: TriFace,
+    ea: usize,
+    eb: usize,
+    info: &mut IntersectInfo<'b>,
+) -> (usize, Vec<'b, usize>) {
+    let next_tet = &mesh.tets[tri.tet].nei[tri.ver & 3];
+    let next_tid = next_tet.tet;
+    if !info.visited[next_tid] {
+        info.visited[next_tid] = true;
+        info.intersected.push(next_tid);
+    }
+
+    let v_oppo = mesh.oppo(next_tet);
+    let bump = mesh.tets.bump();
+    if v_oppo == eb {
+        return (next_tid, bumpalo::vec![in bump; eb]);
+    }
+
+    for _ in 0..3 {
+        let va = mesh.org(&tri);
+        let vb = mesh.dest(&tri);
+        if vert_inner_segment_cross_inner_triangle(mesh, ea, eb, va, vb, v_oppo) {
+            return (next_tid, bumpalo::vec![in bump; va, vb, v_oppo]);
+        }
+        tri.enext_self();
+    }
+
+    for v in [mesh.org(&tri), mesh.dest(&tri), mesh.apex(&tri)] {
+        if vert_inner_segments_cross(mesh, ea, eb, v, v_oppo) {
+            return (next_tid, bumpalo::vec![in bump; v, v_oppo]);
+        }
+    }
+
+    // it must be that [ea, eb] pass through v_oppo
+    return (next_tid, bumpalo::vec![in bump; v_oppo]);
 }
