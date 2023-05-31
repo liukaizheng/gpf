@@ -62,7 +62,10 @@ fn make_mesh_for_triangles<'a, 'b: 'a>(points: &'a [f64], triangles: Vec<'b, usi
     let mut constraints = Constraints::new(triangles);
     let mut tet_mesh = tetrahedralize(points, bump);
     constraints.place_virtual_constraints(&tet_mesh);
-    constraints.insert_constraints(&mut tet_mesh);
+    let tet_marks = constraints.insert_constraints(&mut tet_mesh);
+    for marks in tet_marks {
+        println!("{:?}", marks);
+    }
 }
 
 pub fn make_polyhedra_mesh<'b>(

@@ -2,6 +2,7 @@
 #![feature(float_next_up_down)]
 #![feature(cell_leak)]
 #![feature(trait_alias)]
+#![feature(iter_partition_in_place)]
 
 pub mod math;
 pub mod mesh;

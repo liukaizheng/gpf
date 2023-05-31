@@ -227,7 +227,7 @@ impl<'a, 'b: 'a> TetMesh<'a, 'b> {
         let bump = self.tets.bump();
         let mut result = bumpalo::vec![in bump; self.p2t[vid]];
         self.mark_test(result[0]);
-        let idx = 0;
+        let mut idx = 0;
         while idx < result.len() {
             let t = result[idx];
             let pos = self.tets[t].index(vid).unwrap();
@@ -236,11 +236,12 @@ impl<'a, 'b: 'a> TetMesh<'a, 'b> {
                     continue;
                 }
                 let nei = self.tets[t].nei[i].tet;
-                if !self.mark_tested(nei) || !self.is_hull_tet(nei) {
+                if !self.mark_tested(nei) && !self.is_hull_tet(nei) {
                     self.mark_test(nei);
                     result.push(nei);
                 }
             }
+            idx += 1;
         }
         for &tid in &result {
             self.unmark_test(tid);
@@ -978,6 +979,13 @@ fn insert_vertex_bw(
             bw_face_map.insert((verts[1], verts[2]), TriFace::new(newtet.tet, 1));
             bw_face_map.insert((verts[2], verts[0]), TriFace::new(newtet.tet, 8));
 
+            for vid in verts {
+                let tid = tets.p2t[vid];
+                if tets.tets[tid].data[2] != pid {
+                    tets.p2t[vid] = newtet.tet;
+                }
+            }
+
             *oldtet = newtet;
         }
 
@@ -1037,6 +1045,13 @@ fn insert_vertex_bw(
             tets.tets[newtet.tet].nei[2].set(neightet.tet, neightet.ver);
             tets.tets[neightet.tet].nei[neightet.ver & 3]
                 .set(newtet.tet, COL_V02_TBL[neightet.ver]);
+
+            for vid in v {
+                let tid = tets.p2t[vid];
+                if tets.tets[tid].data[2] != pid {
+                    tets.p2t[vid] = newtet.tet;
+                }
+            }
         }
 
         // randomly pick a new tet

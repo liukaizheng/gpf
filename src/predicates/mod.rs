@@ -14,7 +14,7 @@ pub use interval_number::*;
 pub use orient2d::*;
 pub use predicates::*;
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub enum Orientation {
     Positive,
     Negative,
@@ -198,6 +198,80 @@ pub fn max_comp_in_tri_normal<'b>(ov1: &[f64], ov2: &[f64], ov3: &[f64], bump: &
             bumpalo::vec![in bump;ov3[2]].into(),
         )
     }
+}
+
+pub fn point_in_inner_triangle(p: &[f64], v1: &[f64], v2: &[f64], v3: &[f64], bump: &Bump) -> bool {
+    // Projection on (x,y)-plane -> p VS v1
+    let mut o1 = double_to_sign(predicates::orient2d(p, v2, v3, bump));
+    let mut o2 = double_to_sign(predicates::orient2d(v1, v2, v3, bump));
+    let oo2 = o2;
+    if o1 != o2 {
+        return false;
+    };
+
+    // Projection on (y,z)-plane -> p VS v1
+    o1 = double_to_sign(predicates::orient2d(&p[1..], &v2[1..], &v3[1..], bump));
+    o2 = double_to_sign(predicates::orient2d(&v1[1..], &v2[1..], &v3[1..], bump));
+    let oo4 = o2;
+    if o1 != o2 {
+        return false;
+    };
+
+    // Projection on (x,z)-plane -> p VS v1
+    let pxz = [p[0], p[2]];
+    let v1xz = [v1[0], v1[2]];
+    let v2xz = [v2[0], v2[2]];
+    let v3xz = [v3[0], v3[2]];
+    o1 = double_to_sign(predicates::orient2d(&pxz, &v2xz, &v3xz, bump));
+    o2 = double_to_sign(predicates::orient2d(&v1xz, &v2xz, &v3xz, bump));
+    let oo6 = o2;
+    if o1 != o2 {
+        return false;
+    };
+
+    // Projection on (x,y)-plane -> p VS v2
+    o1 = double_to_sign(predicates::orient2d(p, v3, v1, bump));
+    o2 = oo2;
+    if o1 != o2 {
+        return false;
+    };
+
+    // Projection on (y,z)-plane -> p VS v2
+    o1 = double_to_sign(predicates::orient2d(&p[1..], &v3[1..], &v1[1..], bump));
+    o2 = oo4;
+    if o1 != o2 {
+        return false;
+    };
+
+    // Projection on (x,z)-plane -> p VS v2
+    o1 = double_to_sign(predicates::orient2d(&pxz, &v3xz, &v1xz, bump));
+    o2 = oo6;
+    if o1 != o2 {
+        return false;
+    };
+
+    // Projection on (x,y)-plane -> p VS v3
+    o1 = double_to_sign(predicates::orient2d(p, v1, v2, bump));
+    o2 = oo2;
+    if o1 != o2 {
+        return false;
+    };
+
+    // Projection on (y,z)-plane -> p VS v3
+    o1 = double_to_sign(predicates::orient2d(&p[1..], &v1[1..], &v2[1..], bump));
+    o2 = oo4;
+    if o1 != o2 {
+        return false;
+    };
+
+    // Projection on (x,z)-plane -> p VS v3
+    o1 = double_to_sign(predicates::orient2d(&pxz, &v1xz, &v2xz, bump));
+    o2 = oo6;
+    if o1 != o2 {
+        return false;
+    };
+
+    true
 }
 
 #[inline]
@@ -390,6 +464,7 @@ pub fn point_in_inner_segment(p: &[f64], v1: &[f64], v2: &[f64], bump: &Bump) ->
             || (v1[2] < v2[2] && v1[2] < p[2] && p[2] < v2[2])
             || (v1[2] > v2[2] && v1[2] > p[2] && p[2] > v2[2]));
 }
+
 #[inline(always)]
 pub fn point_in_segment(p: &[f64], v1: &[f64], v2: &[f64], bump: &Bump) -> bool {
     return same_point(p, v1) || same_point(p, v2) || point_in_inner_segment(p, v1, v2, bump);
@@ -413,9 +488,9 @@ pub fn inner_segment_cross_triangle(
         || inner_segment_cross_inner_triangle(&u1, &u2, &v1, &v2, &v3, bump);
 }
 #[inline(always)]
-fn point_in_triangle(p: &[f64], v1: &[f64], v2: &[f64], v3: &[f64], bump: &Bump) -> bool {
+pub fn point_in_triangle(p: &[f64], v1: &[f64], v2: &[f64], v3: &[f64], bump: &Bump) -> bool {
     return point_in_segment(p, v1, v2, bump)
         || point_in_segment(p, v2, v3, bump)
-        || point_in_segment(p, v3, v1, bump);
-    // || point_in_inner_triangle(p, v1, v2, v3, bump);
+        || point_in_segment(p, v3, v1, bump)
+        || point_in_inner_triangle(p, v1, v2, v3, bump);
 }
