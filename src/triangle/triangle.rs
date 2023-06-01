@@ -1172,7 +1172,7 @@ fn form_skeleton(m: &mut Mesh, ghost: &[bool], segment: &[usize], bump: &Bump) {
     let mut vertex_map = make_vertex_map(&m.triangles, ghost, m.points.len() >> 1, bump);
     for (i, seg) in segment.chunks(2).enumerate() {
         if seg[0] != seg[1] {
-            insert_segment(m, &mut vertex_map, ghost, seg[0], seg[1], 1 << i, bump);
+            insert_segment(m, &mut vertex_map, ghost, seg[0], seg[1], i << 1, bump);
         }
     }
 }

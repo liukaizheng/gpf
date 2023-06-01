@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Instant};
 
 use bumpalo::{collections::Vec, Bump};
 
@@ -138,17 +138,22 @@ impl<'b> Constraints<'b> {
             bumpalo::vec![in bump; Vec::<'b, usize>::new_in(bump); mesh.tets.len()],
             bumpalo::vec![in bump; Vec::<'b, usize>::new_in(bump); mesh.tets.len()],
         ];
+        let mut intersect_info = IntersectInfo {
+            intersected: Vec::new_in(bump),
+            visited: bumpalo::vec![in bump; false; mesh.tets.len()],
+        };
         for (i, triangle) in self.triangles.chunks(3).enumerate() {
             let tet_face = triangle_at_tet(mesh, triangle);
             if tet_face.tet != INVALID_IND {
                 tet_marks[tet_face.ver & 3][tet_face.tet].push(i);
                 let nei = &mesh.tets[tet_face.tet].nei[tet_face.ver & 3];
                 tet_marks[nei.ver & 3][nei.tet].push(i);
+                continue;
             }
-            let mut intersect_info = IntersectInfo {
-                intersected: Vec::new_in(bump),
-                visited: bumpalo::vec![in bump; false; mesh.tets.len()],
-            };
+            let start = Instant::now();
+            intersect_info.intersected.clear();
+            intersect_info.visited.fill(false);
+            println!("the {} elapsed: in {:?}", i, start.elapsed());
             constraint_sides_intersections(mesh, triangle, &mut intersect_info);
             set_improper_intersections(mesh, i, triangle, &mut tet_marks, &mut intersect_info);
             interior_intersections(mesh, i, triangle, &mut tet_marks, &mut intersect_info);
@@ -324,6 +329,7 @@ fn triangle_at_tet<'a, 'b: 'a>(mesh: &mut TetMesh<'a, 'b>, tri: &[usize]) -> Tri
             }
             let nei = mesh.tets[tid].nei[i].tet;
             if mesh.is_hull_tet(nei) && !mesh.mark_tested(nei) {
+                mesh.mark_test(nei);
                 tets.push(nei);
             }
         }
@@ -384,8 +390,8 @@ fn constraint_sides_intersections<'b>(
                         TriFace::new(tid, VPIVOT[mesh.tets[tid].index(connect_verts[0]).unwrap()]);
                     for _ in 0..2 {
                         let (dest, apex) = (mesh.dest(&edge), mesh.apex(&edge));
-                        if (dest == connect_verts[2] && apex == connect_verts[3])
-                            || (dest == connect_verts[3] && apex == connect_verts[2])
+                        if (dest == connect_verts[1] && apex == connect_verts[2])
+                            || (dest == connect_verts[2] && apex == connect_verts[1])
                         {
                             break;
                         }
