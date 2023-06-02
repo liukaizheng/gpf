@@ -27,6 +27,41 @@ fn make_two_dim_arr<'b, T: 'b + Clone>(
     )
 }
 
+fn read_points_from_obj<'b>(name: &str, bump: &'b Bump) -> BVec<'b, f64> {
+    use std::io::BufRead;
+    let f = std::fs::File::open(name).unwrap();
+    let reader = std::io::BufReader::new(f);
+
+    let mut vertices = BVec::new_in(bump);
+
+    for line in reader.lines() {
+        let line = line.unwrap();
+        let mut split = line.split_whitespace();
+        let prefix = split.next().unwrap();
+
+        match prefix {
+            "v" => {
+                let x = split.next().unwrap().parse::<f64>().unwrap();
+                let y = split.next().unwrap().parse::<f64>().unwrap();
+                let z = split.next().unwrap().parse::<f64>().unwrap();
+                vertices.push(x);
+                vertices.push(y);
+                vertices.push(z);
+            }
+            _ => {}  // Ignore other lines
+        }
+    }
+    vertices
+}
+
+#[test]
+fn test_tetrahedralize() {
+    let bump = Bump::new();
+    let points = read_points_from_obj("model1.obj", &bump);
+    let tets = tetrahedralize(&points, &bump);
+    let a = 2;
+}
+
 #[test]
 fn two_models() {
     let f = std::fs::File::open("tests/data/solidFix.json").expect("read file");
