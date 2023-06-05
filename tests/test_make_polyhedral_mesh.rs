@@ -1,6 +1,6 @@
 use bumpalo::Bump;
-use gpf::{polygonlization::make_polyhedra_mesh, triangle::tetrahedralize};
-use serde::{Deserialize, Serialize};
+use gpf::polygonlization::make_polyhedra_mesh;
+use serde::Deserialize;
 type BVec<'b, T> = bumpalo::collections::Vec<'b, T>;
 
 #[allow(non_snake_case)]
@@ -27,54 +27,6 @@ fn make_two_dim_arr<'b, T: 'b + Clone>(
     )
 }
 
-fn read_points_from_obj<'b>(name: &str, bump: &'b Bump) -> BVec<'b, f64> {
-    use std::io::BufRead;
-    let f = std::fs::File::open(name).unwrap();
-    let reader = std::io::BufReader::new(f);
-
-    let mut vertices = BVec::new_in(bump);
-
-    for line in reader.lines() {
-        let line = line.unwrap();
-        let mut split = line.split_whitespace();
-        let prefix = split.next().unwrap();
-
-        match prefix {
-            "v" => {
-                let x = split.next().unwrap().parse::<f64>().unwrap();
-                let y = split.next().unwrap().parse::<f64>().unwrap();
-                let z = split.next().unwrap().parse::<f64>().unwrap();
-                vertices.push(x);
-                vertices.push(y);
-                vertices.push(z);
-            }
-            _ => {} // Ignore other lines
-        }
-    }
-    vertices
-}
-
-#[test]
-fn test_tetrahedralize() {
-    let bump = Bump::new();
-    let points = read_points_from_obj("model1.obj", &bump);
-    let tet_mesh = tetrahedralize(&points, &bump);
-    let tet_triangles = BVec::from_iter_in(
-        tet_mesh.tets.iter().enumerate().filter_map(|(tid, t)| {
-            if tet_mesh.is_hull_tet(tid) {
-                None
-            } else {
-                let d = &t.data;
-                Some([
-                    d[0], d[2], d[1], d[0], d[1], d[3], d[1], d[2], d[3], d[2], d[0], d[3],
-                ])
-            }
-        }),
-        &bump,
-    );
-    println!("the number of valid tets is {}", tet_triangles.len());
-}
-
 #[test]
 fn two_models() {
     let f = std::fs::File::open("tests/data/solidFix.json").expect("read file");
@@ -90,7 +42,6 @@ fn two_models() {
         &bump,
         1e-6,
     );
-    let a = 2;
 }
 
 #[test]

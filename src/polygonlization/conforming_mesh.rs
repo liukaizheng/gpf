@@ -1,4 +1,4 @@
-use std::{collections::HashMap};
+use std::collections::HashMap;
 
 use bumpalo::{collections::Vec, Bump};
 
@@ -13,6 +13,7 @@ use crate::{
     triangle::{TetMesh, TriFace, VPIVOT},
     INVALID_IND,
 };
+
 pub struct Constraints<'b> {
     triangles: Vec<'b, usize>,
     n_ori_triangles: usize,
