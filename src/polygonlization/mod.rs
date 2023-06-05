@@ -1,6 +1,7 @@
 mod conforming_mesh;
 
 use bumpalo::{collections::Vec, Bump};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     predicates::get_exponent,
@@ -57,41 +58,64 @@ pub fn remove_duplicates<'b>(
     )
 }
 
+#[derive(Deserialize, Serialize)]
+struct Marks {
+    marks: [std::vec::Vec<std::vec::Vec<usize>>; 5],
+}
+
 fn make_mesh_for_triangles<'a, 'b: 'a>(points: &'a [f64], triangles: Vec<'b, usize>) {
     let bump = triangles.bump();
     let mut constraints = Constraints::new(triangles);
     let mut tet_mesh = tetrahedralize(points, bump);
-    let tet_triangles = Vec::from_iter_in(tet_mesh.tets.iter().enumerate().filter_map(|(tid, t)| {
-        if tet_mesh.is_hull_tet(tid) {
-            None
-        } else {
-            let d = &t.data;
-            Some([
-                d[0], d[2], d[1],
-                d[0], d[1], d[3],
-                d[1], d[2], d[3],
-                d[2], d[0], d[3],
-            ])
-        }
-    }).flatten(), bump);
-    write_obj("tets.obj", points, &tet_triangles);
+    let tet_triangles = Vec::from_iter_in(
+        tet_mesh
+            .tets
+            .iter()
+            .enumerate()
+            .filter_map(|(tid, t)| {
+                if tet_mesh.is_hull_tet(tid) {
+                    None
+                } else {
+                    let d = &t.data;
+                    Some([
+                        d[0], d[2], d[1], d[0], d[1], d[3], d[1], d[2], d[3], d[2], d[0], d[3],
+                    ])
+                }
+            })
+            .flatten(),
+        bump,
+    );
+    // write_obj("tets.obj", points, &tet_triangles);
     constraints.place_virtual_constraints(&tet_mesh);
-    let tet_marks = constraints.insert_constraints(&mut tet_mesh);
-    for marks in tet_marks {
-        println!("{:?}", marks);
+    let mut tet_marks = constraints.insert_constraints(&mut tet_mesh);
+    for arr in &mut tet_marks {
+        for marks in arr {
+            marks.sort_unstable();
+        }
     }
+    let marks = tet_marks.map(|arr| {
+        arr.into_iter()
+            .map(|m| std::vec::Vec::from_iter(m))
+            .collect::<std::vec::Vec<_>>()
+    });
+    let marks = Marks { marks };
+    let mark_strs = serde_json::to_string(&marks).unwrap();
+    use std::io::Write;
+    let mut file = std::fs::File::create("marks.json").unwrap();
+    file.write_all(mark_strs.as_bytes()).unwrap();
 }
 
-fn write_obj(name: &str, points: &[f64], triangles: &[usize]) {
+fn write_off(name: &str, points: &[f64], triangles: &[usize]) {
     use std::io::Write;
     let mut file = std::fs::File::create(name).unwrap();
+    writeln!(&mut file, "OFF").unwrap();
+    writeln!(&mut file, "{} {} 0", points.len() / 3, triangles.len() / 3).unwrap();
     for p in points.chunks(3) {
-        writeln!(&mut file, "v {} {} {}", p[0], p[1], p[2]).unwrap();
+        writeln!(&mut file, "{} {} {}", p[0], p[1], p[2]).unwrap();
     }
     for t in triangles.chunks(3) {
-        writeln!(&mut file, "f {} {} {}", t[0] + 1, t[1] + 1, t[2] + 1).unwrap();
+        writeln!(&mut file, "3 {} {} {}", t[0], t[1], t[2]).unwrap();
     }
-
 }
 
 pub fn make_polyhedra_mesh<'b>(
@@ -123,6 +147,6 @@ pub fn make_polyhedra_mesh<'b>(
         bump,
     );
     let (triangles, tri_parents) = triangulate_polygon_soup(&points, &face_edges, axis_data, bump);
-    write_obj("model.obj", &points, &triangles);
+    // write_off("model.off", &points, &triangles);
     make_mesh_for_triangles(&points, triangles);
 }

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Instant};
+use std::{collections::HashMap};
 
 use bumpalo::{collections::Vec, Bump};
 
@@ -150,10 +150,8 @@ impl<'b> Constraints<'b> {
                 tet_marks[nei.ver & 3][nei.tet].push(i);
                 continue;
             }
-            let start = Instant::now();
             intersect_info.intersected.clear();
             intersect_info.visited.fill(false);
-            println!("the {} elapsed: in {:?}", i, start.elapsed());
             constraint_sides_intersections(mesh, triangle, &mut intersect_info);
             set_improper_intersections(mesh, i, triangle, &mut tet_marks, &mut intersect_info);
             interior_intersections(mesh, i, triangle, &mut tet_marks, &mut intersect_info);
@@ -228,7 +226,7 @@ fn verts_in_same_half_space(
     v2: usize,
     v3: usize,
 ) -> bool {
-    mesh.orient3d(u1, v1, v2, v3) == mesh.orient3d(u2, v1, v2, v3)
+    double_to_sign(mesh.orient3d(u1, v1, v2, v3)) == double_to_sign(mesh.orient3d(u2, v1, v2, v3))
 }
 
 #[inline(always)]

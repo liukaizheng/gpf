@@ -48,7 +48,7 @@ fn read_points_from_obj<'b>(name: &str, bump: &'b Bump) -> BVec<'b, f64> {
                 vertices.push(y);
                 vertices.push(z);
             }
-            _ => {}  // Ignore other lines
+            _ => {} // Ignore other lines
         }
     }
     vertices
@@ -58,8 +58,21 @@ fn read_points_from_obj<'b>(name: &str, bump: &'b Bump) -> BVec<'b, f64> {
 fn test_tetrahedralize() {
     let bump = Bump::new();
     let points = read_points_from_obj("model1.obj", &bump);
-    let tets = tetrahedralize(&points, &bump);
-    let a = 2;
+    let tet_mesh = tetrahedralize(&points, &bump);
+    let tet_triangles = BVec::from_iter_in(
+        tet_mesh.tets.iter().enumerate().filter_map(|(tid, t)| {
+            if tet_mesh.is_hull_tet(tid) {
+                None
+            } else {
+                let d = &t.data;
+                Some([
+                    d[0], d[2], d[1], d[0], d[1], d[3], d[1], d[2], d[3], d[2], d[0], d[3],
+                ])
+            }
+        }),
+        &bump,
+    );
+    println!("the number of valid tets is {}", tet_triangles.len());
 }
 
 #[test]
