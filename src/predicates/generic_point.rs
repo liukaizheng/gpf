@@ -21,6 +21,14 @@ impl Deref for ExplicitPoint3D {
     }
 }
 
+impl From<&[f64]> for ExplicitPoint3D {
+    fn from(d: &[f64]) -> Self {
+        Self {
+            data: [d[0], d[1], d[2]],
+        }
+    }
+}
+
 #[inline(always)]
 fn normalize_lambda3d(x: &mut [f64], y: &mut [f64], z: &mut [f64], d: &mut [f64]) {
     let data = [x, y, z, d];

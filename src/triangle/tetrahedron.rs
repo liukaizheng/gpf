@@ -1,4 +1,3 @@
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::{
@@ -1247,47 +1246,5 @@ pub fn tetrahedralize<'a, 'b: 'a>(points: &'a [f64], bump: &'b Bump) -> TetMesh<
         }
     }
 
-    write_tet(&mesh);
     mesh
-}
-
-#[derive(Serialize, Deserialize)]
-struct TetMsh {
-    tet_node: std::vec::Vec<usize>,
-    tet_neigh: std::vec::Vec<usize>,
-    p2i: std::vec::Vec<usize>,
-}
-
-pub fn write_tet(mesh: &TetMesh) {
-    let tet_node = mesh
-        .tets
-        .iter()
-        .map(|t| {
-            t.data.iter().map(|&vid| {
-                if vid >= mesh.n_points {
-                    u32::MAX as usize
-                } else {
-                    vid
-                }
-            })
-        })
-        .flatten()
-        .collect::<std::vec::Vec<_>>();
-    let tet_neigh = mesh
-        .tets
-        .iter()
-        .map(|t| t.nei.iter().map(|f| (f.tet << 2) + (f.ver & 3)))
-        .flatten()
-        .collect::<std::vec::Vec<_>>();
-    let p2i = std::vec::Vec::from_iter(mesh.p2t.clone());
-    let tets = TetMsh {
-        tet_node,
-        tet_neigh,
-        p2i,
-    };
-    let json_str = serde_json::to_string(&tets).unwrap();
-    use std::io::Write;
-    let mut file = std::fs::File::create("tets.json").unwrap();
-    file.write_all(json_str.as_bytes())
-        .expect("write sucessfually");
 }

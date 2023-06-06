@@ -1,3 +1,4 @@
+mod bsp_complex;
 mod conforming_mesh;
 
 use bumpalo::{collections::Vec, Bump};
@@ -7,7 +8,7 @@ use crate::{
     triangle::{tetrahedralize, triangulate_polygon_soup},
 };
 
-use self::conforming_mesh::Constraints;
+use self::{bsp_complex::BSPComplex, conforming_mesh::Constraints};
 
 fn point(points: &[f64], idx: usize) -> &[f64] {
     let start = idx * 3;
@@ -81,6 +82,7 @@ fn make_mesh_for_triangles<'a, 'b: 'a>(points: &'a [f64], triangles: Vec<'b, usi
     );
     constraints.place_virtual_constraints(&tet_mesh);
     let tet_marks = constraints.insert_constraints(&mut tet_mesh);
+    let complex = BSPComplex::new(tet_mesh, tet_marks);
 }
 
 pub fn make_polyhedra_mesh<'b>(
