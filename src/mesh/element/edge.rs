@@ -1,4 +1,4 @@
-use std::ops::{Deref, DerefMut, Index, IndexMut};
+use std::{ops::{Deref, DerefMut, Index, IndexMut}, marker::PhantomData};
 
 use super::{iter_next, Element, ElementId, HalfedgeIter};
 use crate::{element_id, mesh::Mesh, INVALID_IND};
@@ -8,14 +8,15 @@ pub struct EdgeId(pub usize);
 
 element_id! {struct EdgeId}
 
-pub struct EdgeIter<'a, M: Mesh> {
+pub struct EdgeIter<'a, 'b: 'a, M: Mesh<'b>> {
+    phantom: PhantomData<&'b M>,
     id: EdgeId,
     mesh: &'a M,
 }
 
-impl<'a, M: Mesh> EdgeIter<'a, M> {
+impl<'a, 'b: 'a, M: Mesh<'b>> EdgeIter<'a, 'b, M> {
     pub fn new(id: EdgeId, mesh: &'a M) -> Self {
-        Self { id, mesh }
+        Self { id, mesh , phantom: PhantomData}
     }
 
     #[allow(dead_code)]
@@ -28,7 +29,7 @@ impl<'a, M: Mesh> EdgeIter<'a, M> {
     }
 }
 
-impl<'a, M: Mesh> Deref for EdgeIter<'a, M> {
+impl<'a, 'b: 'a, M: Mesh<'b>> Deref for EdgeIter<'a, 'b, M> {
     type Target = EdgeId;
 
     fn deref(&self) -> &Self::Target {
@@ -36,7 +37,7 @@ impl<'a, M: Mesh> Deref for EdgeIter<'a, M> {
     }
 }
 
-impl<'a, M: Mesh> Element for EdgeIter<'a, M> {
+impl<'a, 'b: 'a, M: Mesh<'b>> Element<'b> for EdgeIter<'a, 'b, M> {
     type Id = EdgeId;
     type M = M;
 
@@ -61,17 +62,17 @@ impl<'a, M: Mesh> Element for EdgeIter<'a, M> {
     }
 }
 
-pub trait Edge: Element {
-    fn halfedge(&self) -> HalfedgeIter<'_, Self::M>;
+pub trait Edge<'b>: Element<'b> {
+    fn halfedge(&self) -> HalfedgeIter<'_, 'b, Self::M>;
 }
 
-impl<'a, M: Mesh> Edge for EdgeIter<'a, M> {
-    fn halfedge(&self) -> HalfedgeIter<'_, Self::M> {
+impl<'a, 'b: 'a, M: Mesh<'b>> Edge<'b> for EdgeIter<'a, 'b, M> {
+    fn halfedge(&self) -> HalfedgeIter<'_, 'b, Self::M> {
         HalfedgeIter::new(self.mesh.e_halfedge(self.id), self.mesh)
     }
 }
 
-impl<'a, M: Mesh> Iterator for EdgeIter<'a, M> {
+impl<'a, 'b: 'a, M: Mesh<'b>> Iterator for EdgeIter<'a, 'b, M> {
     type Item = EdgeId;
 
     fn next(&mut self) -> Option<Self::Item> {

@@ -1,4 +1,4 @@
-use std::ops::{Deref, DerefMut, Index, IndexMut};
+use std::{ops::{Deref, DerefMut, Index, IndexMut}, marker::PhantomData};
 
 use super::{iter_next, Element, ElementId};
 use crate::{element_id, mesh::Mesh, INVALID_IND};
@@ -8,14 +8,15 @@ pub struct FaceId(pub usize);
 
 element_id! {struct FaceId}
 
-pub struct FaceIter<'a, M: Mesh> {
+pub struct FaceIter<'a, 'b: 'a, M: Mesh<'b>> {
+    phantom: PhantomData<&'b M>,
     id: FaceId,
     mesh: &'a M,
 }
 
-impl<'a, M: Mesh> FaceIter<'a, M> {
+impl<'a, 'b: 'a, M: Mesh<'b>> FaceIter<'a, 'b, M> {
     pub fn new(id: FaceId, mesh: &'a M) -> Self {
-        Self { id, mesh }
+        Self { id, mesh, phantom: PhantomData}
     }
 
     #[allow(dead_code)]
@@ -28,7 +29,7 @@ impl<'a, M: Mesh> FaceIter<'a, M> {
     }
 }
 
-impl<'a, M: Mesh> Deref for FaceIter<'a, M> {
+impl<'a, 'b: 'a, M: Mesh<'b>> Deref for FaceIter<'a, 'b, M> {
     type Target = FaceId;
 
     fn deref(&self) -> &Self::Target {
@@ -36,7 +37,7 @@ impl<'a, M: Mesh> Deref for FaceIter<'a, M> {
     }
 }
 
-impl<'a, M: Mesh> Element for FaceIter<'a, M> {
+impl<'a, 'b: 'a, M: Mesh<'b>> Element<'b> for FaceIter<'a, 'b, M> {
     type Id = FaceId;
     type M = M;
 
@@ -61,7 +62,7 @@ impl<'a, M: Mesh> Element for FaceIter<'a, M> {
     }
 }
 
-impl<'a, M: Mesh> Iterator for FaceIter<'a, M> {
+impl<'a, 'b: 'a, M: Mesh<'b>> Iterator for FaceIter<'a, 'b, M> {
     type Item = FaceId;
 
     fn next(&mut self) -> Option<Self::Item> {

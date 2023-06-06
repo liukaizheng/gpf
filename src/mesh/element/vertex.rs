@@ -1,4 +1,4 @@
-use std::ops::{Deref, DerefMut, Index, IndexMut};
+use std::{ops::{Deref, DerefMut, Index, IndexMut}, marker::PhantomData};
 
 use super::{iter_next, Edge, EdgeId, Element, ElementId, Halfedge, HalfedgeId, HalfedgeIter};
 use crate::{element_id, element_iterator, mesh::Mesh, INVALID_IND};
@@ -8,14 +8,15 @@ pub struct VertexId(pub usize);
 
 element_id! {struct VertexId}
 
-pub struct VertexIter<'a, M: Mesh> {
+pub struct VertexIter<'a, 'b: 'a, M: Mesh<'b>> {
+    phantom: PhantomData<&'b M>,
     id: VertexId,
     mesh: &'a M,
 }
 
-impl<'a, M: Mesh> VertexIter<'a, M> {
+impl<'a, 'b: 'a, M: Mesh<'b>> VertexIter<'a, 'b, M> {
     pub fn new(id: VertexId, mesh: &'a M) -> Self {
-        Self { id, mesh }
+        Self { id, mesh, phantom: PhantomData}
     }
 
     #[allow(dead_code)]
@@ -28,7 +29,7 @@ impl<'a, M: Mesh> VertexIter<'a, M> {
     }
 }
 
-impl<'a, M: Mesh> Deref for VertexIter<'a, M> {
+impl<'a, 'b: 'a, M: Mesh<'b>> Deref for VertexIter<'a, 'b, M> {
     type Target = VertexId;
 
     fn deref(&self) -> &Self::Target {
@@ -36,37 +37,37 @@ impl<'a, M: Mesh> Deref for VertexIter<'a, M> {
     }
 }
 
-pub trait Vertex: Element {
-    fn halfedge(&self) -> HalfedgeIter<'_, Self::M>;
-    fn adjacent_vertices(&self) -> VVertexIter<'_, Self::M>;
-    fn adjacent_edges(&self) -> VEdgeIter<'_, Self::M>;
-    fn incoming_halfedge(&self) -> VIncomingHalfedgeIter<'_, Self::M>;
-    fn outgoing_halfedge(&self) -> VOutgoingHalfedgeIter<'_, Self::M>;
+pub trait Vertex<'b>: Element<'b> {
+    fn halfedge(&self) -> HalfedgeIter<'_, 'b, Self::M>;
+    fn adjacent_vertices(&self) -> VVertexIter<'_, 'b, Self::M>;
+    fn adjacent_edges(&self) -> VEdgeIter<'_, 'b, Self::M>;
+    fn incoming_halfedge(&self) -> VIncomingHalfedgeIter<'_, 'b, Self::M>;
+    fn outgoing_halfedge(&self) -> VOutgoingHalfedgeIter<'_, 'b, Self::M>;
 }
 
-impl<'a, M: Mesh> Vertex for VertexIter<'a, M> {
+impl<'a, 'b: 'a, M: Mesh<'b>> Vertex<'b> for VertexIter<'a, 'b, M> {
     #[inline(always)]
-    fn halfedge(&self) -> HalfedgeIter<'_, Self::M> {
+    fn halfedge(&self) -> HalfedgeIter<'_, 'b, Self::M> {
         HalfedgeIter::new(self.mesh.v_halfedge(self.id), self.mesh)
     }
 
     #[inline(always)]
-    fn adjacent_vertices(&self) -> VVertexIter<'_, Self::M> {
+    fn adjacent_vertices(&self) -> VVertexIter<'_, 'b, Self::M> {
         VVertexIter::new(self.id(), self.mesh)
     }
 
     #[inline(always)]
-    fn adjacent_edges(&self) -> VEdgeIter<'_, Self::M> {
+    fn adjacent_edges(&self) -> VEdgeIter<'_, 'b, Self::M> {
         VEdgeIter::new(self.id, self.mesh)
     }
 
     #[inline(always)]
-    fn incoming_halfedge(&self) -> VIncomingHalfedgeIter<'_, Self::M> {
+    fn incoming_halfedge(&self) -> VIncomingHalfedgeIter<'_, 'b, Self::M> {
         VIncomingHalfedgeIter::new(self.mesh, *self.halfedge().prev())
     }
 
     #[inline(always)]
-    fn outgoing_halfedge(&self) -> VOutgoingHalfedgeIter<'_, Self::M> {
+    fn outgoing_halfedge(&self) -> VOutgoingHalfedgeIter<'_, 'b, Self::M> {
         VOutgoingHalfedgeIter::new(self.mesh, self.mesh.v_halfedge(self.id))
     }
 }
@@ -107,7 +108,7 @@ impl VNeighborIterState {
     }
 
     #[inline]
-    pub fn is_halfedge_canonical<M: Mesh>(&self, mesh: &M) -> bool {
+    pub fn is_halfedge_canonical<'b, M: Mesh<'b> + 'b>(&self, mesh: &M) -> bool {
         if mesh.use_implicit_twin() {
             true
         } else {
@@ -116,7 +117,7 @@ impl VNeighborIterState {
     }
 
     #[inline]
-    pub fn next<M: Mesh>(&mut self, mesh: &M, first_he: &mut HalfedgeId) {
+    pub fn next<'b, M: Mesh<'b>>(&mut self, mesh: &M, first_he: &mut HalfedgeId) {
         if mesh.use_implicit_twin() {
             self.curr_he = mesh.he_next_outgoing_neighbor(self.curr_he);
         } else {
@@ -139,7 +140,8 @@ impl VNeighborIterState {
     }
 }
 
-pub struct VVertexIter<'a, M: Mesh> {
+pub struct VVertexIter<'a, 'b: 'a, M: Mesh<'b>> {
+    phantom: PhantomData<&'b M>,
     mesh: &'a M,
     just_start: bool,
     curr_state: VNeighborIterState,
@@ -149,7 +151,7 @@ pub struct VVertexIter<'a, M: Mesh> {
 
 macro_rules! vertex_state_iterator {
     (struct $name:ident -> $item: ty, {$($id: tt)*}) => {
-        impl<'a, M: Mesh> $name<'a, M> {
+        impl<'a, 'b: 'a, M: Mesh<'b>> $name<'a, 'b, M> {
             pub fn new(id: VertexId, mesh: &'a M) -> Self {
                 let mut first_he = mesh.v_halfedge(id);
                 let mut curr_state = VNeighborIterState::new(first_he);
@@ -162,6 +164,7 @@ macro_rules! vertex_state_iterator {
                 }
                 let start_state = curr_state.clone();
                 Self {
+                    phantom: PhantomData,
                     mesh,
                     just_start: true,
                     curr_state,
@@ -225,16 +228,18 @@ macro_rules! vertex_halfedge_iterator {
     };
 }
 
-pub struct VIncomingHalfedgeIter<'a, M: Mesh> {
+pub struct VIncomingHalfedgeIter<'a, 'b: 'a, M: Mesh<'b>> {
+    phantom: PhantomData<&'b M>,
     mesh: &'a M,
     just_start: bool,
     first_he: HalfedgeId,
     curr_he: HalfedgeId,
 }
 
-impl<'a, M: Mesh> VIncomingHalfedgeIter<'a, M> {
+impl<'a, 'b: 'a, M: Mesh<'b>> VIncomingHalfedgeIter<'a, 'b, M> {
     pub fn new(mesh: &'a M, he: HalfedgeId) -> Self {
         Self {
+            phantom: PhantomData,
             mesh,
             just_start: true,
             first_he: he,
@@ -249,16 +254,18 @@ impl<'a, M: Mesh> VIncomingHalfedgeIter<'a, M> {
 
 vertex_halfedge_iterator! {struct VIncomingHalfedgeIter}
 
-pub struct VOutgoingHalfedgeIter<'a, M: Mesh> {
+pub struct VOutgoingHalfedgeIter<'a, 'b: 'a, M: Mesh<'b>> {
+    phantom: PhantomData<&'b M>,
     mesh: &'a M,
     just_start: bool,
     first_he: HalfedgeId,
     curr_he: HalfedgeId,
 }
 
-impl<'a, M: Mesh> VOutgoingHalfedgeIter<'a, M> {
+impl<'a, 'b: 'a, M: Mesh<'b>> VOutgoingHalfedgeIter<'a, 'b, M> {
     pub fn new(mesh: &'a M, he: HalfedgeId) -> Self {
         Self {
+            phantom: PhantomData,
             mesh,
             just_start: true,
             first_he: he,
@@ -273,7 +280,8 @@ impl<'a, M: Mesh> VOutgoingHalfedgeIter<'a, M> {
 
 vertex_halfedge_iterator! {struct VOutgoingHalfedgeIter}
 
-pub struct VEdgeIter<'a, M: Mesh> {
+pub struct VEdgeIter<'a, 'b: 'a, M: Mesh<'b>> {
+    phantom: PhantomData<&'b M>,
     mesh: &'a M,
     just_start: bool,
     curr_state: VNeighborIterState,

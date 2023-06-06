@@ -7,14 +7,16 @@ use super::{
     FaceOrBoundaryLoopId, HalfedgeData, HalfedgeId, HalfedgeIter, Mesh, MeshData, VertexId,
     VertexIter,
 };
+use bumpalo::collections::Vec;
+use bumpalo::Bump;
 
-pub struct ManifoldMesh {
-    v_halfedge_arr: Vec<HalfedgeId>,
-    he_next_arr: Vec<HalfedgeId>,
-    he_vertex_arr: Vec<VertexId>,
-    he_face_arr: Vec<FaceOrBoundaryLoopId>,
-    f_halfedge_arr: Vec<HalfedgeId>,
-    bl_halfedge_arr: Vec<BoundaryLoopId>,
+pub struct ManifoldMesh<'b> {
+    v_halfedge_arr: Vec<'b, HalfedgeId>,
+    he_next_arr: Vec<'b, HalfedgeId>,
+    he_vertex_arr: Vec<'b, VertexId>,
+    he_face_arr: Vec<'b, FaceOrBoundaryLoopId>,
+    f_halfedge_arr: Vec<'b, HalfedgeId>,
+    bl_halfedge_arr: Vec<'b, BoundaryLoopId>,
 
     n_vertices: usize,
     n_halfedges: usize,
@@ -22,10 +24,10 @@ pub struct ManifoldMesh {
     n_faces: usize,
     n_boundary_loops: usize,
 
-    halfedges_data: Vec<Weak<RefCell<dyn MeshData<Id = HalfedgeId>>>>,
+    halfedges_data: std::vec::Vec<Weak<RefCell<dyn MeshData<Id = HalfedgeId>>>>,
 }
 
-impl ManifoldMesh {
+impl<'b> ManifoldMesh<'b> {
     #[inline]
     pub fn n_interior_halfedges(&self) -> usize {
         self.n_interior_halfedges
@@ -50,12 +52,12 @@ impl ManifoldMesh {
 
     /// start boundary loop iterator
     #[inline(always)]
-    pub fn boundary_loop<'a>(&'a self, blid: BoundaryLoopId) -> BoundaryLoopIter<'a> {
+    pub fn boundary_loop<'a>(&'a self, blid: BoundaryLoopId) -> BoundaryLoopIter<'a, 'b> {
         BoundaryLoopIter::new(blid, self)
     }
 }
 
-impl Mesh for ManifoldMesh {
+impl<'b> Mesh<'b> for ManifoldMesh<'b> {
     build_connect_info!();
 
     /// the number of edges
@@ -115,4 +117,11 @@ impl Mesh for ManifoldMesh {
     fn e_halfedge(&self, eid: EdgeId) -> HalfedgeId {
         (*eid << 1).into()
     }
+    #[inline]
+        fn add_halfedges_data<T: 'b + Clone>(
+            &mut self,
+            data: Weak<RefCell<HalfedgeData<'b, T, Self>>>,
+        ) {
+            self.halfedges_data.push(data);
+        }
 }

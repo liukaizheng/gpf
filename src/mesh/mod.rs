@@ -8,6 +8,7 @@ mod mesh_macro;
 
 use std::{cell::RefCell, rc::Weak};
 
+use bumpalo::Bump;
 pub use element::*;
 pub use manifold_mesh::*;
 pub use mesh_data::*;
@@ -20,7 +21,7 @@ pub enum FaceOrBoundaryLoopId {
     INVALID,
 }
 
-pub trait Mesh: Sized {
+pub trait Mesh<'b>: Sized {
     fn n_vertices(&self) -> usize;
     fn n_halfedges(&self) -> usize;
     fn n_edges(&self) -> usize;
@@ -39,16 +40,16 @@ pub trait Mesh: Sized {
     fn face_is_valid(&self, fid: FaceId) -> bool;
     // fn boundary_loop_is_valid(&self, blid: BoundaryLoopId) -> bool;
 
-    fn vertex<'a>(&'a self, vid: VertexId) -> VertexIter<'a, Self>;
-    fn halfedge<'a>(&'a self, hid: HalfedgeId) -> HalfedgeIter<'a, Self>;
-    fn edge<'a>(&'a self, eid: EdgeId) -> EdgeIter<'a, Self>;
-    fn face<'a>(&'a self, fid: FaceId) -> FaceIter<'a, Self>;
+    fn vertex(&self, vid: VertexId) -> VertexIter<'_, 'b, Self>;
+    fn halfedge(&self, hid: HalfedgeId) -> HalfedgeIter<'_, 'b, Self>;
+    fn edge(&self, eid: EdgeId) -> EdgeIter<'_, 'b, Self>;
+    fn face(&self, fid: FaceId) -> FaceIter<'_, 'b, Self>;
     // fn boundary_loop<'a>(&'a self, blid: BoundaryLoopId) -> BoundaryLoopIter<'a, Self>;
 
-    fn vertices(&self) -> VertexIter<'_, Self>;
-    fn halfedges(&self) -> HalfedgeIter<'_, Self>;
-    fn edges(&self) -> EdgeIter<'_, Self>;
-    fn faces(&self) -> FaceIter<'_, Self>;
+    fn vertices(&self) -> VertexIter<'_, 'b, Self>;
+    fn halfedges(&self) -> HalfedgeIter<'_, 'b, Self>;
+    fn edges(&self) -> EdgeIter<'_, 'b, Self>;
+    fn faces(&self) -> FaceIter<'_, 'b, Self>;
 
     /// the halfedge starting from this vertex
     fn v_halfedge(&self, vid: VertexId) -> HalfedgeId;
@@ -83,10 +84,10 @@ pub trait Mesh: Sized {
     fn use_implicit_twin(&self) -> bool;
 
     /// add halfedges data reference
-    fn add_halfedges_data<T: Default + Clone + 'static>(
+    fn add_halfedges_data<T: 'b + Clone>(
         &mut self,
-        data: Weak<RefCell<HalfedgeData<T, Self>>>,
+        data: Weak<RefCell<HalfedgeData<'b, T, Self>>>,
     );
 
-    fn remove_halfedges_data<T: Default + Clone>(&mut self, data: &HalfedgeData<T, Self>);
+    fn remove_halfedges_data<T: 'b + Clone>(&mut self, data: &HalfedgeData<'b, T, Self>);
 }
