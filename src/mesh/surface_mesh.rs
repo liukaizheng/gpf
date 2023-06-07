@@ -67,37 +67,49 @@ impl<'b> SurfaceMesh<'b> {
         (vertex_halfedges, vertex_separators)
     }
 
-    fn new_halfedge(&mut self) -> HalfedgeId {
+    #[inline]
+    fn new_halfedges(&mut self, n: usize) -> HalfedgeId {
         let hid = HalfedgeId::from(self.he_next_arr.len());
-        self.he_next_arr.push(HalfedgeId::new());
-        self.he_vertex_arr.push(VertexId::new());
+        let new_len = self.n_halfedges_capacity() + n;
+        self.he_next_arr.resize(new_len, HalfedgeId::new());
+        self.he_vertex_arr.resize(new_len, VertexId::new());
 
-        self.he_face_arr.push(FaceId::new());
-        self.he_sibling_arr.push(HalfedgeId::new());
-        self.he_edge_arr.push(EdgeId::new());
-        self.he_vert_in_next_arr.push(HalfedgeId::new());
-        self.he_vert_in_prev_arr.push(HalfedgeId::new());
-        self.he_vert_out_next_arr.push(HalfedgeId::new());
-        self.he_vert_out_prev_arr.push(HalfedgeId::new());
-        self.n_halfedges += 1;
+        self.he_face_arr.resize(new_len, FaceId::new());
+        self.he_sibling_arr.resize(new_len, HalfedgeId::new());
+        self.he_edge_arr.resize(new_len, EdgeId::new());
+        self.he_vert_in_next_arr.resize(new_len, HalfedgeId::new());
+        self.he_vert_in_prev_arr.resize(new_len, HalfedgeId::new());
+        self.he_vert_out_next_arr.resize(new_len, HalfedgeId::new());
+        self.he_vert_out_prev_arr.resize(new_len, HalfedgeId::new());
+        self.n_halfedges += n;
 
         for data in &self.halfedges_data {
             if let Some(data) = data.upgrade() {
-                data.borrow_mut().expand(self.n_halfedges);
+                data.borrow_mut().expand(self.n_halfedges_capacity());
             }
         }
 
         hid
     }
 
-    fn new_edge(&mut self) -> EdgeId {
+    #[inline]
+    fn new_edges(&mut self, n: usize) -> EdgeId {
         let eid = self.e_halfedge_arr.len();
-        self.e_halfedge_arr.push(HalfedgeId::new());
+        let new_len = self.n_edges_capacity() + n;
+        self.e_halfedge_arr.resize(new_len, HalfedgeId::new());
 
-        // TODO: update edge callback
-
-        self.n_edges += 1;
+        for data in &self.edges_data {
+            if let Some(data) = data.upgrade() {
+                data.borrow_mut().expand(self.n_edges_capacity());
+            }
+        }
+        self.n_edges += n;
         eid.into()
+    }
+
+    #[inline]
+    fn split_edge(&mut self, eid: EdgeId) {
+        let neigh_halfedges = self.edge(eid);
     }
 }
 
@@ -143,7 +155,7 @@ impl<'b> From<Vec<'b, Vec<'b, usize>>> for SurfaceMesh<'b> {
             let mut prev_hid = first_hid;
             for i in 0..polygon.len() {
                 let tail = polygon[i];
-                let hid = mesh.new_halfedge();
+                let hid = mesh.new_halfedges(1);
 
                 mesh.he_vertex_arr[hid] = tail.into();
                 mesh.he_face_arr[hid] = fid.into();
@@ -178,7 +190,7 @@ impl<'b> From<Vec<'b, Vec<'b, usize>>> for SurfaceMesh<'b> {
                         *prev_hid = hid;
                     } else {
                         // This is the first time we've ever seen this edge, create a new edge object
-                        let new_eid = mesh.new_edge();
+                        let new_eid = mesh.new_edges(1);
                         mesh.he_edge_arr[hid] = new_eid;
                         mesh.he_sibling_arr[hid] = HalfedgeId::new();
                         mesh.e_halfedge_arr[new_eid] = hid.into();
