@@ -1,6 +1,10 @@
 #[macro_export]
 macro_rules! build_connect_info {
     () => {
+        /// get bump
+        fn bump(&self) -> &'b Bump {
+            self.v_halfedge_arr.bump()
+        }
         /// the number of vertices
         fn n_vertices(&self) -> usize {
             return self.n_vertices;
@@ -136,13 +140,13 @@ macro_rules! build_connect_info {
             HalfedgeId::from(self.f_halfedge_arr[fid])
         }
 
-        /*#[inline]
+        #[inline]
         fn add_halfedges_data<T: 'b + Clone>(
             &mut self,
             data: Weak<RefCell<HalfedgeData<'b, T, Self>>>,
         ) {
             self.halfedges_data.push(data);
-        }*/
+        }
 
         #[inline]
         fn remove_halfedges_data<T: 'b + Clone>(&mut self, remove: &HalfedgeData<'b, T, Self>) {

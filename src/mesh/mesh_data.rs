@@ -4,7 +4,7 @@ use std::{
 };
 
 use super::{ElementId, HalfedgeId, Mesh};
-use bumpalo::{collections::Vec, Bump};
+use bumpalo::collections::Vec;
 
 pub trait MeshData {
     type Id: ElementId;
@@ -20,8 +20,10 @@ pub struct HalfedgeData<'b, T: 'b + Clone, M: Mesh<'b>> {
 
 impl<'b, T: 'b + Clone, M: Mesh<'b>> HalfedgeData<'b, T, M> {
     #[inline]
-    pub fn new(mesh: Weak<RefCell<M>>, bump: &'b Bump, default_val: T) -> Rc<RefCell<Self>> {
-        let n_halfedges = mesh.upgrade().map_or(0, |m| m.borrow().n_halfedges());
+    pub fn new(mesh: Weak<RefCell<M>>, default_val: T) -> Rc<RefCell<Self>> {
+        let m = mesh.upgrade().unwrap();
+        let n_halfedges = m.borrow().n_halfedges();
+        let bump = m.borrow().bump();
         let default_val_clone = default_val.clone();
         let data = Rc::new(RefCell::new(Self {
             default_val,
@@ -35,7 +37,7 @@ impl<'b, T: 'b + Clone, M: Mesh<'b>> HalfedgeData<'b, T, M> {
     }
 }
 
-impl<'b, T: 'b + Clone, M: Mesh<'b>> HalfedgeData<'b, T, M> {
+impl<'b, T: 'b + Clone, M: Mesh<'b>> Drop for HalfedgeData<'b, T, M> {
     fn drop(&mut self) {
         if let Some(mesh) = self.mesh.upgrade() {
             mesh.borrow_mut().remove_halfedges_data(self);
@@ -48,7 +50,7 @@ impl<'b, T: 'b + Clone, M: Mesh<'b>> MeshData for HalfedgeData<'b, T, M> {
 
     #[inline(always)]
     fn expand(&mut self, len: usize) {
-        // self.data.resize(len, Default::default());
+        self.data.resize(len, self.default_val.clone());
     }
 
     #[inline(always)]

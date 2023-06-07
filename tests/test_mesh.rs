@@ -2,13 +2,14 @@ use gpf::mesh::{Mesh, SurfaceMesh, Vertex};
 
 #[test]
 fn build_nomanifold_mesh() {
-    let mesh = SurfaceMesh::from(vec![
-        vec![0, 1, 2],
-        vec![0, 2, 3],
-        vec![0, 3, 1],
-        vec![0, 4, 5],
-        vec![0, 5, 6],
-        vec![0, 6, 4],
+    let bump = bumpalo::Bump::new();
+    let mesh = SurfaceMesh::from(bumpalo::vec![in &bump;
+        bumpalo::vec![in &bump;0, 1, 2],
+        bumpalo::vec![in &bump;0, 2, 3],
+        bumpalo::vec![in &bump;0, 3, 1],
+        bumpalo::vec![in &bump;0, 4, 5],
+        bumpalo::vec![in &bump;0, 5, 6],
+        bumpalo::vec![in &bump;0, 6, 4],
     ]);
 
     let base_vertices = vec![1, 2, 3, 4, 5, 6];

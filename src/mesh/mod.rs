@@ -22,6 +22,7 @@ pub enum FaceOrBoundaryLoopId {
 }
 
 pub trait Mesh<'b>: Sized {
+    fn bump(&self) -> &'b Bump;
     fn n_vertices(&self) -> usize;
     fn n_halfedges(&self) -> usize;
     fn n_edges(&self) -> usize;
@@ -84,10 +85,7 @@ pub trait Mesh<'b>: Sized {
     fn use_implicit_twin(&self) -> bool;
 
     /// add halfedges data reference
-    fn add_halfedges_data<T: 'b + Clone>(
-        &mut self,
-        data: Weak<RefCell<HalfedgeData<'b, T, Self>>>,
-    );
+    fn add_halfedges_data<T: 'b + Clone>(&mut self, data: Weak<RefCell<HalfedgeData<'b, T, Self>>>);
 
     fn remove_halfedges_data<T: 'b + Clone>(&mut self, data: &HalfedgeData<'b, T, Self>);
 }

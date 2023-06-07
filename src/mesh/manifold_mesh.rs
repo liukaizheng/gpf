@@ -7,8 +7,7 @@ use super::{
     FaceOrBoundaryLoopId, HalfedgeData, HalfedgeId, HalfedgeIter, Mesh, MeshData, VertexId,
     VertexIter,
 };
-use bumpalo::collections::Vec;
-use bumpalo::Bump;
+use bumpalo::{collections::Vec, Bump};
 
 pub struct ManifoldMesh<'b> {
     v_halfedge_arr: Vec<'b, HalfedgeId>,
@@ -24,7 +23,7 @@ pub struct ManifoldMesh<'b> {
     n_faces: usize,
     n_boundary_loops: usize,
 
-    halfedges_data: std::vec::Vec<Weak<RefCell<dyn MeshData<Id = HalfedgeId>>>>,
+    halfedges_data: std::vec::Vec<Weak<RefCell<dyn MeshData<Id = HalfedgeId> + 'b>>>,
 }
 
 impl<'b> ManifoldMesh<'b> {
@@ -117,11 +116,4 @@ impl<'b> Mesh<'b> for ManifoldMesh<'b> {
     fn e_halfedge(&self, eid: EdgeId) -> HalfedgeId {
         (*eid << 1).into()
     }
-    #[inline]
-        fn add_halfedges_data<T: 'b + Clone>(
-            &mut self,
-            data: Weak<RefCell<HalfedgeData<'b, T, Self>>>,
-        ) {
-            self.halfedges_data.push(data);
-        }
 }

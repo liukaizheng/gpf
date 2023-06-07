@@ -6,7 +6,7 @@ use super::{
     EdgeId, EdgeIter, ElementId, FaceId, FaceIter, FaceOrBoundaryLoopId, HalfedgeData, HalfedgeId,
     HalfedgeIter, MeshData, VertexId, VertexIter,
 };
-use bumpalo::collections::Vec;
+use bumpalo::{collections::Vec, Bump};
 
 pub struct SurfaceMesh<'b> {
     v_halfedge_arr: Vec<'b, HalfedgeId>,
@@ -28,7 +28,7 @@ pub struct SurfaceMesh<'b> {
     he_sibling_arr: Vec<'b, HalfedgeId>,
     e_halfedge_arr: Vec<'b, HalfedgeId>,
 
-    pub halfedges_data: std::vec::Vec<Weak<RefCell<dyn MeshData<Id = HalfedgeId>>>>,
+    pub halfedges_data: std::vec::Vec<Weak<RefCell<dyn MeshData<Id = HalfedgeId> + 'b>>>,
 }
 
 impl<'b> SurfaceMesh<'b> {
@@ -298,11 +298,4 @@ impl<'b> Mesh<'b> for SurfaceMesh<'b> {
     fn use_implicit_twin(&self) -> bool {
         false
     }
-    #[inline]
-        fn add_halfedges_data<T: 'b + Clone>(
-            &mut self,
-            data: Weak<RefCell<HalfedgeData<'b, T, Self>>>,
-        ) {
-            self.halfedges_data.push(data);
-        }
 }
