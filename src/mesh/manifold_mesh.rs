@@ -3,9 +3,9 @@ use std::{cell::RefCell, rc::Weak};
 use crate::build_connect_info;
 
 use super::{
-    BoundaryLoopId, BoundaryLoopIter, EdgeId, EdgeIter, ElementId, FaceId, FaceIter,
-    FaceOrBoundaryLoopId, HalfedgeData, HalfedgeId, HalfedgeIter, Mesh, MeshData, VertexId,
-    VertexIter,
+    BoundaryLoopId, BoundaryLoopIter, EdgeData, EdgeId, EdgeIter, ElementId, FaceData, FaceId,
+    FaceIter, FaceOrBoundaryLoopId, HalfedgeData, HalfedgeId, HalfedgeIter, Mesh, MeshData,
+    VertexData, VertexId, VertexIter,
 };
 use bumpalo::{collections::Vec, Bump};
 
@@ -23,7 +23,10 @@ pub struct ManifoldMesh<'b> {
     n_faces: usize,
     n_boundary_loops: usize,
 
-    halfedges_data: std::vec::Vec<Weak<RefCell<dyn MeshData<Id = HalfedgeId> + 'b>>>,
+    pub vertices_data: Vec<'b, Weak<RefCell<dyn MeshData<Id = VertexId> + 'b>>>,
+    pub halfedges_data: Vec<'b, Weak<RefCell<dyn MeshData<Id = HalfedgeId> + 'b>>>,
+    pub edges_data: Vec<'b, Weak<RefCell<dyn MeshData<Id = EdgeId> + 'b>>>,
+    pub faces_data: Vec<'b, Weak<RefCell<dyn MeshData<Id = FaceId> + 'b>>>,
 }
 
 impl<'b> ManifoldMesh<'b> {

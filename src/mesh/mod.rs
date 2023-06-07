@@ -83,9 +83,17 @@ pub trait Mesh<'b>: Sized {
     fn f_halfedge(&self, fid: FaceId) -> HalfedgeId;
 
     fn use_implicit_twin(&self) -> bool;
+    /// add vertices data
+    fn add_vertices_data<T: 'b + Clone>(&mut self, data: Weak<RefCell<VertexData<'b, T, Self>>>);
+    fn remove_vertices_data<T: 'b + Clone>(&mut self, data: &VertexData<'b, T, Self>);
 
     /// add halfedges data reference
     fn add_halfedges_data<T: 'b + Clone>(&mut self, data: Weak<RefCell<HalfedgeData<'b, T, Self>>>);
-
     fn remove_halfedges_data<T: 'b + Clone>(&mut self, data: &HalfedgeData<'b, T, Self>);
+
+    fn add_edges_data<T: 'b + Clone>(&mut self, data: Weak<RefCell<EdgeData<'b, T, Self>>>);
+    fn remove_edges_data<T: 'b + Clone>(&mut self, data: &EdgeData<'b, T, Self>);
+
+    fn add_faces_data<T: 'b + Clone>(&mut self, data: Weak<RefCell<FaceData<'b, T, Self>>>);
+    fn remove_faces_data<T: 'b + Clone>(&mut self, data: &FaceData<'b, T, Self>);
 }

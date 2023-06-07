@@ -3,8 +3,8 @@ use std::{cell::RefCell, collections::HashMap, rc::Weak};
 use crate::{build_connect_info, mesh::Mesh, INVALID_IND};
 
 use super::{
-    EdgeId, EdgeIter, ElementId, FaceId, FaceIter, FaceOrBoundaryLoopId, HalfedgeData, HalfedgeId,
-    HalfedgeIter, MeshData, VertexId, VertexIter,
+    EdgeData, EdgeId, EdgeIter, ElementId, FaceData, FaceId, FaceIter, FaceOrBoundaryLoopId,
+    HalfedgeData, HalfedgeId, HalfedgeIter, MeshData, VertexData, VertexId, VertexIter,
 };
 use bumpalo::{collections::Vec, Bump};
 
@@ -28,7 +28,10 @@ pub struct SurfaceMesh<'b> {
     he_sibling_arr: Vec<'b, HalfedgeId>,
     e_halfedge_arr: Vec<'b, HalfedgeId>,
 
-    pub halfedges_data: std::vec::Vec<Weak<RefCell<dyn MeshData<Id = HalfedgeId> + 'b>>>,
+    pub vertices_data: Vec<'b, Weak<RefCell<dyn MeshData<Id = VertexId> + 'b>>>,
+    pub halfedges_data: Vec<'b, Weak<RefCell<dyn MeshData<Id = HalfedgeId> + 'b>>>,
+    pub edges_data: Vec<'b, Weak<RefCell<dyn MeshData<Id = EdgeId> + 'b>>>,
+    pub faces_data: Vec<'b, Weak<RefCell<dyn MeshData<Id = FaceId> + 'b>>>,
 }
 
 impl<'b> SurfaceMesh<'b> {
@@ -129,7 +132,10 @@ impl<'b> From<Vec<'b, Vec<'b, usize>>> for SurfaceMesh<'b> {
             he_sibling_arr: Vec::new_in(bump),
             e_halfedge_arr: Vec::new_in(bump),
 
-            halfedges_data: std::vec::Vec::new(),
+            vertices_data: Vec::new_in(bump),
+            halfedges_data: Vec::new_in(bump),
+            edges_data: Vec::new_in(bump),
+            faces_data: Vec::new_in(bump),
         };
 
         for (fid, polygon) in polygons.iter().enumerate() {

@@ -15,7 +15,10 @@ fn build_mesh_data() {
     ])));
     {
         let halfedge_data = HalfedgeData::new(Rc::downgrade(&mesh), 0.0);
-        let _halfedge_data = HalfedgeData::new(Rc::downgrade(&mesh), 0);
+        let _halfedge_data = HalfedgeData::new(
+            Rc::downgrade(&mesh),
+            bumpalo::vec![in &bump; 'a'.to_owned()],
+        );
         assert_eq!(halfedge_data.borrow().len(), 18);
         assert_eq!(mesh.borrow().halfedges_data.len(), 2);
     }

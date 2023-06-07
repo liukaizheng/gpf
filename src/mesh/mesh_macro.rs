@@ -141,6 +141,23 @@ macro_rules! build_connect_info {
         }
 
         #[inline]
+        fn add_vertices_data<T: 'b + Clone>(
+            &mut self,
+            data: Weak<RefCell<VertexData<'b, T, Self>>>,
+        ) {
+            self.vertices_data.push(data);
+        }
+
+        #[inline]
+        fn remove_vertices_data<T: 'b + Clone>(&mut self, remove: &VertexData<'b, T, Self>) {
+            self.vertices_data.retain(|data| {
+                data.upgrade()
+                    .map(|data| !std::ptr::eq(data.as_ptr(), remove))
+                    .unwrap_or(false)
+            })
+        }
+
+        #[inline]
         fn add_halfedges_data<T: 'b + Clone>(
             &mut self,
             data: Weak<RefCell<HalfedgeData<'b, T, Self>>>,
@@ -151,6 +168,34 @@ macro_rules! build_connect_info {
         #[inline]
         fn remove_halfedges_data<T: 'b + Clone>(&mut self, remove: &HalfedgeData<'b, T, Self>) {
             self.halfedges_data.retain(|data| {
+                data.upgrade()
+                    .map(|data| !std::ptr::eq(data.as_ptr(), remove))
+                    .unwrap_or(false)
+            })
+        }
+
+        #[inline]
+        fn add_edges_data<T: 'b + Clone>(&mut self, data: Weak<RefCell<EdgeData<'b, T, Self>>>) {
+            self.edges_data.push(data);
+        }
+
+        #[inline]
+        fn remove_edges_data<T: 'b + Clone>(&mut self, remove: &EdgeData<'b, T, Self>) {
+            self.edges_data.retain(|data| {
+                data.upgrade()
+                    .map(|data| !std::ptr::eq(data.as_ptr(), remove))
+                    .unwrap_or(false)
+            })
+        }
+
+        #[inline]
+        fn add_faces_data<T: 'b + Clone>(&mut self, data: Weak<RefCell<FaceData<'b, T, Self>>>) {
+            self.faces_data.push(data);
+        }
+
+        #[inline]
+        fn remove_faces_data<T: 'b + Clone>(&mut self, remove: &FaceData<'b, T, Self>) {
+            self.faces_data.retain(|data| {
                 data.upgrade()
                     .map(|data| !std::ptr::eq(data.as_ptr(), remove))
                     .unwrap_or(false)
