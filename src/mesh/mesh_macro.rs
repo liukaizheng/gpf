@@ -2,10 +2,12 @@
 macro_rules! build_connect_info {
     () => {
         /// get bump
+        #[inline(always)]
         fn bump(&self) -> &'b Bump {
             self.v_halfedge_arr.bump()
         }
         /// the number of vertices
+        #[inline(always)]
         fn n_vertices(&self) -> usize {
             return self.n_vertices;
         }
@@ -123,6 +125,7 @@ macro_rules! build_connect_info {
         }
 
         /// the previous halfedge of the halfedge
+        #[inline]
         fn he_prev(&self, hid: HalfedgeId) -> HalfedgeId {
             let mut curr = hid;
             loop {

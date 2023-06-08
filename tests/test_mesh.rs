@@ -1,4 +1,4 @@
-use gpf::mesh::{Mesh, SurfaceMesh, Vertex};
+use gpf::mesh::{Face, Mesh, SurfaceMesh, Vertex};
 
 #[test]
 fn build_nomanifold_mesh() {
@@ -40,4 +40,38 @@ fn build_nomanifold_mesh() {
         .collect::<Vec<_>>();
     adjacent_vertices.sort();
     assert_eq!(adjacent_vertices, base_vertices);
+}
+
+#[test]
+fn split_edges() {
+    use bumpalo::collections::Vec;
+    let bump = bumpalo::Bump::new();
+    let mut mesh = SurfaceMesh::from(bumpalo::vec![in &bump;
+        bumpalo::vec![in &bump;0, 1, 2],
+        bumpalo::vec![in &bump;0, 1, 3],
+        bumpalo::vec![in &bump;0, 1, 4],
+        bumpalo::vec![in &bump;0, 1, 5],
+    ]);
+    mesh.split_edge(0.into());
+    for fid in mesh.faces() {
+        let f_verts = Vec::from_iter_in(
+            mesh.face(fid).halfedges().map(|hid| mesh.he_vertex(hid)),
+            &bump,
+        );
+        assert_eq!(f_verts.len(), 4);
+    }
+
+    let new_v = 6.into();
+    let mut n_new_halfedges = 0;
+    for hid in mesh.vertex(new_v).incoming_halfedge() {
+        assert_eq!(mesh.he_tip_vertex(hid), new_v);
+        n_new_halfedges += 1;
+    }
+    assert_eq!(n_new_halfedges, 4);
+    n_new_halfedges = 0;
+    for hid in mesh.vertex(new_v).outgoing_halfedge() {
+        assert_eq!(mesh.he_vertex(hid), new_v);
+        n_new_halfedges += 1;
+    }
+    assert_eq!(n_new_halfedges, 4);
 }

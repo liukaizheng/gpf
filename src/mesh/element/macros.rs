@@ -48,6 +48,7 @@ macro_rules! element_id {
         }
     };
 }
+
 #[macro_export]
 macro_rules! element_iterator {
     (struct $name: ident -> $item: ty, {$($id: tt)*}, {$($valid: tt)*}, {$($next: tt)*}, {$($is_end: tt)*}) => {
@@ -81,4 +82,31 @@ macro_rules! element_iterator {
         }
 
     }
+}
+
+#[macro_export]
+macro_rules! halfedges_iterator {
+    (struct $name:ident) => {
+        element_iterator! {
+            struct $name -> HalfedgeId, {
+                fn id(&self) -> Self::Id {
+                    self.curr_he
+                }
+            }, {
+                fn valid(&self) -> bool {
+                    true
+                }
+            }, {
+                fn next(&mut self) {
+                    self.just_start = false;
+                    self.next();
+                }
+            }, {
+                fn is_end(&self) -> bool {
+                    !self.just_start && self.curr_he == self.first_he
+                }
+            }
+
+        }
+    };
 }

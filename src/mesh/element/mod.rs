@@ -14,6 +14,7 @@ pub use halfedge::*;
 pub use vertex::*;
 
 use super::Mesh;
+use bumpalo::collections::Vec;
 
 pub trait ElementId: From<usize> {
     fn new() -> Self;
@@ -28,6 +29,15 @@ pub trait Element<'b> {
     fn valid(&self) -> bool;
     fn next(&mut self);
     fn is_end(&self) -> bool;
+}
+
+#[inline(always)]
+pub fn ele_ranges<'b, E: ElementId>(
+    start: usize,
+    len: usize,
+    bump: &'b bumpalo::Bump,
+) -> Vec<'b, E> {
+    Vec::from_iter_in((start..(start + len)).map(|idx| idx.into()), bump)
 }
 
 fn iter_next<'b, E: Element<'b>>(ele: &mut E) -> Option<<E as Element<'b>>::Id> {

@@ -3,10 +3,12 @@ use std::{cell::RefCell, collections::HashMap, rc::Weak};
 use crate::{build_connect_info, mesh::Mesh, INVALID_IND};
 
 use super::{
-    EdgeData, EdgeId, EdgeIter, ElementId, FaceData, FaceId, FaceIter, FaceOrBoundaryLoopId,
-    HalfedgeData, HalfedgeId, HalfedgeIter, MeshData, VertexData, VertexId, VertexIter,
+    ele_ranges, Edge, EdgeData, EdgeId, EdgeIter, ElementId, FaceData, FaceId, FaceIter,
+    FaceOrBoundaryLoopId, HalfedgeData, HalfedgeId, HalfedgeIter, MeshData, Vertex, VertexData,
+    VertexId, VertexIter,
 };
 use bumpalo::{collections::Vec, Bump};
+use itertools::Itertools;
 
 pub struct SurfaceMesh<'b> {
     v_halfedge_arr: Vec<'b, HalfedgeId>,
@@ -22,9 +24,7 @@ pub struct SurfaceMesh<'b> {
 
     he_edge_arr: Vec<'b, EdgeId>,
     he_vert_in_next_arr: Vec<'b, HalfedgeId>,
-    he_vert_in_prev_arr: Vec<'b, HalfedgeId>,
     he_vert_out_next_arr: Vec<'b, HalfedgeId>,
-    he_vert_out_prev_arr: Vec<'b, HalfedgeId>,
     he_sibling_arr: Vec<'b, HalfedgeId>,
     e_halfedge_arr: Vec<'b, HalfedgeId>,
 
@@ -68,6 +68,20 @@ impl<'b> SurfaceMesh<'b> {
     }
 
     #[inline]
+    fn new_vertices(&mut self, n: usize) -> VertexId {
+        let vid = VertexId::from(self.v_halfedge_arr.len());
+        let new_len = self.n_vertices_capacity() + n;
+        self.v_halfedge_arr.resize(new_len, HalfedgeId::new());
+        self.n_vertices += n;
+        for data in &self.vertices_data {
+            if let Some(data) = data.upgrade() {
+                data.borrow_mut().expand(self.n_vertices_capacity())
+            }
+        }
+        vid
+    }
+
+    #[inline]
     fn new_halfedges(&mut self, n: usize) -> HalfedgeId {
         let hid = HalfedgeId::from(self.he_next_arr.len());
         let new_len = self.n_halfedges_capacity() + n;
@@ -78,9 +92,7 @@ impl<'b> SurfaceMesh<'b> {
         self.he_sibling_arr.resize(new_len, HalfedgeId::new());
         self.he_edge_arr.resize(new_len, EdgeId::new());
         self.he_vert_in_next_arr.resize(new_len, HalfedgeId::new());
-        self.he_vert_in_prev_arr.resize(new_len, HalfedgeId::new());
         self.he_vert_out_next_arr.resize(new_len, HalfedgeId::new());
-        self.he_vert_out_prev_arr.resize(new_len, HalfedgeId::new());
         self.n_halfedges += n;
 
         for data in &self.halfedges_data {
@@ -108,8 +120,76 @@ impl<'b> SurfaceMesh<'b> {
     }
 
     #[inline]
-    fn split_edge(&mut self, eid: EdgeId) {
-        let neigh_halfedges = self.edge(eid);
+    pub fn split_edge(&mut self, eid: EdgeId) {
+        let bump = self.bump();
+        let e_halfedges = Vec::from_iter_in(self.edge(eid).halfedges(), bump);
+        let new_v = self.new_vertices(1);
+        let new_halfedges = ele_ranges::<HalfedgeId>(
+            self.new_halfedges(e_halfedges.len()).0,
+            e_halfedges.len(),
+            bump,
+        );
+
+        // v-h
+        self.v_halfedge_arr[new_v] = new_halfedges[0];
+
+        // h-v
+        for &hid in &new_halfedges {
+            self.he_vertex_arr[hid] = new_v;
+        }
+        let (va, vb) = (
+            self.he_vertex(e_halfedges[0]),
+            self.he_tip_vertex(e_halfedges[0]),
+        );
+
+        // h-h
+        let he_pos_map = HashMap::<HalfedgeId, usize>::from_iter(
+            e_halfedges.iter().enumerate().map(|(i, &hid)| (hid, i)),
+        );
+        let to_new_halfedge = |hid: HalfedgeId| -> HalfedgeId {
+            if let Some(&pos) = he_pos_map.get(&hid) {
+                new_halfedges[pos]
+            } else {
+                hid
+            }
+        };
+        let va_in_halfedges = Vec::from_iter_in(
+            self.vertex(va).incoming_halfedge().map(to_new_halfedge),
+            bump,
+        );
+        let vb_in_halfedges = Vec::from_iter_in(
+            self.vertex(vb).incoming_halfedge().map(to_new_halfedge),
+            bump,
+        );
+        for (&ha, &hb) in va_in_halfedges.iter().circular_tuple_windows() {
+            self.he_vert_in_next_arr[ha] = hb;
+        }
+        for (&ha, &hb) in vb_in_halfedges.iter().circular_tuple_windows() {
+            self.he_vert_in_next_arr[ha] = hb;
+        }
+        for (&ha, &hb) in e_halfedges.iter().circular_tuple_windows() {
+            self.he_vert_in_next_arr[ha] = hb;
+        }
+        for (&ha, &hb) in new_halfedges.iter().circular_tuple_windows() {
+            self.he_vert_out_next_arr[ha] = hb;
+            self.he_sibling_arr[ha] = hb;
+        }
+        for &prev_he in &e_halfedges {
+            let next_he = new_halfedges[*he_pos_map.get(&prev_he).unwrap()];
+            let nnext_he = self.he_next_arr[prev_he];
+            self.he_next_arr[prev_he] = next_he;
+            self.he_next_arr[next_he] = nnext_he;
+        }
+
+        // h-e
+        let new_e = self.new_edges(1);
+        for &he in &new_halfedges {
+            self.he_edge_arr[he] = new_e;
+        }
+        // h-f
+        for (old_he, new_he) in e_halfedges.into_iter().zip(new_halfedges) {
+            self.he_face_arr[new_he] = self.he_face_arr[old_he];
+        }
     }
 }
 
@@ -138,9 +218,7 @@ impl<'b> From<Vec<'b, Vec<'b, usize>>> for SurfaceMesh<'b> {
 
             he_edge_arr: Vec::new_in(bump),
             he_vert_in_next_arr: Vec::new_in(bump),
-            he_vert_in_prev_arr: Vec::new_in(bump),
             he_vert_out_next_arr: Vec::new_in(bump),
-            he_vert_out_prev_arr: Vec::new_in(bump),
             he_sibling_arr: Vec::new_in(bump),
             e_halfedge_arr: Vec::new_in(bump),
 
@@ -231,7 +309,6 @@ impl<'b> From<Vec<'b, Vec<'b, usize>>> for SurfaceMesh<'b> {
                     let ha = v_in_halfedges[i];
                     let hb = v_in_halfedges[start + (i - start + 1) % len];
                     mesh.he_vert_in_next_arr[ha] = hb;
-                    mesh.he_vert_in_prev_arr[hb] = ha;
                 }
             }
             {
@@ -241,7 +318,6 @@ impl<'b> From<Vec<'b, Vec<'b, usize>>> for SurfaceMesh<'b> {
                     let ha = v_out_halfedges[i];
                     let hb = v_out_halfedges[start + (i - start + 1) % len];
                     mesh.he_vert_out_next_arr[ha] = hb;
-                    mesh.he_vert_out_prev_arr[hb] = ha;
                 }
             }
         }

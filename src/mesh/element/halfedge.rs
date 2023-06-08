@@ -1,4 +1,7 @@
-use std::{ops::{Deref, DerefMut, Index, IndexMut}, marker::PhantomData};
+use std::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut, Index, IndexMut},
+};
 
 use super::{iter_next, EdgeIter, Element, ElementId};
 use crate::{element_id, mesh::Mesh, INVALID_IND};
@@ -16,7 +19,11 @@ pub struct HalfedgeIter<'a, 'b: 'a, M: Mesh<'b>> {
 
 impl<'a, 'b: 'a, M: Mesh<'b>> HalfedgeIter<'a, 'b, M> {
     pub fn new(id: HalfedgeId, mesh: &'a M) -> Self {
-        Self { id, mesh, phantom: PhantomData}
+        Self {
+            id,
+            mesh,
+            phantom: PhantomData,
+        }
     }
 
     #[allow(dead_code)]

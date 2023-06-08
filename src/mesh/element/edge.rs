@@ -3,8 +3,8 @@ use std::{
     ops::{Deref, DerefMut, Index, IndexMut},
 };
 
-use super::{iter_next, Element, ElementId, HalfedgeIter};
-use crate::{element_id, element_iterator, mesh::Mesh, INVALID_IND};
+use super::{iter_next, Element, ElementId, HalfedgeId, HalfedgeIter};
+use crate::{element_id, element_iterator, halfedges_iterator, mesh::Mesh, INVALID_IND};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EdgeId(pub usize);
@@ -45,16 +45,6 @@ impl<'a, 'b: 'a, M: Mesh<'b>> Deref for EdgeIter<'a, 'b, M> {
     }
 }
 
-pub trait Edge<'b>: Element<'b> {
-    fn halfedge(&self) -> HalfedgeIter<'_, 'b, Self::M>;
-}
-
-impl<'a, 'b: 'a, M: Mesh<'b>> Edge<'b> for EdgeIter<'a, 'b, M> {
-    fn halfedge(&self) -> HalfedgeIter<'_, 'b, Self::M> {
-        HalfedgeIter::new(self.mesh.e_halfedge(self.id), self.mesh)
-    }
-}
-
 element_iterator! {
     struct EdgeIter -> EdgeId, {
         fn id(&self) -> EdgeId {
@@ -74,3 +64,43 @@ element_iterator! {
         }
     }
 }
+
+pub trait Edge<'b>: Element<'b> {
+    fn halfedge(&self) -> HalfedgeIter<'_, 'b, Self::M>;
+    fn halfedges(&self) -> EHalfedgesIter<'_, 'b, Self::M>;
+}
+
+impl<'a, 'b: 'a, M: Mesh<'b>> Edge<'b> for EdgeIter<'a, 'b, M> {
+    fn halfedge(&self) -> HalfedgeIter<'_, 'b, Self::M> {
+        HalfedgeIter::new(self.mesh.e_halfedge(self.id), self.mesh)
+    }
+    fn halfedges(&self) -> EHalfedgesIter<'_, 'b, Self::M> {
+        EHalfedgesIter::new(self.mesh.e_halfedge(self.id), self.mesh)
+    }
+}
+
+pub struct EHalfedgesIter<'a, 'b: 'a, M: Mesh<'b>> {
+    phantom: PhantomData<&'b M>,
+    mesh: &'a M,
+    just_start: bool,
+    first_he: HalfedgeId,
+    curr_he: HalfedgeId,
+}
+
+impl<'a, 'b: 'a, M: Mesh<'b>> EHalfedgesIter<'a, 'b, M> {
+    pub fn new(he: HalfedgeId, mesh: &'a M) -> Self {
+        Self {
+            phantom: PhantomData,
+            mesh,
+            just_start: true,
+            first_he: he,
+            curr_he: he,
+        }
+    }
+
+    fn next(&mut self) {
+        self.curr_he = self.mesh.he_sibling(self.curr_he);
+    }
+}
+
+halfedges_iterator! {struct EHalfedgesIter}

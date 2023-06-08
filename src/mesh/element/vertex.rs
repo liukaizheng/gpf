@@ -1,7 +1,10 @@
-use std::{ops::{Deref, DerefMut, Index, IndexMut}, marker::PhantomData};
+use std::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut, Index, IndexMut},
+};
 
 use super::{iter_next, Edge, EdgeId, Element, ElementId, Halfedge, HalfedgeId, HalfedgeIter};
-use crate::{element_id, element_iterator, mesh::Mesh, INVALID_IND};
+use crate::{element_id, element_iterator, halfedges_iterator, mesh::Mesh, INVALID_IND};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VertexId(pub usize);
@@ -16,7 +19,11 @@ pub struct VertexIter<'a, 'b: 'a, M: Mesh<'b>> {
 
 impl<'a, 'b: 'a, M: Mesh<'b>> VertexIter<'a, 'b, M> {
     pub fn new(id: VertexId, mesh: &'a M) -> Self {
-        Self { id, mesh, phantom: PhantomData}
+        Self {
+            id,
+            mesh,
+            phantom: PhantomData,
+        }
     }
 
     #[allow(dead_code)]
@@ -202,32 +209,6 @@ vertex_state_iterator! { struct VVertexIter -> VertexId, {
     }
 }}
 
-macro_rules! vertex_halfedge_iterator {
-    (struct $name:ident) => {
-        element_iterator! {
-            struct $name -> HalfedgeId, {
-                fn id(&self) -> Self::Id {
-                    self.curr_he
-                }
-            }, {
-                fn valid(&self) -> bool {
-                    true
-                }
-            }, {
-                fn next(&mut self) {
-                    self.just_start = false;
-                    self.next();
-                }
-            }, {
-                fn is_end(&self) -> bool {
-                    !self.just_start && self.curr_he == self.first_he
-                }
-            }
-
-        }
-    };
-}
-
 pub struct VIncomingHalfedgeIter<'a, 'b: 'a, M: Mesh<'b>> {
     phantom: PhantomData<&'b M>,
     mesh: &'a M,
@@ -252,7 +233,7 @@ impl<'a, 'b: 'a, M: Mesh<'b>> VIncomingHalfedgeIter<'a, 'b, M> {
     }
 }
 
-vertex_halfedge_iterator! {struct VIncomingHalfedgeIter}
+halfedges_iterator! {struct VIncomingHalfedgeIter}
 
 pub struct VOutgoingHalfedgeIter<'a, 'b: 'a, M: Mesh<'b>> {
     phantom: PhantomData<&'b M>,
@@ -278,7 +259,7 @@ impl<'a, 'b: 'a, M: Mesh<'b>> VOutgoingHalfedgeIter<'a, 'b, M> {
     }
 }
 
-vertex_halfedge_iterator! {struct VOutgoingHalfedgeIter}
+halfedges_iterator! {struct VOutgoingHalfedgeIter}
 
 pub struct VEdgeIter<'a, 'b: 'a, M: Mesh<'b>> {
     phantom: PhantomData<&'b M>,
