@@ -3,8 +3,12 @@ use std::{
     ops::{Deref, DerefMut, Index, IndexMut},
 };
 
-use super::{iter_next, EdgeIter, Element, ElementId};
-use crate::{element_id, mesh::Mesh, INVALID_IND};
+use super::{iter_next, EdgeIter, Element, ElementId, FaceIter};
+use crate::{
+    element_id,
+    mesh::{FaceOrBoundaryLoopId, Mesh},
+    INVALID_IND,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct HalfedgeId(pub usize);
@@ -73,6 +77,7 @@ pub trait Halfedge<'b>: Element<'b> {
     fn edge(&self) -> EdgeIter<'_, 'b, Self::M>;
     fn next(&self) -> HalfedgeIter<'_, 'b, Self::M>;
     fn prev(&self) -> HalfedgeIter<'_, 'b, Self::M>;
+    fn face(&self) -> Option<FaceIter<'_, 'b, Self::M>>;
 }
 
 impl<'a, 'b: 'a, M: Mesh<'b>> Halfedge<'b> for HalfedgeIter<'a, 'b, M> {
@@ -84,6 +89,12 @@ impl<'a, 'b: 'a, M: Mesh<'b>> Halfedge<'b> for HalfedgeIter<'a, 'b, M> {
     }
     fn prev(&self) -> HalfedgeIter<'_, 'b, Self::M> {
         HalfedgeIter::new(self.mesh.he_prev(self.id), self.mesh)
+    }
+    fn face(&self) -> Option<FaceIter<'_, 'b, Self::M>> {
+        match self.mesh.he_face_or_boundary_loop(self.id) {
+            FaceOrBoundaryLoopId::Face(fid) => Some(FaceIter::new(fid, self.mesh)),
+            _ => None,
+        }
     }
 }
 

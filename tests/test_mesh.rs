@@ -1,4 +1,4 @@
-use gpf::mesh::{Face, Mesh, SurfaceMesh, Vertex};
+use gpf::mesh::{Face, Halfedge, Mesh, SurfaceMesh, Vertex};
 
 #[test]
 fn build_nomanifold_mesh() {
@@ -43,7 +43,7 @@ fn build_nomanifold_mesh() {
 }
 
 #[test]
-fn split_edges() {
+fn split_edge_and_face() {
     use bumpalo::collections::Vec;
     let bump = bumpalo::Bump::new();
     let mut mesh = SurfaceMesh::from(bumpalo::vec![in &bump;
@@ -52,26 +52,37 @@ fn split_edges() {
         bumpalo::vec![in &bump;0, 1, 4],
         bumpalo::vec![in &bump;0, 1, 5],
     ]);
-    mesh.split_edge(0.into());
-    for fid in mesh.faces() {
-        let f_verts = Vec::from_iter_in(
-            mesh.face(fid).halfedges().map(|hid| mesh.he_vertex(hid)),
-            &bump,
-        );
-        assert_eq!(f_verts.len(), 4);
-    }
+    // split edge
+    {
+        mesh.split_edge(0.into());
+        for fid in mesh.faces() {
+            let f_verts = Vec::from_iter_in(
+                mesh.face(fid).halfedges().map(|hid| mesh.he_vertex(hid)),
+                &bump,
+            );
+            assert_eq!(f_verts.len(), 4);
+        }
 
-    let new_v = 6.into();
-    let mut n_new_halfedges = 0;
-    for hid in mesh.vertex(new_v).incoming_halfedge() {
-        assert_eq!(mesh.he_tip_vertex(hid), new_v);
-        n_new_halfedges += 1;
+        let new_v = 6.into();
+        let mut n_new_halfedges = 0;
+        for hid in mesh.vertex(new_v).incoming_halfedge() {
+            assert_eq!(mesh.he_tip_vertex(hid), new_v);
+            n_new_halfedges += 1;
+        }
+        assert_eq!(n_new_halfedges, 4);
+        n_new_halfedges = 0;
+        for hid in mesh.vertex(new_v).outgoing_halfedge() {
+            assert_eq!(mesh.he_vertex(hid), new_v);
+            n_new_halfedges += 1;
+        }
+        assert_eq!(n_new_halfedges, 4);
     }
-    assert_eq!(n_new_halfedges, 4);
-    n_new_halfedges = 0;
-    for hid in mesh.vertex(new_v).outgoing_halfedge() {
-        assert_eq!(mesh.he_vertex(hid), new_v);
-        n_new_halfedges += 1;
+    // split face
+    {
+        let new_hid = mesh.split_face(0.into(), 2.into(), 6.into());
+        assert_eq!(
+            mesh.halfedge(new_hid).face().unwrap().halfedges().count(),
+            3,
+        );
     }
-    assert_eq!(n_new_halfedges, 4);
 }

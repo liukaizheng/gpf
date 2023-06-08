@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Weak};
 use crate::{build_connect_info, mesh::Mesh, INVALID_IND};
 
 use super::{
-    ele_ranges, Edge, EdgeData, EdgeId, EdgeIter, ElementId, FaceData, FaceId, FaceIter,
+    ele_ranges, Edge, EdgeData, EdgeId, EdgeIter, ElementId, Face, FaceData, FaceId, FaceIter,
     FaceOrBoundaryLoopId, HalfedgeData, HalfedgeId, HalfedgeIter, MeshData, Vertex, VertexData,
     VertexId, VertexIter,
 };
@@ -120,7 +120,21 @@ impl<'b> SurfaceMesh<'b> {
     }
 
     #[inline]
-    pub fn split_edge(&mut self, eid: EdgeId) {
+    fn new_faces(&mut self, n: usize) -> FaceId {
+        let fid = self.f_halfedge_arr.len();
+        let new_len = self.n_faces_capacity() + n;
+        self.f_halfedge_arr.resize(new_len, HalfedgeId::new());
+        for data in &self.faces_data {
+            if let Some(data) = data.upgrade() {
+                data.borrow_mut().expand(self.n_faces_capacity());
+            }
+        }
+        self.n_faces += n;
+        fid.into()
+    }
+
+    #[inline]
+    pub fn split_edge(&mut self, eid: EdgeId) -> VertexId {
         let bump = self.bump();
         let e_halfedges = Vec::from_iter_in(self.edge(eid).halfedges(), bump);
         let new_v = self.new_vertices(1);
@@ -176,9 +190,7 @@ impl<'b> SurfaceMesh<'b> {
         }
         for &prev_he in &e_halfedges {
             let next_he = new_halfedges[*he_pos_map.get(&prev_he).unwrap()];
-            let nnext_he = self.he_next_arr[prev_he];
-            self.he_next_arr[prev_he] = next_he;
-            self.he_next_arr[next_he] = nnext_he;
+            insert_halfedge(&mut self.he_next_arr, prev_he, next_he);
         }
 
         // h-e
@@ -186,11 +198,113 @@ impl<'b> SurfaceMesh<'b> {
         for &he in &new_halfedges {
             self.he_edge_arr[he] = new_e;
         }
+
+        // e-h
+        self.e_halfedge_arr[new_e] = new_halfedges[0];
+
         // h-f
         for (old_he, new_he) in e_halfedges.into_iter().zip(new_halfedges) {
             self.he_face_arr[new_he] = self.he_face_arr[old_he];
         }
+
+        new_v
     }
+
+    #[inline]
+    pub fn split_face(&mut self, fid: FaceId, va: VertexId, vb: VertexId) -> HalfedgeId {
+        let bump = self.bump();
+        let face_halfedges = Vec::from_iter_in(self.face(fid).halfedges(), bump);
+        let (mut pos1, mut pos2) = (INVALID_IND, INVALID_IND);
+        for (i, &hid) in face_halfedges.iter().enumerate() {
+            let v = self.he_vertex(hid);
+            if v == va || v == vb {
+                if pos1 == INVALID_IND {
+                    pos1 = i;
+                } else {
+                    pos2 = i;
+                    break;
+                }
+            }
+        }
+        let (va, vb) = if self.he_vertex(face_halfedges[pos1]) == va {
+            (va, vb)
+        } else {
+            (vb, va)
+        };
+        let first_halfedges =
+            Vec::from_iter_in(face_halfedges[pos1..pos2].iter().map(|&hid| hid), bump);
+        let second_halfedges = Vec::from_iter_in(
+            face_halfedges[pos2..]
+                .iter()
+                .chain(&face_halfedges[..pos1])
+                .map(|&hid| hid),
+            bump,
+        );
+        let first_he = self.new_halfedges(2);
+        let second_he = HalfedgeId::from(first_he.0 + 1);
+
+        // h-v
+        self.he_vertex_arr[first_he] = vb;
+        self.he_vertex_arr[second_he] = va;
+
+        // h-h
+        // sibling halfedges
+        self.he_sibling_arr[first_he] = second_he;
+        self.he_sibling_arr[second_he] = first_he;
+        // incoming halfedges and outcoming halfedges
+        insert_halfedge(
+            &mut self.he_vert_in_next_arr,
+            *second_halfedges.last().unwrap(),
+            first_he,
+        );
+        insert_halfedge(
+            &mut self.he_vert_out_next_arr,
+            second_halfedges[0],
+            first_he,
+        );
+        insert_halfedge(
+            &mut self.he_vert_in_next_arr,
+            *first_halfedges.last().unwrap(),
+            second_he,
+        );
+        insert_halfedge(
+            &mut self.he_vert_out_next_arr,
+            first_halfedges[0],
+            second_he,
+        );
+        // next halfedges
+        self.he_next_arr[first_he] = first_halfedges[0];
+        self.he_next_arr[*first_halfedges.last().unwrap()] = first_he;
+        self.he_next_arr[second_he] = second_halfedges[0];
+        self.he_next_arr[*second_halfedges.last().unwrap()] = second_he;
+
+        // h-e
+        let new_e = self.new_edges(1);
+        self.he_edge_arr[first_he] = new_e;
+        self.he_edge_arr[second_he] = new_e;
+
+        // h-f
+        let new_f = self.new_faces(1);
+        self.he_face_arr[first_he] = fid;
+        self.he_face_arr[second_he] = new_f;
+        for hid in second_halfedges {
+            self.he_face_arr[hid] = new_f;
+        }
+
+        // e-h
+        self.e_halfedge_arr[new_e] = first_he;
+
+        // f-h
+        self.f_halfedge_arr[new_f] = second_he;
+        second_he
+    }
+}
+
+#[inline(always)]
+fn insert_halfedge(next_arr: &mut [HalfedgeId], start: HalfedgeId, new_he: HalfedgeId) {
+    let nnext = next_arr[start.0];
+    next_arr[start.0] = new_he;
+    next_arr[new_he.0] = nnext;
 }
 
 impl<'b> From<Vec<'b, Vec<'b, usize>>> for SurfaceMesh<'b> {
