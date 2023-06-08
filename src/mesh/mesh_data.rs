@@ -21,7 +21,7 @@ macro_rules! mesh_data {
         }
 
         impl<'b, T: 'b + Clone, M: Mesh<'b>> $name<'b, T, M> {
-            #[inline]
+            #[inline(always)]
             pub fn new(mesh: Weak<RefCell<M>>, default_val: T) -> Rc<RefCell<Self>> {
                 let m = mesh.upgrade().unwrap();
                 let n_elements = m.borrow().$n_elements();
@@ -36,6 +36,21 @@ macro_rules! mesh_data {
                     mesh.borrow_mut().$add_ele_data(Rc::downgrade(&data));
                 }
                 data
+            }
+            #[inline(always)]
+            pub fn from_data(mesh: Weak<RefCell<M>>, mut data: Vec<'b, T>, default_val: T) -> Rc<RefCell<Self>> {
+                let m = mesh.upgrade().unwrap();
+                let n_elements = m.borrow().$n_elements();
+                data.resize(n_elements, default_val.clone());
+                let mesh_data = Rc::new(RefCell::new(Self {
+                    default_val,
+                    data,
+                    mesh: mesh.clone(),
+                }));
+                if let Some(mesh) = mesh.upgrade() {
+                    mesh.borrow_mut().$add_ele_data(Rc::downgrade(&mesh_data));
+                }
+                mesh_data
             }
         }
         impl<'b, T: 'b + Clone, M: Mesh<'b>> Drop for $name<'b, T, M> {
