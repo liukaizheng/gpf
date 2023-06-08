@@ -1,7 +1,13 @@
 #[macro_export]
 macro_rules! build_connect_info {
     () => {
+        /// get bump
+        #[inline(always)]
+        fn bump(&self) -> &'b Bump {
+            self.v_halfedge_arr.bump()
+        }
         /// the number of vertices
+        #[inline(always)]
         fn n_vertices(&self) -> usize {
             return self.n_vertices;
         }
@@ -53,45 +59,45 @@ macro_rules! build_connect_info {
 
         /// start vertex iterator
         #[inline(always)]
-        fn vertex<'a>(&'a self, vid: VertexId) -> VertexIter<'a, Self> {
+        fn vertex(&self, vid: VertexId) -> VertexIter<'_, 'b, Self> {
             VertexIter::new(vid, self)
         }
 
         /// start halfedge iterator
         #[inline(always)]
-        fn halfedge<'a>(&'a self, hid: HalfedgeId) -> HalfedgeIter<'a, Self> {
+        fn halfedge(&self, hid: HalfedgeId) -> HalfedgeIter<'_, 'b, Self> {
             HalfedgeIter::new(hid, self)
         }
 
         /// start edge iterator
         #[inline(always)]
-        fn edge<'a>(&'a self, eid: EdgeId) -> super::EdgeIter<'a, Self> {
+        fn edge(&self, eid: EdgeId) -> super::EdgeIter<'_, 'b, Self> {
             EdgeIter::new(eid, self)
         }
 
         /// start face iterator
         #[inline(always)]
-        fn face<'a>(&'a self, fid: FaceId) -> FaceIter<'a, Self> {
+        fn face(&self, fid: FaceId) -> FaceIter<'_, 'b, Self> {
             FaceIter::new(fid, self)
         }
 
         #[inline(always)]
-        fn vertices(&self) -> VertexIter<'_, Self> {
+        fn vertices(&self) -> VertexIter<'_, 'b, Self> {
             VertexIter::new(VertexId::from(0), self)
         }
 
         #[inline(always)]
-        fn halfedges(&self) -> HalfedgeIter<'_, Self> {
+        fn halfedges(&self) -> HalfedgeIter<'_, 'b, Self> {
             HalfedgeIter::new(HalfedgeId::from(0), self)
         }
 
         #[inline(always)]
-        fn edges(&self) -> EdgeIter<'_, Self> {
+        fn edges(&self) -> EdgeIter<'_, 'b, Self> {
             EdgeIter::new(EdgeId::from(0), self)
         }
 
         #[inline(always)]
-        fn faces(&self) -> FaceIter<'_, Self> {
+        fn faces(&self) -> FaceIter<'_, 'b, Self> {
             FaceIter::new(FaceId::from(0), self)
         }
         /// the halfedge starting from this vertex
@@ -119,6 +125,7 @@ macro_rules! build_connect_info {
         }
 
         /// the previous halfedge of the halfedge
+        #[inline]
         fn he_prev(&self, hid: HalfedgeId) -> HalfedgeId {
             let mut curr = hid;
             loop {
@@ -137,16 +144,61 @@ macro_rules! build_connect_info {
         }
 
         #[inline]
-        fn add_halfedges_data<T: Default + Clone + 'static>(
+        fn add_vertices_data<T: 'b + Clone>(
             &mut self,
-            data: Weak<RefCell<HalfedgeData<T, Self>>>,
+            data: Weak<RefCell<VertexData<'b, T, Self>>>,
+        ) {
+            self.vertices_data.push(data);
+        }
+
+        #[inline]
+        fn remove_vertices_data<T: 'b + Clone>(&mut self, remove: &VertexData<'b, T, Self>) {
+            self.vertices_data.retain(|data| {
+                data.upgrade()
+                    .map(|data| !std::ptr::eq(data.as_ptr(), remove))
+                    .unwrap_or(false)
+            })
+        }
+
+        #[inline]
+        fn add_halfedges_data<T: 'b + Clone>(
+            &mut self,
+            data: Weak<RefCell<HalfedgeData<'b, T, Self>>>,
         ) {
             self.halfedges_data.push(data);
         }
 
         #[inline]
-        fn remove_halfedges_data<T: Default + Clone>(&mut self, remove: &HalfedgeData<T, Self>) {
+        fn remove_halfedges_data<T: 'b + Clone>(&mut self, remove: &HalfedgeData<'b, T, Self>) {
             self.halfedges_data.retain(|data| {
+                data.upgrade()
+                    .map(|data| !std::ptr::eq(data.as_ptr(), remove))
+                    .unwrap_or(false)
+            })
+        }
+
+        #[inline]
+        fn add_edges_data<T: 'b + Clone>(&mut self, data: Weak<RefCell<EdgeData<'b, T, Self>>>) {
+            self.edges_data.push(data);
+        }
+
+        #[inline]
+        fn remove_edges_data<T: 'b + Clone>(&mut self, remove: &EdgeData<'b, T, Self>) {
+            self.edges_data.retain(|data| {
+                data.upgrade()
+                    .map(|data| !std::ptr::eq(data.as_ptr(), remove))
+                    .unwrap_or(false)
+            })
+        }
+
+        #[inline]
+        fn add_faces_data<T: 'b + Clone>(&mut self, data: Weak<RefCell<FaceData<'b, T, Self>>>) {
+            self.faces_data.push(data);
+        }
+
+        #[inline]
+        fn remove_faces_data<T: 'b + Clone>(&mut self, remove: &FaceData<'b, T, Self>) {
+            self.faces_data.retain(|data| {
                 data.upgrade()
                     .map(|data| !std::ptr::eq(data.as_ptr(), remove))
                     .unwrap_or(false)

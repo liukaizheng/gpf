@@ -8,6 +8,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::time::Instant;
 extern crate test;
 
+#[allow(dead_code)]
 fn write_obj(points: &[f64], triangles: &[usize], name: &str) {
     let mut file = std::fs::File::create(name).unwrap();
     for i in 0..points.len() / 2 {
@@ -57,9 +58,11 @@ fn test_triangulate() {
     let start = Instant::now();
     let triangles = triangulate(&points, &[start_idx, end_idx], &bump);
     println!("Time elapsed in {:?}", start.elapsed());
-    write_obj(&points, &triangles, "test.obj");
+    assert_eq!(triangles.len(), 54684);
+    // write_obj(&points, &triangles, "test.obj");
 }
 
+#[allow(dead_code)]
 fn read_points<'b>(name: &str, bump: &'b Bump) -> Vec<'b, f64> {
     let f = File::open(name).unwrap();
 

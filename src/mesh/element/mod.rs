@@ -14,15 +14,16 @@ pub use halfedge::*;
 pub use vertex::*;
 
 use super::Mesh;
+use bumpalo::collections::Vec;
 
 pub trait ElementId: From<usize> {
     fn new() -> Self;
     fn valid(&self) -> bool;
 }
 
-pub trait Element {
+pub trait Element<'b> {
     type Id: ElementId;
-    type M: Mesh;
+    type M: Mesh<'b>;
     fn id(&self) -> Self::Id;
     fn mesh(&self) -> &Self::M;
     fn valid(&self) -> bool;
@@ -30,7 +31,16 @@ pub trait Element {
     fn is_end(&self) -> bool;
 }
 
-fn iter_next<E: Element>(ele: &mut E) -> Option<<E as Element>::Id> {
+#[inline(always)]
+pub fn ele_ranges<'b, E: ElementId>(
+    start: usize,
+    len: usize,
+    bump: &'b bumpalo::Bump,
+) -> Vec<'b, E> {
+    Vec::from_iter_in((start..(start + len)).map(|idx| idx.into()), bump)
+}
+
+fn iter_next<'b, E: Element<'b>>(ele: &mut E) -> Option<<E as Element<'b>>::Id> {
     if ele.is_end() {
         return None;
     }
