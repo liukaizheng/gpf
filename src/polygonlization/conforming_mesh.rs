@@ -16,7 +16,7 @@ use crate::{
 
 pub struct Constraints<'b> {
     triangles: Vec<'b, usize>,
-    n_ori_triangles: usize,
+    pub(crate) n_ori_triangles: usize,
 }
 
 impl<'b> Constraints<'b> {

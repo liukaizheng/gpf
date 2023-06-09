@@ -82,7 +82,7 @@ fn make_mesh_for_triangles<'a, 'b: 'a>(points: &'a [f64], triangles: Vec<'b, usi
     );
     constraints.place_virtual_constraints(&tet_mesh);
     let tet_marks = constraints.insert_constraints(&mut tet_mesh);
-    let complex = BSPComplex::new(tet_mesh, tet_marks);
+    let complex = BSPComplex::new(tet_mesh, &constraints, tet_marks);
 }
 
 pub fn make_polyhedra_mesh<'b>(

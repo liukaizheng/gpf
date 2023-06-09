@@ -9,6 +9,7 @@ use super::{
     abs_max, dummy_abs_max, estimate, get_exponent, ExpansionNum, GenericNum, IntervalNumber,
 };
 
+#[derive(Clone)]
 pub struct ExplicitPoint3D {
     pub data: [f64; 3],
 }
@@ -48,6 +49,7 @@ fn normalize_lambda3d(x: &mut [f64], y: &mut [f64], z: &mut [f64], d: &mut [f64]
     }
 }
 
+#[derive(Clone)]
 pub struct Implicit3DCache<T> {
     pub x: T,
     pub y: T,
@@ -62,6 +64,7 @@ pub trait ImplicitPoint3D<'b> {
 }
 
 /// A point in 3D space representing the intersection of a line and a plane.
+#[derive(Clone)]
 pub struct ImplicitPointLPI<'b> {
     /// line
     p: ExplicitPoint3D,
@@ -308,6 +311,7 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
 }
 
 /// A point in 3D space representing the intersection of three planes.
+#[derive(Clone)]
 pub struct ImplicitPointTPI<'b> {
     /// plane 1
     v1: ExplicitPoint3D,
@@ -685,6 +689,7 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
     }
 }
 
+#[derive(Clone)]
 pub enum Point3D<'b> {
     Explicit(ExplicitPoint3D),
     LPI(ImplicitPointLPI<'b>),

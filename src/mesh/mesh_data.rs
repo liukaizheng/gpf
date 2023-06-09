@@ -16,7 +16,7 @@ macro_rules! mesh_data {
     (struct $name: ident, $n_elements: ident, $add_ele_data: ident, $remove_ele_data: ident, $id: ty) => {
         pub struct $name<'b, T: 'b + Clone, M: Mesh<'b>> {
             default_val: T,
-            data: Vec<'b, T>,
+            pub data: Vec<'b, T>,
             mesh: Weak<RefCell<M>>,
         }
 

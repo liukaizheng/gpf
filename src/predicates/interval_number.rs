@@ -1,6 +1,7 @@
 use core::f64;
 use std::ops::{Add, Mul, Sub};
 
+#[derive(Clone)]
 pub struct IntervalNumber {
     low: f64,
     high: f64,
