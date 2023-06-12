@@ -82,7 +82,15 @@ fn make_mesh_for_triangles<'a, 'b: 'a>(points: &'a [f64], triangles: Vec<'b, usi
     );
     constraints.place_virtual_constraints(&tet_mesh);
     let tet_marks = constraints.insert_constraints(&mut tet_mesh);
-    let complex = BSPComplex::new(tet_mesh, &constraints, tet_marks);
+    let mut complex = BSPComplex::new(tet_mesh, &constraints, tet_marks);
+    let mut cid = 0;
+    while cid < complex.n_cells() {
+        if complex.splittable(cid) {
+            complex.split_cell(cid);
+        } else {
+            cid += 1;
+        }
+    }
 }
 
 pub fn make_polyhedra_mesh<'b>(

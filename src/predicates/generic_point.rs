@@ -9,7 +9,7 @@ use super::{
     abs_max, dummy_abs_max, estimate, get_exponent, ExpansionNum, GenericNum, IntervalNumber,
 };
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct ExplicitPoint3D {
     pub data: [f64; 3],
 }
@@ -67,12 +67,12 @@ pub trait ImplicitPoint3D<'b> {
 #[derive(Clone)]
 pub struct ImplicitPointLPI<'b> {
     /// line
-    p: ExplicitPoint3D,
-    q: ExplicitPoint3D,
+    pub p: ExplicitPoint3D,
+    pub q: ExplicitPoint3D,
     /// plane
-    r: ExplicitPoint3D,
-    s: ExplicitPoint3D,
-    t: ExplicitPoint3D,
+    pub r: ExplicitPoint3D,
+    pub s: ExplicitPoint3D,
+    pub t: ExplicitPoint3D,
 
     bump: &'b Bump,
 
@@ -314,17 +314,17 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
 #[derive(Clone)]
 pub struct ImplicitPointTPI<'b> {
     /// plane 1
-    v1: ExplicitPoint3D,
-    v2: ExplicitPoint3D,
-    v3: ExplicitPoint3D,
+    pub v1: ExplicitPoint3D,
+    pub v2: ExplicitPoint3D,
+    pub v3: ExplicitPoint3D,
     /// plane 2
-    w1: ExplicitPoint3D,
-    w2: ExplicitPoint3D,
-    w3: ExplicitPoint3D,
+    pub w1: ExplicitPoint3D,
+    pub w2: ExplicitPoint3D,
+    pub w3: ExplicitPoint3D,
     /// plane 3
-    u1: ExplicitPoint3D,
-    u2: ExplicitPoint3D,
-    u3: ExplicitPoint3D,
+    pub u1: ExplicitPoint3D,
+    pub u2: ExplicitPoint3D,
+    pub u3: ExplicitPoint3D,
 
     ss_filter: RefCell<Option<(Implicit3DCache<f64>, f64)>>,
     d_filter: RefCell<Option<Implicit3DCache<IntervalNumber>>>,
@@ -694,4 +694,15 @@ pub enum Point3D<'b> {
     Explicit(ExplicitPoint3D),
     LPI(ImplicitPointLPI<'b>),
     TPI(ImplicitPointTPI<'b>),
+}
+
+impl<'b> Point3D<'b> {
+    #[inline(always)]
+    pub fn explicit(&self) -> Option<&ExplicitPoint3D> {
+        if let Point3D::Explicit(p) = self {
+            Some(p)
+        } else {
+            None
+        }
+    }
 }

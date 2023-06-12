@@ -79,6 +79,9 @@ pub trait Mesh<'b>: Sized {
     /// the first halfedge of the edge
     fn e_halfedge(&self, eid: EdgeId) -> HalfedgeId;
 
+    /// two vertices of the edge
+    fn e_vertices(&self, eid: EdgeId) -> [VertexId; 2];
+
     /// the first halfedge of the face
     fn f_halfedge(&self, fid: FaceId) -> HalfedgeId;
 

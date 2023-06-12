@@ -22,6 +22,20 @@ macro_rules! element_id {
                 &mut self[index.0]
             }
         }
+        impl<T> Index<$name> for [T] {
+            type Output = T;
+            #[inline(always)]
+            fn index(&self, index: $name) -> &Self::Output {
+                &self[index.0]
+            }
+        }
+
+        impl<T> IndexMut<$name> for [T] {
+            #[inline(always)]
+            fn index_mut(&mut self, index: $name) -> &mut Self::Output {
+                &mut self[index.0]
+            }
+        }
 
         impl ElementId for $name {
             #[inline(always)]

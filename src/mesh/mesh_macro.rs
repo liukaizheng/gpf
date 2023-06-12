@@ -137,6 +137,13 @@ macro_rules! build_connect_info {
             }
         }
 
+        // two vertices of the edge
+        #[inline]
+        fn e_vertices(&self, eid: EdgeId) -> [VertexId; 2] {
+            let hid = self.e_halfedge(eid);
+            [self.he_vertex(hid), self.he_tip_vertex(hid)]
+        }
+
         /// the first halfedge of the face
         #[inline(always)]
         fn f_halfedge(&self, fid: FaceId) -> HalfedgeId {

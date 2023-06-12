@@ -14,8 +14,8 @@ use crate::{
     INVALID_IND,
 };
 
-pub struct Constraints<'b> {
-    triangles: Vec<'b, usize>,
+pub(crate) struct Constraints<'b> {
+    pub(crate) triangles: Vec<'b, usize>,
     pub(crate) n_ori_triangles: usize,
 }
 
@@ -29,9 +29,14 @@ impl<'b> Constraints<'b> {
     }
 
     #[inline(always)]
-    fn triangle(&self, idx: usize) -> &[usize] {
+    pub(crate) fn triangle(&self, idx: usize) -> &[usize] {
         let start = idx * 3;
         &self.triangles[start..(start + 3)]
+    }
+
+    #[inline(always)]
+    pub(crate) fn is_virtual(&self, idx: usize) -> bool {
+        !(idx < self.n_ori_triangles)
     }
 
     #[inline(always)]

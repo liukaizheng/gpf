@@ -28,12 +28,12 @@ impl<'a, 'b: 'a, M: Mesh<'b>> EdgeIter<'a, 'b, M> {
 
     #[allow(dead_code)]
     fn len(&self) -> usize {
-        self.mesh.n_halfedges()
+        self.mesh.n_edges()
     }
 
     #[inline(always)]
     fn capacity(&self) -> usize {
-        self.mesh.n_halfedges_capacity()
+        self.mesh.n_edges_capacity()
     }
 }
 

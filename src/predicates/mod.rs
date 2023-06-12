@@ -64,6 +64,12 @@ pub fn sign_reverse(ori: Orientation) -> Orientation {
 }
 
 #[inline(always)]
+pub fn sign_reversed(ori1: Orientation, ori2: Orientation) -> bool {
+    (ori1 == Orientation::Positive && ori2 == Orientation::Negative)
+        || (ori2 == Orientation::Positive && ori1 == Orientation::Negative)
+}
+
+#[inline(always)]
 pub fn get_exponent(x: f64) -> i32 {
     if x == 0.0 {
         0
