@@ -282,7 +282,6 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
 
     #[inline]
     fn split_edge(&mut self, eid: EdgeId, tri: &[usize]) {
-        let [va, vb] = self.mesh.borrow().e_vertices(eid);
         self.mesh.borrow_mut().split_edge(eid);
         self.edge_visits.push(false);
         let p0 = self.points[tri[0]].explicit().unwrap().clone();
@@ -297,8 +296,8 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
             ));
         } else {
             self.points.push(Point3D::LPI(ImplicitPointLPI::new(
-                self.points[va].explicit().unwrap().clone(),
-                self.points[vb].explicit().unwrap().clone(),
+                self.points[ori_edge_parents[0]].explicit().unwrap().clone(),
+                self.points[ori_edge_parents[1]].explicit().unwrap().clone(),
                 p0,
                 p1,
                 p2,

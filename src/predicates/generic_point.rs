@@ -183,12 +183,12 @@ where
 
 impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
     fn static_filter(&self) -> Option<&(Implicit3DCache<f64>, f64)> {
-        let filter_option = Ref::leak(self.ss_filter.borrow()).as_ref();
-        if let Some(filter) = filter_option {
-            if filter.1 == 0.0 {
+        if self.ss_filter.borrow().is_some() {
+            let filter = self.ss_filter.borrow();
+            if filter.as_ref().unwrap().1 == 0.0 {
                 return None;
             } else {
-                return filter_option;
+                return Ref::leak(filter).as_ref();
             }
         } else {
             let (filter, max_var) = lpi_lambda::<'_, true, _, _>(
@@ -234,10 +234,10 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
     }
 
     fn dynamic_filter(&self) -> Option<&Implicit3DCache<IntervalNumber>> {
-        let filter_option = Ref::leak(self.d_filter.borrow()).as_ref();
-        if let Some(filter) = filter_option {
-            if filter.d.not_zero() {
-                return filter_option;
+        if self.d_filter.borrow().is_some() {
+            let filter = self.d_filter.borrow();
+            if filter.as_ref().unwrap().d.not_zero() {
+                return Ref::leak(filter).as_ref();
             } else {
                 return None;
             }
@@ -271,10 +271,10 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
     }
 
     fn exact(&self) -> Option<&Implicit3DCache<ExpansionNum<'b>>> {
-        let exact_option = Ref::leak(self.exact.borrow()).as_ref();
-        if let Some(exact) = exact_option {
-            if exact.d.not_zero() {
-                return exact_option;
+        if self.exact.borrow().is_some() {
+            let exact = self.exact.borrow();
+            if exact.as_ref().unwrap().d.not_zero() {
+                return Ref::leak(exact).as_ref();
             } else {
                 return None;
             }
@@ -524,12 +524,12 @@ where
 
 impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
     fn static_filter(&self) -> Option<&(Implicit3DCache<f64>, f64)> {
-        let filter_option = Ref::leak(self.ss_filter.borrow()).as_ref();
-        if let Some(filter) = filter_option {
-            if filter.1 == 0.0 {
+        if self.ss_filter.borrow().is_some() {
+            let filter = self.ss_filter.borrow();
+            if filter.as_ref().unwrap().1 == 0.0 {
                 return None;
             } else {
-                return filter_option;
+                return Ref::leak(filter).as_ref();
             }
         } else {
             let (filter, max_var) = tpi_lambda::<'_, true, _, _>(
@@ -589,10 +589,10 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
     }
 
     fn dynamic_filter(&self) -> Option<&Implicit3DCache<IntervalNumber>> {
-        let filter_option = Ref::leak(self.d_filter.borrow()).as_ref();
-        if let Some(filter) = filter_option {
-            if filter.d.not_zero() {
-                return filter_option;
+        if self.d_filter.borrow().is_some() {
+            let filter = self.d_filter.borrow();
+            if filter.as_ref().unwrap().d.not_zero() {
+                return Ref::leak(filter).as_ref();
             } else {
                 return None;
             }
@@ -638,10 +638,10 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
     }
 
     fn exact(&self) -> Option<&Implicit3DCache<ExpansionNum<'b>>> {
-        let exact_option = Ref::leak(self.exact.borrow()).as_ref();
-        if let Some(exact) = exact_option {
-            if exact.d.not_zero() {
-                return exact_option;
+        if self.exact.borrow().is_some() {
+            let exact = self.exact.borrow();
+            if exact.as_ref().unwrap().d.not_zero() {
+                return Ref::leak(exact).as_ref();
             } else {
                 return None;
             }
@@ -705,4 +705,16 @@ impl<'b> Point3D<'b> {
             None
         }
     }
+}
+
+#[test]
+fn test_get_filter() {
+    let p = ExplicitPoint3D {data: [0.0, 0.0, -1.0]};
+    let q = ExplicitPoint3D {data: [0.0, 0.0, 1.0]};
+    let r = ExplicitPoint3D {data: [-1.0, -1.0, 0.0]};
+    let s = ExplicitPoint3D {data: [1.0, -1.0, 0.0]};
+    let t = ExplicitPoint3D {data: [0.0, 1.0, 0.0]};
+    let bump = Bump::new();
+    let point = ImplicitPointLPI::new(p, q, r, s, t, &bump);
+    assert!(point.static_filter().is_some());
 }

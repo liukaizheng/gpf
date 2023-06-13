@@ -11,22 +11,22 @@ use bumpalo::{collections::Vec, Bump};
 use itertools::Itertools;
 
 pub struct SurfaceMesh<'b> {
-    v_halfedge_arr: Vec<'b, HalfedgeId>,
-    he_next_arr: Vec<'b, HalfedgeId>,
-    he_vertex_arr: Vec<'b, VertexId>,
-    he_face_arr: Vec<'b, FaceId>,
-    f_halfedge_arr: Vec<'b, HalfedgeId>,
+    pub v_halfedge_arr: Vec<'b, HalfedgeId>,
+    pub he_next_arr: Vec<'b, HalfedgeId>,
+    pub he_vertex_arr: Vec<'b, VertexId>,
+    pub he_face_arr: Vec<'b, FaceId>,
+    pub f_halfedge_arr: Vec<'b, HalfedgeId>,
 
-    n_vertices: usize,
-    n_halfedges: usize,
-    n_edges: usize,
-    n_faces: usize,
+    pub n_vertices: usize,
+    pub n_halfedges: usize,
+    pub n_edges: usize,
+    pub n_faces: usize,
 
-    he_edge_arr: Vec<'b, EdgeId>,
-    he_vert_in_next_arr: Vec<'b, HalfedgeId>,
-    he_vert_out_next_arr: Vec<'b, HalfedgeId>,
-    he_sibling_arr: Vec<'b, HalfedgeId>,
-    e_halfedge_arr: Vec<'b, HalfedgeId>,
+    pub he_edge_arr: Vec<'b, EdgeId>,
+    pub he_vert_in_next_arr: Vec<'b, HalfedgeId>,
+    pub he_vert_out_next_arr: Vec<'b, HalfedgeId>,
+    pub he_sibling_arr: Vec<'b, HalfedgeId>,
+    pub e_halfedge_arr: Vec<'b, HalfedgeId>,
 
     pub vertices_data: Vec<'b, Weak<RefCell<dyn MeshData<Id = VertexId> + 'b>>>,
     pub halfedges_data: Vec<'b, Weak<RefCell<dyn MeshData<Id = HalfedgeId> + 'b>>>,

@@ -70,7 +70,9 @@ impl<'a, 'b: 'a, M: Mesh<'b>> Vertex<'b> for VertexIter<'a, 'b, M> {
 
     #[inline(always)]
     fn incoming_halfedge(&self) -> VIncomingHalfedgeIter<'_, 'b, Self::M> {
-        VIncomingHalfedgeIter::new(self.mesh, *self.halfedge().prev())
+        let mut he = self.halfedge();
+        he.prev();
+        VIncomingHalfedgeIter::new(self.mesh, *he)
     }
 
     #[inline(always)]
