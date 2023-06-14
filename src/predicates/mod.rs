@@ -74,7 +74,7 @@ pub fn get_exponent(x: f64) -> i32 {
     if x == 0.0 {
         0
     } else {
-        x.to_bits().wrapping_shr(52) as i32 - 1023
+        x.abs().to_bits().wrapping_shr(52) as i32 - 1023
     }
 }
 

@@ -1,13 +1,13 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use bumpalo::{collections::Vec, Bump};
 use itertools::Itertools;
 
 use crate::{
-    mesh::{EdgeData, EdgeId, Face, FaceData, Mesh, SurfaceMesh, validate_mesh_connectivity},
+    mesh::{validate_mesh_connectivity, EdgeData, EdgeId, Face, FaceData, Mesh, SurfaceMesh},
     predicates::{
-        orient3d::orient3d, sign_reversed, ExplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
-        Orientation, Point3D,
+        orient2d, orient2d_xy, orient2d_yz, orient2d_zx, orient3d::orient3d, sign_reversed,
+        ExplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI, Orientation, Point3D,
     },
     triangle::TetMesh,
     INVALID_IND,
@@ -238,6 +238,7 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
             unreachable!("don't find plane to split cell");
         }
 
+        let mut n_split = 0;
         for &eid in &cell_edges {
             let eid = eid.into();
             let e_verts = self.mesh.borrow().e_vertices(eid);
@@ -246,10 +247,57 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
                 self.vert_orientations[e_verts[1]],
             ) {
                 self.split_edge(eid, tri);
-                let res = validate_mesh_connectivity(&self.mesh.borrow());
-                if let Err(str) = res {
-                    panic!("failed to split {}", str);
+                n_split += 1;
+                // let res = validate_mesh_connectivity(&self.mesh.borrow());
+                // if let Err(str) = res {
+                //     panic!("failed to split {}", str);
+                // }
+            }
+        }
+
+        if n_split > 4 {
+            let mut edge_map = HashMap::<(usize, usize), std::vec::Vec<usize>>::new();
+            let mesh = self.mesh.borrow();
+            for &fid in &self.cell_data[cid].faces {
+                for hid in mesh.face(fid.into()).halfedges() {
+                    let verts = self.edge_data.borrow().data[mesh.he_edge(hid)]
+                        .parents
+                        .clone();
+                    let va = verts[0];
+                    let vb = verts[1];
+                    let key = if va < vb { (va, vb) } else { (vb, va) };
+                    let vals = edge_map.entry(key).or_insert(std::vec::Vec::new());
+                    vals.push(hid.0);
                 }
+            }
+            let edge_vertices = edge_map
+                .values()
+                .map(|hes| {
+                    hes.iter()
+                        .map(|&hid| {
+                            [
+                                mesh.he_vertex(hid.into()).0,
+                                mesh.he_tip_vertex(hid.into()).0,
+                            ]
+                        })
+                        .flatten()
+                        .unique()
+                        .collect::<std::vec::Vec<_>>()
+                })
+                .collect::<std::vec::Vec<_>>();
+
+            let edge_orientaions = edge_vertices
+                .iter()
+                .map(|arr| {
+                    let a = arr
+                        .iter()
+                        .map(|&vid| self.vert_orientations[vid])
+                        .collect::<std::vec::Vec<Orientation>>();
+                    a
+                })
+                .collect::<std::vec::Vec<_>>();
+            for oris in &edge_orientaions {
+                println!("he");
             }
         }
 
