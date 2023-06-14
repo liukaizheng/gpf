@@ -52,6 +52,11 @@ impl IntervalNumber {
     pub fn negative(&self) -> bool {
         self.high < 0.0
     }
+
+    #[inline(always)]
+    pub fn neg(&mut self) {
+        std::mem::swap(&mut self.low, &mut self.high);
+    }
 }
 
 impl PartialEq for IntervalNumber {

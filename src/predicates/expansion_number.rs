@@ -12,7 +12,7 @@ pub struct ExpansionNum<'b> {
 }
 
 impl<'b> ExpansionNum<'b> {
-    #[inline]
+    #[inline(always)]
     pub fn bump(&self) -> &'b Bump {
         self.vec.bump()
     }
@@ -21,12 +21,14 @@ impl<'b> ExpansionNum<'b> {
 impl<'b> Deref for ExpansionNum<'b> {
     type Target = [f64];
 
+    #[inline(always)]
     fn deref(&self) -> &Self::Target {
         &self.vec
     }
 }
 
 impl<'b> DerefMut for ExpansionNum<'b> {
+    #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.vec
     }
@@ -40,21 +42,34 @@ impl<'b> From<Vec<'b, f64>> for ExpansionNum<'b> {
 }
 
 impl<'b> ExpansionNum<'b> {
+    #[inline(always)]
     pub fn not_zero(&self) -> bool {
         *self.last().unwrap() != 0.0
     }
+    #[inline(always)]
+    pub fn negative(&self) -> bool {
+        *self.last().unwrap() < 0.0
+    }
+
+    #[inline(always)]
+    pub fn neg(&mut self) {
+        for v in &mut self.vec {
+            *v = -*v;
+        }
+    }
 }
 
-#[inline]
+#[inline(always)]
 fn add<'b>(a: &[f64], b: &[f64], bump: &'b Bump) -> Vec<'b, f64> {
     fast_expansion_sum_zeroelim(a, b, bump)
 }
 
-#[inline]
+#[inline(always)]
 fn sub<'b>(a: &[f64], b: &[f64], bump: &'b Bump) -> Vec<'b, f64> {
     fast_expansion_diff_zeroelim(a, b, bump)
 }
-#[inline]
+
+#[inline(always)]
 fn mul<'b>(a: &[f64], b: &[f64], bump: &'b Bump) -> Vec<'b, f64> {
     mul_expansion_zeroelim(a, b, bump)
 }
@@ -64,7 +79,7 @@ macro_rules! impl_op {
         impl<'b> $op for ExpansionNum<'b> {
             type Output = ExpansionNum<'b>;
 
-            #[inline]
+            #[inline(always)]
             fn $func(self, rhs: Self) -> Self::Output {
                 Self::Output {
                     vec: $func(&self, &rhs, self.bump()),
@@ -75,7 +90,7 @@ macro_rules! impl_op {
         impl<'b> $op for &ExpansionNum<'b> {
             type Output = ExpansionNum<'b>;
 
-            #[inline]
+            #[inline(always)]
             fn $func(self, rhs: Self) -> Self::Output {
                 Self::Output {
                     vec: $func(self, rhs, self.bump()),
@@ -86,7 +101,7 @@ macro_rules! impl_op {
         impl<'b> $op<&ExpansionNum<'b>> for ExpansionNum<'b> {
             type Output = ExpansionNum<'b>;
 
-            #[inline]
+            #[inline(always)]
             fn $func(self, rhs: &Self) -> Self::Output {
                 Self::Output {
                     vec: $func(&self, rhs, self.bump()),
@@ -97,7 +112,7 @@ macro_rules! impl_op {
         impl<'b> $op<ExpansionNum<'b>> for &ExpansionNum<'b> {
             type Output = ExpansionNum<'b>;
 
-            #[inline]
+            #[inline(always)]
             fn $func(self, rhs: ExpansionNum<'b>) -> Self::Output {
                 Self::Output {
                     vec: $func(self, &rhs, self.bump()),

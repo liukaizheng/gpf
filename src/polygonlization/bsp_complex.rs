@@ -1,13 +1,13 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
 use bumpalo::{collections::Vec, Bump};
 use itertools::Itertools;
 
 use crate::{
-    mesh::{validate_mesh_connectivity, EdgeData, EdgeId, Face, FaceData, Mesh, SurfaceMesh},
+    mesh::{EdgeData, EdgeId, Face, FaceData, Mesh, SurfaceMesh},
     predicates::{
-        orient2d, orient2d_xy, orient2d_yz, orient2d_zx, orient3d::orient3d, sign_reversed,
-        ExplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI, Orientation, Point3D,
+        orient3d::orient3d, sign_reversed, ExplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
+        Orientation, Point3D,
     },
     triangle::TetMesh,
     INVALID_IND,
@@ -221,71 +221,6 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
             &mut self.vert_orientations,
             bump,
         );
-        {
-            let mut edge_map = HashMap::<(usize, usize), std::vec::Vec<usize>>::new();
-            let mesh = self.mesh.borrow();
-            for &fid in &self.cell_data[cid].faces {
-                let mut temp_map = HashMap::new();
-                for hid in mesh.face(fid.into()).halfedges() {
-                    let verts = self.edge_data.borrow().data[mesh.he_edge(hid)]
-                        .parents
-                        .clone();
-                    let va = verts[0];
-                    let vb = verts[1];
-                    let key = if va < vb { (va, vb) } else { (vb, va) };
-                    if edge_map.contains_key(&key) {
-                        continue;
-                    }
-                    let vals = temp_map.entry(key).or_insert(std::vec::Vec::new());
-                    vals.push(hid.0);
-                }
-                for vals in temp_map.values_mut() {
-                    let pos = (0..vals.len())
-                        .find_position(|&curr| {
-                            let next = (curr + 1) % vals.len();
-                            mesh.he_tip_vertex(vals[curr].into())
-                                != mesh.he_vertex(vals[next].into())
-                        })
-                        .unwrap()
-                        .0;
-                    vals.rotate_left(pos + 1);
-                }
-                edge_map.extend(temp_map);
-            }
-            let edge_vertices = edge_map
-                .values()
-                .map(|hes| {
-                    let mut res = hes
-                        .iter()
-                        .map(|&hid| mesh.he_vertex(hid.into()).0)
-                        .collect::<std::vec::Vec<_>>();
-                    let last_he = *hes.last().unwrap();
-                    res.push(mesh.he_tip_vertex(last_he.into()).0);
-                    res
-                })
-                .collect::<std::vec::Vec<_>>();
-
-            let edge_orientaions = edge_vertices
-                .iter()
-                .map(|arr| {
-                    let a = arr
-                        .iter()
-                        .map(|&vid| self.vert_orientations[vid])
-                        .collect::<std::vec::Vec<Orientation>>();
-                    a
-                })
-                .collect::<std::vec::Vec<_>>();
-            for oris in &edge_orientaions {
-                let mut coris = oris.clone();
-                coris.dedup();
-                let counts = coris.iter().counts();
-                if counts.values().any(|&v| v > 1)
-                    || (counts.len() == 3 && coris[0] == Orientation::Zero)
-                {
-                    panic!("more intersecionts");
-                }
-            }
-        }
 
         let (mut n_over, mut n_under) = (0, 0);
         for &vid in &cell_verts {
@@ -300,10 +235,9 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
             }
         }
         if n_over == 0 || n_under == 0 {
-            unreachable!("don't find plane to split cell");
+            panic!("don't find plane to split cell");
         }
 
-        let mut n_split = 0;
         for &eid in &cell_edges {
             let eid = eid.into();
             let e_verts = self.mesh.borrow().e_vertices(eid);
@@ -312,11 +246,6 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
                 self.vert_orientations[e_verts[1]],
             ) {
                 self.split_edge(eid, tri);
-                n_split += 1;
-                // let res = validate_mesh_connectivity(&self.mesh.borrow());
-                // if let Err(str) = res {
-                //     panic!("failed to split {}", str);
-                // }
             }
         }
 

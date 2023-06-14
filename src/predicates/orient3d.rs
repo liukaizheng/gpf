@@ -23,7 +23,7 @@ pub fn orient3d<'a, 'b: 'a>(
             Point3D::Explicit(pb),
             Point3D::Explicit(pc),
             Point3D::Explicit(pd),
-        ) => double_to_sign(predicates::orient3d(pa, pb, pc, pd, bump)),
+        ) => double_to_sign(-predicates::orient3d(pa, pb, pc, pd, bump)),
         (Point3D::Explicit(pa), Point3D::Explicit(pb), Point3D::Explicit(pc), Point3D::LPI(pd)) => {
             orient3d_leee(pd, pa, pc, pb, bump)
         }

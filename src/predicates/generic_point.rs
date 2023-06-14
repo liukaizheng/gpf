@@ -191,7 +191,7 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
                 return Ref::leak(filter).as_ref();
             }
         } else {
-            let (filter, max_var) = lpi_lambda::<'_, true, _, _>(
+            let (mut filter, max_var) = lpi_lambda::<'_, true, _, _>(
                 self.p.data[0],
                 self.p.data[1],
                 self.p.data[2],
@@ -216,6 +216,12 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
             lambda_d_eps *= max_var;
             lambda_d_eps *= 4.884981308350689e-15;
             if filter.d > lambda_d_eps || filter.d < -lambda_d_eps {
+                if filter.d < 0.0 {
+                    filter.x = -filter.x;
+                    filter.y = -filter.y;
+                    filter.z = -filter.z;
+                    filter.d = -filter.d;
+                }
                 self.ss_filter.replace(Some((filter, max_var)));
                 return Ref::leak(self.ss_filter.borrow()).as_ref();
             } else {
@@ -242,7 +248,7 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
                 return None;
             }
         } else {
-            let (filter, _) = lpi_lambda::<'_, false, _, _>(
+            let (mut filter, _) = lpi_lambda::<false, IntervalNumber, _>(
                 self.p.data[0].into(),
                 self.p.data[1].into(),
                 self.p.data[2].into(),
@@ -261,6 +267,12 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
                 dummy_abs_max,
                 &self.bump,
             );
+            if filter.d.negative() {
+                filter.x.neg();
+                filter.y.neg();
+                filter.z.neg();
+                filter.d.neg();
+            }
             self.d_filter.replace(Some(filter));
             if self.d_filter.borrow().as_ref().unwrap().d.not_zero() {
                 return Ref::leak(self.d_filter.borrow()).as_ref();
@@ -298,6 +310,12 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
                 dummy_abs_max,
                 &self.bump,
             );
+            if exact.d.negative() {
+                exact.x.neg();
+                exact.y.neg();
+                exact.z.neg();
+                exact.d.neg();
+            }
             normalize_lambda3d(&mut exact.x, &mut exact.y, &mut exact.z, &mut exact.d);
 
             self.exact.replace(Some(exact));
@@ -532,7 +550,7 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
                 return Ref::leak(filter).as_ref();
             }
         } else {
-            let (filter, max_var) = tpi_lambda::<'_, true, _, _>(
+            let (mut filter, max_var) = tpi_lambda::<'_, true, _, _>(
                 self.v1.data[0],
                 self.v1.data[1],
                 self.v1.data[2],
@@ -571,6 +589,12 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
             lambda_d_eps *= max_var;
             lambda_d_eps *= 8.704148513061234e-14;
             if filter.d > lambda_d_eps || filter.d < -lambda_d_eps {
+                if filter.d < 0.0 {
+                    filter.x = -filter.x;
+                    filter.y = -filter.y;
+                    filter.z = -filter.z;
+                    filter.d = -filter.d;
+                }
                 self.ss_filter.replace(Some((filter, max_var)));
                 return Ref::leak(self.ss_filter.borrow()).as_ref();
             } else {
@@ -597,7 +621,7 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
                 return None;
             }
         } else {
-            let (filter, _) = tpi_lambda::<'_, false, _, _>(
+            let (mut filter, _) = tpi_lambda::<false, IntervalNumber, _>(
                 self.v1.data[0].into(),
                 self.v1.data[1].into(),
                 self.v1.data[2].into(),
@@ -628,6 +652,14 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
                 dummy_abs_max,
                 &self.bump,
             );
+
+            if filter.d.negative() {
+                filter.x.neg();
+                filter.y.neg();
+                filter.z.neg();
+                filter.d.neg();
+            }
+
             self.d_filter.replace(Some(filter));
             if self.d_filter.borrow().as_ref().unwrap().d.not_zero() {
                 return Ref::leak(self.d_filter.borrow()).as_ref();
@@ -646,7 +678,7 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
                 return None;
             }
         } else {
-            let (mut exact, _) = tpi_lambda::<'_, false, ExpansionNum<'_>, _>(
+            let (mut exact, _) = tpi_lambda::<false, ExpansionNum<'_>, _>(
                 vec![in self.bump; self.v1.data[0]].into(),
                 vec![in self.bump; self.v1.data[1]].into(),
                 vec![in self.bump; self.v1.data[2]].into(),
@@ -677,6 +709,12 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
                 dummy_abs_max,
                 &self.bump,
             );
+            if exact.d.negative() {
+                exact.x.neg();
+                exact.y.neg();
+                exact.z.neg();
+                exact.d.neg();
+            }
             normalize_lambda3d(&mut exact.x, &mut exact.y, &mut exact.z, &mut exact.d);
 
             self.exact.replace(Some(exact));
@@ -709,11 +747,21 @@ impl<'b> Point3D<'b> {
 
 #[test]
 fn test_get_filter() {
-    let p = ExplicitPoint3D {data: [0.0, 0.0, -1.0]};
-    let q = ExplicitPoint3D {data: [0.0, 0.0, 1.0]};
-    let r = ExplicitPoint3D {data: [-1.0, -1.0, 0.0]};
-    let s = ExplicitPoint3D {data: [1.0, -1.0, 0.0]};
-    let t = ExplicitPoint3D {data: [0.0, 1.0, 0.0]};
+    let p = ExplicitPoint3D {
+        data: [0.0, 0.0, -1.0],
+    };
+    let q = ExplicitPoint3D {
+        data: [0.0, 0.0, 1.0],
+    };
+    let r = ExplicitPoint3D {
+        data: [-1.0, -1.0, 0.0],
+    };
+    let s = ExplicitPoint3D {
+        data: [1.0, -1.0, 0.0],
+    };
+    let t = ExplicitPoint3D {
+        data: [0.0, 1.0, 0.0],
+    };
     let bump = Bump::new();
     let point = ImplicitPointLPI::new(p, q, r, s, t, &bump);
     assert!(point.static_filter().is_some());
