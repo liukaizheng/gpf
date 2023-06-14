@@ -86,6 +86,7 @@ fn make_mesh_for_triangles<'a, 'b: 'a>(points: &'a [f64], triangles: Vec<'b, usi
     let mut cid = 0;
     while cid < complex.n_cells() {
         if complex.splittable(cid) {
+            println!("split cell {}", cid);
             complex.split_cell(cid);
         } else {
             cid += 1;

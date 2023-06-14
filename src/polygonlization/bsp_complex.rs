@@ -4,7 +4,7 @@ use bumpalo::{collections::Vec, Bump};
 use itertools::Itertools;
 
 use crate::{
-    mesh::{EdgeData, EdgeId, Face, FaceData, Mesh, SurfaceMesh},
+    mesh::{EdgeData, EdgeId, Face, FaceData, Mesh, SurfaceMesh, validate_mesh_connectivity},
     predicates::{
         orient3d::orient3d, sign_reversed, ExplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
         Orientation, Point3D,
@@ -246,6 +246,10 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
                 self.vert_orientations[e_verts[1]],
             ) {
                 self.split_edge(eid, tri);
+                let res = validate_mesh_connectivity(&self.mesh.borrow());
+                if let Err(str) = res {
+                    panic!("failed to split {}", str);
+                }
             }
         }
 
