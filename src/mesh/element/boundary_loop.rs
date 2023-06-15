@@ -8,13 +8,13 @@ pub struct BoundaryLoopId(usize);
 
 element_id! {struct BoundaryLoopId}
 
-pub struct BoundaryLoopIter<'a, 'b> {
+pub struct BoundaryLoopIter<'a> {
     id: BoundaryLoopId,
-    mesh: &'a ManifoldMesh<'b>,
+    mesh: &'a ManifoldMesh,
 }
 
-impl<'a, 'b: 'a> BoundaryLoopIter<'a, 'b> {
-    pub fn new(id: BoundaryLoopId, mesh: &'a ManifoldMesh<'b>) -> Self {
+impl<'a> BoundaryLoopIter<'a> {
+    pub fn new(id: BoundaryLoopId, mesh: &'a ManifoldMesh) -> Self {
         Self { id, mesh }
     }
 
@@ -28,7 +28,7 @@ impl<'a, 'b: 'a> BoundaryLoopIter<'a, 'b> {
     }
 }
 
-impl<'a, 'b: 'a> Deref for BoundaryLoopIter<'a, 'b> {
+impl<'a> Deref for BoundaryLoopIter<'a> {
     type Target = BoundaryLoopId;
 
     fn deref(&self) -> &Self::Target {
@@ -36,9 +36,9 @@ impl<'a, 'b: 'a> Deref for BoundaryLoopIter<'a, 'b> {
     }
 }
 
-impl<'a, 'b: 'a> Element<'b> for BoundaryLoopIter<'a, 'b> {
+impl<'a> Element for BoundaryLoopIter<'a> {
     type Id = BoundaryLoopId;
-    type M = ManifoldMesh<'b>;
+    type M = ManifoldMesh;
 
     fn id(&self) -> BoundaryLoopId {
         self.id
@@ -61,7 +61,7 @@ impl<'a, 'b: 'a> Element<'b> for BoundaryLoopIter<'a, 'b> {
     }
 }
 
-impl<'a, 'b: 'a> Iterator for BoundaryLoopIter<'a, 'b> {
+impl<'a> Iterator for BoundaryLoopIter<'a> {
     type Item = BoundaryLoopId;
 
     fn next(&mut self) -> Option<Self::Item> {

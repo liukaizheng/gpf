@@ -1,7 +1,4 @@
-use std::{
-    marker::PhantomData,
-    ops::{Deref, DerefMut, Index, IndexMut},
-};
+use std::ops::{Deref, DerefMut, Index, IndexMut};
 
 use super::{iter_next, EdgeIter, Element, ElementId, FaceIter, VertexIter};
 use crate::{
@@ -15,19 +12,14 @@ pub struct HalfedgeId(pub usize);
 
 element_id! {struct HalfedgeId}
 
-pub struct HalfedgeIter<'a, 'b: 'a, M: Mesh<'b>> {
-    phantom: PhantomData<&'b M>,
+pub struct HalfedgeIter<'a, M: Mesh> {
     id: HalfedgeId,
     mesh: &'a M,
 }
 
-impl<'a, 'b: 'a, M: Mesh<'b>> HalfedgeIter<'a, 'b, M> {
+impl<'a, M: Mesh> HalfedgeIter<'a, M> {
     pub fn new(id: HalfedgeId, mesh: &'a M) -> Self {
-        Self {
-            id,
-            mesh,
-            phantom: PhantomData,
-        }
+        Self { id, mesh }
     }
 
     #[allow(dead_code)]
@@ -40,7 +32,7 @@ impl<'a, 'b: 'a, M: Mesh<'b>> HalfedgeIter<'a, 'b, M> {
     }
 }
 
-impl<'a, 'b: 'a, M: Mesh<'b>> Deref for HalfedgeIter<'a, 'b, M> {
+impl<'a, M: Mesh> Deref for HalfedgeIter<'a, M> {
     type Target = HalfedgeId;
 
     fn deref(&self) -> &Self::Target {
@@ -48,7 +40,7 @@ impl<'a, 'b: 'a, M: Mesh<'b>> Deref for HalfedgeIter<'a, 'b, M> {
     }
 }
 
-impl<'a, 'b: 'a, M: Mesh<'b>> Element<'b> for HalfedgeIter<'a, 'b, M> {
+impl<'a, M: Mesh> Element for HalfedgeIter<'a, M> {
     type Id = HalfedgeId;
     type M = M;
 
@@ -73,27 +65,27 @@ impl<'a, 'b: 'a, M: Mesh<'b>> Element<'b> for HalfedgeIter<'a, 'b, M> {
     }
 }
 
-pub trait Halfedge<'b>: Element<'b> {
-    fn vertex(&self) -> VertexIter<'_, 'b, Self::M>;
-    fn tip_vertex(&self) -> VertexIter<'_, 'b, Self::M>;
-    fn edge(&self) -> EdgeIter<'_, 'b, Self::M>;
+pub trait Halfedge: Element {
+    fn vertex(&self) -> VertexIter<Self::M>;
+    fn tip_vertex(&self) -> VertexIter<Self::M>;
+    fn edge(&self) -> EdgeIter<Self::M>;
     fn next(&mut self) -> &Self;
     fn prev(&mut self) -> &Self;
     fn sibling(&mut self) -> &Self;
-    fn face(&self) -> Option<FaceIter<'_, 'b, Self::M>>;
+    fn face(&self) -> Option<FaceIter<Self::M>>;
 }
 
-impl<'a, 'b: 'a, M: Mesh<'b>> Halfedge<'b> for HalfedgeIter<'a, 'b, M> {
+impl<'a, M: Mesh> Halfedge for HalfedgeIter<'a, M> {
     #[inline(always)]
-    fn vertex(&self) -> VertexIter<'_, 'b, Self::M> {
+    fn vertex(&self) -> VertexIter<Self::M> {
         VertexIter::new(self.mesh.he_vertex(self.id), self.mesh)
     }
     #[inline(always)]
-    fn tip_vertex(&self) -> VertexIter<'_, 'b, Self::M> {
+    fn tip_vertex(&self) -> VertexIter<Self::M> {
         VertexIter::new(self.mesh.he_tip_vertex(self.id), self.mesh)
     }
     #[inline(always)]
-    fn edge(&self) -> EdgeIter<'_, 'b, Self::M> {
+    fn edge(&self) -> EdgeIter<Self::M> {
         EdgeIter::new(self.mesh.he_edge(self.id), self.mesh)
     }
     #[inline(always)]
@@ -112,7 +104,7 @@ impl<'a, 'b: 'a, M: Mesh<'b>> Halfedge<'b> for HalfedgeIter<'a, 'b, M> {
         self
     }
     #[inline(always)]
-    fn face(&self) -> Option<FaceIter<'_, 'b, Self::M>> {
+    fn face(&self) -> Option<FaceIter<Self::M>> {
         match self.mesh.he_face_or_boundary_loop(self.id) {
             FaceOrBoundaryLoopId::Face(fid) => Some(FaceIter::new(fid, self.mesh)),
             _ => None,
@@ -120,9 +112,10 @@ impl<'a, 'b: 'a, M: Mesh<'b>> Halfedge<'b> for HalfedgeIter<'a, 'b, M> {
     }
 }
 
-impl<'a, 'b: 'a, M: Mesh<'b>> Iterator for HalfedgeIter<'a, 'b, M> {
+impl<'a, M: Mesh> Iterator for HalfedgeIter<'a, M> {
     type Item = HalfedgeId;
 
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         iter_next(self)
     }

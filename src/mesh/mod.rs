@@ -8,7 +8,6 @@ mod mesh_macro;
 
 use std::{cell::RefCell, rc::Weak};
 
-use bumpalo::Bump;
 pub use element::*;
 pub use manifold_mesh::*;
 pub use mesh_data::*;
@@ -21,8 +20,7 @@ pub enum FaceOrBoundaryLoopId {
     INVALID,
 }
 
-pub trait Mesh<'b>: Sized {
-    fn bump(&self) -> &'b Bump;
+pub trait Mesh: Sized {
     fn n_vertices(&self) -> usize;
     fn n_halfedges(&self) -> usize;
     fn n_edges(&self) -> usize;
@@ -41,16 +39,16 @@ pub trait Mesh<'b>: Sized {
     fn face_is_valid(&self, fid: FaceId) -> bool;
     // fn boundary_loop_is_valid(&self, blid: BoundaryLoopId) -> bool;
 
-    fn vertex(&self, vid: VertexId) -> VertexIter<'_, 'b, Self>;
-    fn halfedge(&self, hid: HalfedgeId) -> HalfedgeIter<'_, 'b, Self>;
-    fn edge(&self, eid: EdgeId) -> EdgeIter<'_, 'b, Self>;
-    fn face(&self, fid: FaceId) -> FaceIter<'_, 'b, Self>;
+    fn vertex(&self, vid: VertexId) -> VertexIter<Self>;
+    fn halfedge(&self, hid: HalfedgeId) -> HalfedgeIter<Self>;
+    fn edge(&self, eid: EdgeId) -> EdgeIter<Self>;
+    fn face(&self, fid: FaceId) -> FaceIter<Self>;
     // fn boundary_loop<'a>(&'a self, blid: BoundaryLoopId) -> BoundaryLoopIter<'a, Self>;
 
-    fn vertices(&self) -> VertexIter<'_, 'b, Self>;
-    fn halfedges(&self) -> HalfedgeIter<'_, 'b, Self>;
-    fn edges(&self) -> EdgeIter<'_, 'b, Self>;
-    fn faces(&self) -> FaceIter<'_, 'b, Self>;
+    fn vertices(&self) -> VertexIter<Self>;
+    fn halfedges(&self) -> HalfedgeIter<Self>;
+    fn edges(&self) -> EdgeIter<Self>;
+    fn faces(&self) -> FaceIter<Self>;
 
     /// the halfedge starting from this vertex
     fn v_halfedge(&self, vid: VertexId) -> HalfedgeId;
@@ -87,18 +85,18 @@ pub trait Mesh<'b>: Sized {
 
     fn use_implicit_twin(&self) -> bool;
     /// add vertices data
-    fn add_vertices_data<T: 'b + Clone>(&mut self, data: Weak<RefCell<VertexData<'b, T, Self>>>);
-    fn remove_vertices_data<T: 'b + Clone>(&mut self, data: &VertexData<'b, T, Self>);
+    fn add_vertices_data<T: Clone>(&mut self, data: Weak<RefCell<VertexData<T, Self>>>);
+    fn remove_vertices_data<T: Clone>(&mut self, data: &VertexData<T, Self>);
 
     /// add halfedges data reference
-    fn add_halfedges_data<T: 'b + Clone>(&mut self, data: Weak<RefCell<HalfedgeData<'b, T, Self>>>);
-    fn remove_halfedges_data<T: 'b + Clone>(&mut self, data: &HalfedgeData<'b, T, Self>);
+    fn add_halfedges_data<T: Clone>(&mut self, data: Weak<RefCell<HalfedgeData<T, Self>>>);
+    fn remove_halfedges_data<T: Clone>(&mut self, data: &HalfedgeData<T, Self>);
 
-    fn add_edges_data<T: 'b + Clone>(&mut self, data: Weak<RefCell<EdgeData<'b, T, Self>>>);
-    fn remove_edges_data<T: 'b + Clone>(&mut self, data: &EdgeData<'b, T, Self>);
+    fn add_edges_data<T: Clone>(&mut self, data: Weak<RefCell<EdgeData<T, Self>>>);
+    fn remove_edges_data<T: Clone>(&mut self, data: &EdgeData<T, Self>);
 
-    fn add_faces_data<T: 'b + Clone>(&mut self, data: Weak<RefCell<FaceData<'b, T, Self>>>);
-    fn remove_faces_data<T: 'b + Clone>(&mut self, data: &FaceData<'b, T, Self>);
+    fn add_faces_data<T: Clone>(&mut self, data: Weak<RefCell<FaceData<T, Self>>>);
+    fn remove_faces_data<T: Clone>(&mut self, data: &FaceData<T, Self>);
 }
 
 pub fn validate_mesh_connectivity(mesh: &SurfaceMesh) -> Result<(), String> {
@@ -140,7 +138,10 @@ pub fn validate_mesh_connectivity(mesh: &SurfaceMesh) -> Result<(), String> {
 
         validate_halfedge(mesh.he_next(hid), "he_next: ")?;
         validate_halfedge(mesh.he_twin(hid), "he_twin: ")?;
-        validate_halfedge(mesh.he_next_incoming_neighbor(hid), &format!("next_incoming for {}: ", hid.0))?;
+        validate_halfedge(
+            mesh.he_next_incoming_neighbor(hid),
+            &format!("next_incoming for {}: ", hid.0),
+        )?;
         validate_halfedge(mesh.he_next_outgoing_neighbor(hid), "next_outgoing: ")?;
 
         validate_edge(mesh.he_edge(hid), "he_edge: ")?;

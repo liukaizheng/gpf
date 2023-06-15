@@ -7,15 +7,16 @@ use super::{
     FaceIter, FaceOrBoundaryLoopId, HalfedgeData, HalfedgeId, HalfedgeIter, Mesh, MeshData,
     VertexData, VertexId, VertexIter,
 };
-use bumpalo::{collections::Vec, Bump};
 
-pub struct ManifoldMesh<'b> {
-    v_halfedge_arr: Vec<'b, HalfedgeId>,
-    he_next_arr: Vec<'b, HalfedgeId>,
-    he_vertex_arr: Vec<'b, VertexId>,
-    he_face_arr: Vec<'b, FaceOrBoundaryLoopId>,
-    f_halfedge_arr: Vec<'b, HalfedgeId>,
-    bl_halfedge_arr: Vec<'b, BoundaryLoopId>,
+use bumpalo::Bump;
+
+pub struct ManifoldMesh {
+    v_halfedge_arr: Vec<HalfedgeId>,
+    he_next_arr: Vec<HalfedgeId>,
+    he_vertex_arr: Vec<VertexId>,
+    he_face_arr: Vec<FaceOrBoundaryLoopId>,
+    f_halfedge_arr: Vec<HalfedgeId>,
+    bl_halfedge_arr: Vec<BoundaryLoopId>,
 
     n_vertices: usize,
     n_halfedges: usize,
@@ -23,13 +24,13 @@ pub struct ManifoldMesh<'b> {
     n_faces: usize,
     n_boundary_loops: usize,
 
-    pub vertices_data: Vec<'b, Weak<RefCell<dyn MeshData<Id = VertexId> + 'b>>>,
-    pub halfedges_data: Vec<'b, Weak<RefCell<dyn MeshData<Id = HalfedgeId> + 'b>>>,
-    pub edges_data: Vec<'b, Weak<RefCell<dyn MeshData<Id = EdgeId> + 'b>>>,
-    pub faces_data: Vec<'b, Weak<RefCell<dyn MeshData<Id = FaceId> + 'b>>>,
+    pub vertices_data: Vec<Weak<RefCell<dyn MeshData<Id = VertexId>>>>,
+    pub halfedges_data: Vec<Weak<RefCell<dyn MeshData<Id = HalfedgeId>>>>,
+    pub edges_data: Vec<Weak<RefCell<dyn MeshData<Id = EdgeId>>>>,
+    pub faces_data: Vec<Weak<RefCell<dyn MeshData<Id = FaceId>>>>,
 }
 
-impl<'b> ManifoldMesh<'b> {
+impl ManifoldMesh {
     #[inline]
     pub fn n_interior_halfedges(&self) -> usize {
         self.n_interior_halfedges
@@ -54,12 +55,12 @@ impl<'b> ManifoldMesh<'b> {
 
     /// start boundary loop iterator
     #[inline(always)]
-    pub fn boundary_loop<'a>(&'a self, blid: BoundaryLoopId) -> BoundaryLoopIter<'a, 'b> {
+    pub fn boundary_loop<'a>(&'a self, blid: BoundaryLoopId) -> BoundaryLoopIter<'a> {
         BoundaryLoopIter::new(blid, self)
     }
 }
 
-impl<'b> Mesh<'b> for ManifoldMesh<'b> {
+impl Mesh for ManifoldMesh {
     build_connect_info!();
 
     /// the number of edges

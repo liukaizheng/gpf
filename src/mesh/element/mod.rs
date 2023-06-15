@@ -21,9 +21,9 @@ pub trait ElementId: From<usize> {
     fn valid(&self) -> bool;
 }
 
-pub trait Element<'b> {
+pub trait Element {
     type Id: ElementId;
-    type M: Mesh<'b>;
+    type M: Mesh;
     fn id(&self) -> Self::Id;
     fn mesh(&self) -> &Self::M;
     fn valid(&self) -> bool;
@@ -40,7 +40,7 @@ pub fn ele_ranges<'b, E: ElementId>(
     Vec::from_iter_in((start..(start + len)).map(|idx| idx.into()), bump)
 }
 
-fn iter_next<'b, E: Element<'b>>(ele: &mut E) -> Option<<E as Element<'b>>::Id> {
+fn iter_next<E: Element>(ele: &mut E) -> Option<<E as Element>::Id> {
     if ele.is_end() {
         return None;
     }

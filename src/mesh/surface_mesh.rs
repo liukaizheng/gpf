@@ -7,37 +7,36 @@ use super::{
     FaceOrBoundaryLoopId, HalfedgeData, HalfedgeId, HalfedgeIter, MeshData, Vertex, VertexData,
     VertexId, VertexIter,
 };
-use bumpalo::{collections::Vec, Bump};
+use bumpalo::Bump;
 use itertools::Itertools;
 
-pub struct SurfaceMesh<'b> {
-    pub v_halfedge_arr: Vec<'b, HalfedgeId>,
-    pub he_next_arr: Vec<'b, HalfedgeId>,
-    pub he_vertex_arr: Vec<'b, VertexId>,
-    pub he_face_arr: Vec<'b, FaceId>,
-    pub f_halfedge_arr: Vec<'b, HalfedgeId>,
+pub struct SurfaceMesh {
+    pub v_halfedge_arr: Vec<HalfedgeId>,
+    pub he_next_arr: Vec<HalfedgeId>,
+    pub he_vertex_arr: Vec<VertexId>,
+    pub he_face_arr: Vec<FaceId>,
+    pub f_halfedge_arr: Vec<HalfedgeId>,
 
     pub n_vertices: usize,
     pub n_halfedges: usize,
     pub n_edges: usize,
     pub n_faces: usize,
 
-    pub he_edge_arr: Vec<'b, EdgeId>,
-    pub he_vert_in_next_arr: Vec<'b, HalfedgeId>,
-    pub he_vert_out_next_arr: Vec<'b, HalfedgeId>,
-    pub he_sibling_arr: Vec<'b, HalfedgeId>,
-    pub e_halfedge_arr: Vec<'b, HalfedgeId>,
+    pub he_edge_arr: Vec<EdgeId>,
+    pub he_vert_in_next_arr: Vec<HalfedgeId>,
+    pub he_vert_out_next_arr: Vec<HalfedgeId>,
+    pub he_sibling_arr: Vec<HalfedgeId>,
+    pub e_halfedge_arr: Vec<HalfedgeId>,
 
-    pub vertices_data: Vec<'b, Weak<RefCell<dyn MeshData<Id = VertexId> + 'b>>>,
-    pub halfedges_data: Vec<'b, Weak<RefCell<dyn MeshData<Id = HalfedgeId> + 'b>>>,
-    pub edges_data: Vec<'b, Weak<RefCell<dyn MeshData<Id = EdgeId> + 'b>>>,
-    pub faces_data: Vec<'b, Weak<RefCell<dyn MeshData<Id = FaceId> + 'b>>>,
+    pub vertices_data: Vec<Weak<RefCell<dyn MeshData<Id = VertexId>>>>,
+    pub halfedges_data: Vec<Weak<RefCell<dyn MeshData<Id = HalfedgeId>>>>,
+    pub edges_data: Vec<Weak<RefCell<dyn MeshData<Id = EdgeId>>>>,
+    pub faces_data: Vec<Weak<RefCell<dyn MeshData<Id = FaceId>>>>,
 }
 
-impl<'b> SurfaceMesh<'b> {
-    fn vertex_cycle(&self, incoming: bool) -> (Vec<'b, HalfedgeId>, Vec<'b, usize>) {
-        let bump = self.v_halfedge_arr.bump();
-        let mut v_degree = bumpalo::vec![in &bump; 0usize; self.n_vertices_capacity()];
+impl SurfaceMesh {
+    fn vertex_cycle(&self, incoming: bool) -> (Vec<HalfedgeId>, Vec<usize>) {
+        let mut v_degree = vec![0usize; self.n_vertices_capacity()];
         self.halfedges().for_each(|hid| {
             let vid = if incoming {
                 self.he_tip_vertex(hid)
@@ -46,14 +45,13 @@ impl<'b> SurfaceMesh<'b> {
             };
             v_degree[vid] += 1;
         });
-        let mut vertex_separators = bumpalo::vec![in bump; 0];
+        let mut vertex_separators = vec![0];
         vertex_separators.extend(v_degree.iter().scan(0, |sum, &count| {
             *sum += count;
             Some(*sum)
         }));
         let mut he_positions = vertex_separators.clone();
-        let mut vertex_halfedges =
-            bumpalo::vec![in bump; HalfedgeId::from(0); self.n_halfedges_capacity()];
+        let mut vertex_halfedges = vec![HalfedgeId::from(0); self.n_halfedges_capacity()];
         self.halfedges().for_each(|hid| {
             let vid = if incoming {
                 self.he_tip_vertex(hid)
@@ -340,8 +338,8 @@ fn insert_halfedge(next_arr: &mut [HalfedgeId], start: HalfedgeId, new_he: Halfe
     next_arr[new_he.0] = nnext;
 }
 
-impl<'b> From<Vec<'b, Vec<'b, usize>>> for SurfaceMesh<'b> {
-    fn from(polygons: Vec<'b, Vec<'b, usize>>) -> Self {
+impl From<Vec<Vec<usize>>> for SurfaceMesh {
+    fn from(polygons: Vec<Vec<usize>>) -> Self {
         let n_faces = polygons.len();
         let mut n_vertices = 0usize;
         polygons.iter().for_each(|polygon| {
@@ -472,7 +470,7 @@ impl<'b> From<Vec<'b, Vec<'b, usize>>> for SurfaceMesh<'b> {
     }
 }
 
-impl<'b> Mesh<'b> for SurfaceMesh<'b> {
+impl Mesh for SurfaceMesh {
     build_connect_info!();
 
     /// the number of edges

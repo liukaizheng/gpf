@@ -3,6 +3,7 @@
 #![feature(cell_leak)]
 #![feature(trait_alias)]
 #![feature(iter_partition_in_place)]
+#![feature(allocator_api)]
 
 pub mod math;
 pub mod mesh;

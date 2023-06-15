@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use bumpalo::{collections::Vec, Bump};
+use bumpalo::Bump;
 use itertools::Itertools;
 
 use crate::{
@@ -16,12 +16,12 @@ use crate::{
 use super::conforming_mesh::Constraints;
 
 #[derive(Clone)]
-struct BSPEdgeData<'b> {
-    parents: Vec<'b, usize>,
+struct BSPEdgeData {
+    parents: Vec<usize>,
 }
 
-impl<'b> BSPEdgeData<'b> {
-    fn new(parents: Vec<'b, usize>) -> Self {
+impl BSPEdgeData {
+    fn new(parents: Vec<usize>) -> Self {
         Self { parents }
     }
 }
@@ -34,15 +34,15 @@ enum FaceColor {
 }
 
 #[derive(Clone)]
-struct BSPFaceData<'b> {
+struct BSPFaceData {
     cells: [usize; 2],
     // coplanar triangles
-    triangles: Vec<'b, usize>,
+    triangles: Vec<usize>,
     color: FaceColor,
 }
 
-impl<'b> BSPFaceData<'b> {
-    fn new(c1: usize, c2: usize, triangles: Vec<'b, usize>) -> Self {
+impl BSPFaceData {
+    fn new(c1: usize, c2: usize, triangles: Vec<usize>) -> Self {
         Self {
             cells: [c1, c2],
             triangles,
@@ -52,13 +52,13 @@ impl<'b> BSPFaceData<'b> {
 }
 
 #[derive(Clone)]
-struct BSPCellData<'b> {
-    faces: Vec<'b, usize>,
-    inner_triangles: Vec<'b, usize>,
+struct BSPCellData {
+    faces: Vec<usize>,
+    inner_triangles: Vec<usize>,
 }
 
-impl<'b> BSPCellData<'b> {
-    fn new(faces: Vec<'b, usize>, inner_triangles: Vec<'b, usize>) -> Self {
+impl BSPCellData {
+    fn new(faces: Vec<usize>, inner_triangles: Vec<usize>) -> Self {
         Self {
             faces,
             inner_triangles,
@@ -67,17 +67,17 @@ impl<'b> BSPCellData<'b> {
 }
 
 pub(crate) struct BSPComplex<'a, 'b> {
-    points: Vec<'b, Point3D<'b>>,
-    mesh: Rc<RefCell<SurfaceMesh<'b>>>,
-    edge_data: Rc<RefCell<EdgeData<'b, BSPEdgeData<'b>, SurfaceMesh<'b>>>>,
-    face_data: Rc<RefCell<FaceData<'b, BSPFaceData<'b>, SurfaceMesh<'b>>>>,
-    cell_data: Vec<'b, BSPCellData<'b>>,
+    points: Vec<Point3D<'b>>,
+    mesh: Rc<RefCell<SurfaceMesh>>,
+    edge_data: Rc<RefCell<EdgeData<BSPEdgeData, SurfaceMesh>>>,
+    face_data: Rc<RefCell<FaceData<BSPFaceData, SurfaceMesh>>>,
+    cell_data: Vec<BSPCellData>>,
     constraints: &'a Constraints<'b>,
 
-    vert_orientations: Vec<'b, Orientation>,
-    vert_visits: Vec<'b, bool>,
+    vert_orientations: Vec<Orientation>,
+    vert_visits: Vec<bool>,
 
-    edge_visits: Vec<'b, bool>,
+    edge_visits: Vec<bool>,
 }
 
 #[inline(always)]
@@ -89,7 +89,7 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
     pub(crate) fn new(
         tet_mesh: TetMesh<'_, 'b>,
         constraints: &'a Constraints<'b>,
-        tet_mark: [Vec<'b, Vec<'b, usize>>; 5],
+        tet_mark: [bumpalo::collections::Vec<'b, bumpalo::collections::Vec<'b, usize>>; 5],
     ) -> Self {
         let bump = tet_mesh.tets.bump();
         let points = Vec::from_iter_in(
@@ -253,10 +253,10 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
     }
 
     #[inline]
-    fn cell_verts_and_edges(&mut self, cid: usize) -> (Vec<'b, usize>, Vec<'b, EdgeId>) {
+    fn cell_verts_and_edges(&mut self, cid: usize) -> (Vec<usize>, Vec<EdgeId>) {
         let mesh = self.mesh.borrow();
-        let mut verts = Vec::new_in(mesh.bump());
-        let mut edges = Vec::new_in(mesh.bump());
+        let mut verts = Vec::new();
+        let mut edges = Vec::new();
         for &fid in &self.cell_data[cid].faces {
             for hid in mesh.face(fid.into()).halfedges() {
                 let vid = mesh.he_vertex(hid).0;
@@ -311,7 +311,7 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
     }
 }
 
-fn remove_ghost_tets<'b>(mesh: &TetMesh<'_, 'b>) -> (usize, Vec<'b, usize>) {
+fn remove_ghost_tets<'b>(mesh: &TetMesh<'_, 'b>) -> (usize, Vec<usize>) {
     let tets = &mesh.tets;
     let mut idx = 0;
     let mut new_orders = bumpalo::vec![in tets.bump(); INVALID_IND; tets.len()];
@@ -324,7 +324,7 @@ fn remove_ghost_tets<'b>(mesh: &TetMesh<'_, 'b>) -> (usize, Vec<'b, usize>) {
     (idx, new_orders)
 }
 
-fn insert_coplanar_triangles<'b>(src: &[usize], dest: &mut Vec<'b, usize>, n_constraints: usize) {
+fn insert_coplanar_triangles(src: &[usize], dest: &mut Vec<usize>, n_constraints: usize) {
     for &idx in src {
         if idx < n_constraints {
             if let Err(pos) = dest.binary_search(&idx) {
@@ -336,20 +336,18 @@ fn insert_coplanar_triangles<'b>(src: &[usize], dest: &mut Vec<'b, usize>, n_con
 
 fn separate_out_coplanar_triangles<'b>(
     pivot_tid: usize,
-    triangles: &mut Vec<'b, usize>,
+    triangles: &mut Vec<usize>,
     points: &[Point3D<'b>],
     vert_orientations: &mut [Orientation],
     constraints: &Constraints,
-) -> Vec<'b, usize> {
-    let bump = triangles.bump();
-    let plane_pts = Vec::from_iter_in(
+) -> Vec<usize> {
+    let plane_pts = Vec::from_iter(
         constraints
             .triangle(pivot_tid)
             .iter()
             .map(|&vid| &points[vid]),
-        bump,
     );
-    let mut coplanar_triangles: Vec<usize> = Vec::new_in(bump);
+    let mut coplanar_triangles: Vec<usize> = Vec::new();
     triangles.retain(|&tid| {
         let tri = constraints.triangle(tid);
         verts_orient_wrt_plane(

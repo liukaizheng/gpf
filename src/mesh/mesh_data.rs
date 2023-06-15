@@ -4,7 +4,6 @@ use std::{
 };
 
 use super::{EdgeId, ElementId, FaceId, HalfedgeId, Mesh, VertexId};
-use bumpalo::collections::Vec;
 
 pub trait MeshData {
     type Id: ElementId;
@@ -14,13 +13,13 @@ pub trait MeshData {
 
 macro_rules! mesh_data {
     (struct $name: ident, $n_elements: ident, $add_ele_data: ident, $remove_ele_data: ident, $id: ty) => {
-        pub struct $name<'b, T: 'b + Clone, M: Mesh<'b>> {
+        pub struct $name<T: Clone, M: Mesh> {
             default_val: T,
-            pub data: Vec<'b, T>,
+            pub data: Vec<T>,
             mesh: Weak<RefCell<M>>,
         }
 
-        impl<'b, T: 'b + Clone, M: Mesh<'b>> $name<'b, T, M> {
+        impl<T: Clone, M: Mesh> $name<T, M> {
             #[inline(always)]
             pub fn new(mesh: Weak<RefCell<M>>, default_val: T) -> Rc<RefCell<Self>> {
                 let m = mesh.upgrade().unwrap();
@@ -38,7 +37,7 @@ macro_rules! mesh_data {
                 data
             }
             #[inline(always)]
-            pub fn from_data(mesh: Weak<RefCell<M>>, mut data: Vec<'b, T>, default_val: T) -> Rc<RefCell<Self>> {
+            pub fn from_data(mesh: Weak<RefCell<M>>, mut data: Vec<T>, default_val: T) -> Rc<RefCell<Self>> {
                 let m = mesh.upgrade().unwrap();
                 let n_elements = m.borrow().$n_elements();
                 data.resize(n_elements, default_val.clone());
@@ -53,7 +52,7 @@ macro_rules! mesh_data {
                 mesh_data
             }
         }
-        impl<'b, T: 'b + Clone, M: Mesh<'b>> Drop for $name<'b, T, M> {
+        impl<T: Clone, M: Mesh> Drop for $name<T, M> {
             fn drop(&mut self) {
                 if let Some(mesh) = self.mesh.upgrade() {
                     mesh.borrow_mut().$remove_ele_data(self);
@@ -61,7 +60,7 @@ macro_rules! mesh_data {
             }
         }
 
-        impl<'b, T: 'b + Clone, M: Mesh<'b>> MeshData for $name<'b, T, M> {
+        impl<T: Clone, M: Mesh> MeshData for $name<T, M> {
             type Id = $id;
 
             #[inline(always)]

@@ -11,19 +11,14 @@ pub struct FaceId(pub usize);
 
 element_id! {struct FaceId}
 
-pub struct FaceIter<'a, 'b: 'a, M: Mesh<'b>> {
-    phantom: PhantomData<&'b M>,
+pub struct FaceIter<'a, M: Mesh> {
     id: FaceId,
     mesh: &'a M,
 }
 
-impl<'a, 'b: 'a, M: Mesh<'b>> FaceIter<'a, 'b, M> {
+impl<'a, M: Mesh> FaceIter<'a, M> {
     pub fn new(id: FaceId, mesh: &'a M) -> Self {
-        Self {
-            id,
-            mesh,
-            phantom: PhantomData,
-        }
+        Self { id, mesh }
     }
 
     #[allow(dead_code)]
@@ -36,7 +31,7 @@ impl<'a, 'b: 'a, M: Mesh<'b>> FaceIter<'a, 'b, M> {
     }
 }
 
-impl<'a, 'b: 'a, M: Mesh<'b>> Deref for FaceIter<'a, 'b, M> {
+impl<'a, M: Mesh> Deref for FaceIter<'a, M> {
     type Target = FaceId;
 
     fn deref(&self) -> &Self::Target {
@@ -44,7 +39,7 @@ impl<'a, 'b: 'a, M: Mesh<'b>> Deref for FaceIter<'a, 'b, M> {
     }
 }
 
-impl<'a, 'b: 'a, M: Mesh<'b>> Element<'b> for FaceIter<'a, 'b, M> {
+impl<'a, M: Mesh> Element for FaceIter<'a, M> {
     type Id = FaceId;
     type M = M;
 
@@ -69,39 +64,37 @@ impl<'a, 'b: 'a, M: Mesh<'b>> Element<'b> for FaceIter<'a, 'b, M> {
     }
 }
 
-impl<'a, 'b: 'a, M: Mesh<'b>> Iterator for FaceIter<'a, 'b, M> {
+impl<'a, M: Mesh> Iterator for FaceIter<'a, M> {
     type Item = FaceId;
 
     fn next(&mut self) -> Option<Self::Item> {
         iter_next(self)
     }
 }
-pub trait Face<'b>: Element<'b> {
-    fn halfedge(&self) -> HalfedgeIter<'_, 'b, Self::M>;
-    fn halfedges(&self) -> FHalfedgesIter<'_, 'b, Self::M>;
+pub trait Face: Element {
+    fn halfedge(&self) -> HalfedgeIter<Self::M>;
+    fn halfedges(&self) -> FHalfedgesIter<Self::M>;
 }
 
-impl<'a, 'b: 'a, M: Mesh<'b>> Face<'b> for FaceIter<'a, 'b, M> {
-    fn halfedge(&self) -> HalfedgeIter<'_, 'b, Self::M> {
+impl<'a, M: Mesh> Face for FaceIter<'a, M> {
+    fn halfedge(&self) -> HalfedgeIter<Self::M> {
         HalfedgeIter::new(self.mesh.f_halfedge(self.id), self.mesh)
     }
-    fn halfedges(&self) -> FHalfedgesIter<'_, 'b, Self::M> {
+    fn halfedges(&self) -> FHalfedgesIter<Self::M> {
         FHalfedgesIter::new(self.mesh.f_halfedge(self.id), self.mesh)
     }
 }
 
-pub struct FHalfedgesIter<'a, 'b: 'a, M: Mesh<'b>> {
-    phantom: PhantomData<&'b M>,
+pub struct FHalfedgesIter<'a, M: Mesh> {
     mesh: &'a M,
     just_start: bool,
     first_he: HalfedgeId,
     curr_he: HalfedgeId,
 }
 
-impl<'a, 'b: 'a, M: Mesh<'b>> FHalfedgesIter<'a, 'b, M> {
+impl<'a, M: Mesh> FHalfedgesIter<'a, M> {
     pub fn new(he: HalfedgeId, mesh: &'a M) -> Self {
         Self {
-            phantom: PhantomData,
             mesh,
             just_start: true,
             first_he: he,

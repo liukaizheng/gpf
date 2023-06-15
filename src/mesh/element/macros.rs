@@ -8,6 +8,21 @@ macro_rules! element_id {
             }
         }
 
+        impl<T> Index<$name> for Vec<T> {
+            type Output = T;
+            #[inline(always)]
+            fn index(&self, index: $name) -> &Self::Output {
+                &self[index.0]
+            }
+        }
+
+        impl<T> IndexMut<$name> for Vec<T> {
+            #[inline(always)]
+            fn index_mut(&mut self, index: $name) -> &mut Self::Output {
+                &mut self[index.0]
+            }
+        }
+
         impl<'b, T> Index<$name> for bumpalo::collections::Vec<'b, T> {
             type Output = T;
             #[inline(always)]
@@ -66,10 +81,10 @@ macro_rules! element_id {
 #[macro_export]
 macro_rules! element_iterator {
     (struct $name: ident -> $item: ty, {$($id: tt)*}, {$($valid: tt)*}, {$($next: tt)*}, {$($is_end: tt)*}) => {
-        impl<'a, 'b: 'a, M: Mesh<'b>> Element<'b> for $name<'a, 'b, M> {
+        impl<'a, M: Mesh> Element for $name<'a, M> {
             type Id = $item;
             type M = M;
-            #[inline]
+            #[inline(always)]
             $($id)*
 
             #[inline(always)]
@@ -86,10 +101,10 @@ macro_rules! element_iterator {
             #[inline(always)]
             $($is_end)*
         }
-        impl<'a, 'b: 'a, M: Mesh<'b>> Iterator for $name<'a, 'b, M> {
+        impl<'a, M: Mesh> Iterator for $name<'a, M> {
             type Item = $item;
 
-            #[inline]
+            #[inline(always)]
             fn next(&mut self) -> Option<Self::Item> {
                 iter_next(self)
             }
