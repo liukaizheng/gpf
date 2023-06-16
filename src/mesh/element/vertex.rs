@@ -1,7 +1,4 @@
-use std::{
-    marker::PhantomData,
-    ops::{Deref, DerefMut, Index, IndexMut},
-};
+use std::ops::{Deref, DerefMut, Index, IndexMut};
 
 use super::{iter_next, Edge, EdgeId, Element, ElementId, Halfedge, HalfedgeId, HalfedgeIter};
 use crate::{element_id, element_iterator, halfedges_iterator, mesh::Mesh, INVALID_IND};
@@ -167,7 +164,6 @@ macro_rules! vertex_state_iterator {
                 }
                 let start_state = curr_state.clone();
                 Self {
-                    phantom: PhantomData,
                     mesh,
                     just_start: true,
                     curr_state,

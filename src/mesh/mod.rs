@@ -85,18 +85,21 @@ pub trait Mesh: Sized {
 
     fn use_implicit_twin(&self) -> bool;
     /// add vertices data
-    fn add_vertices_data<T: Clone>(&mut self, data: Weak<RefCell<VertexData<T, Self>>>);
-    fn remove_vertices_data<T: Clone>(&mut self, data: &VertexData<T, Self>);
+    fn add_vertices_data<T: Clone + 'static>(&mut self, data: Weak<RefCell<VertexData<T, Self>>>);
+    fn remove_vertices_data<T: Clone + 'static>(&mut self, data: &VertexData<T, Self>);
 
     /// add halfedges data reference
-    fn add_halfedges_data<T: Clone>(&mut self, data: Weak<RefCell<HalfedgeData<T, Self>>>);
-    fn remove_halfedges_data<T: Clone>(&mut self, data: &HalfedgeData<T, Self>);
+    fn add_halfedges_data<T: Clone + 'static>(
+        &mut self,
+        data: Weak<RefCell<HalfedgeData<T, Self>>>,
+    );
+    fn remove_halfedges_data<T: Clone + 'static>(&mut self, data: &HalfedgeData<T, Self>);
 
-    fn add_edges_data<T: Clone>(&mut self, data: Weak<RefCell<EdgeData<T, Self>>>);
-    fn remove_edges_data<T: Clone>(&mut self, data: &EdgeData<T, Self>);
+    fn add_edges_data<T: Clone + 'static>(&mut self, data: Weak<RefCell<EdgeData<T, Self>>>);
+    fn remove_edges_data<T: Clone + 'static>(&mut self, data: &EdgeData<T, Self>);
 
-    fn add_faces_data<T: Clone>(&mut self, data: Weak<RefCell<FaceData<T, Self>>>);
-    fn remove_faces_data<T: Clone>(&mut self, data: &FaceData<T, Self>);
+    fn add_faces_data<T: Clone + 'static>(&mut self, data: Weak<RefCell<FaceData<T, Self>>>);
+    fn remove_faces_data<T: Clone + 'static>(&mut self, data: &FaceData<T, Self>);
 }
 
 pub fn validate_mesh_connectivity(mesh: &SurfaceMesh) -> Result<(), String> {

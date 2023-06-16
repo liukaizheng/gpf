@@ -146,12 +146,15 @@ macro_rules! build_connect_info {
         }
 
         #[inline]
-        fn add_vertices_data<T: Clone>(&mut self, data: Weak<RefCell<VertexData<T, Self>>>) {
+        fn add_vertices_data<T: Clone + 'static>(
+            &mut self,
+            data: Weak<RefCell<VertexData<T, Self>>>,
+        ) {
             self.vertices_data.push(data);
         }
 
         #[inline]
-        fn remove_vertices_data<T: Clone>(&mut self, remove: &VertexData<T, Self>) {
+        fn remove_vertices_data<T: Clone + 'static>(&mut self, remove: &VertexData<T, Self>) {
             self.vertices_data.retain(|data| {
                 data.upgrade()
                     .map(|data| !std::ptr::eq(data.as_ptr(), remove))
@@ -160,12 +163,15 @@ macro_rules! build_connect_info {
         }
 
         #[inline]
-        fn add_halfedges_data<T: Clone>(&mut self, data: Weak<RefCell<HalfedgeData<T, Self>>>) {
+        fn add_halfedges_data<T: Clone + 'static>(
+            &mut self,
+            data: Weak<RefCell<HalfedgeData<T, Self>>>,
+        ) {
             self.halfedges_data.push(data);
         }
 
         #[inline]
-        fn remove_halfedges_data<T: Clone>(&mut self, remove: &HalfedgeData<T, Self>) {
+        fn remove_halfedges_data<T: Clone + 'static>(&mut self, remove: &HalfedgeData<T, Self>) {
             self.halfedges_data.retain(|data| {
                 data.upgrade()
                     .map(|data| !std::ptr::eq(data.as_ptr(), remove))
@@ -174,12 +180,12 @@ macro_rules! build_connect_info {
         }
 
         #[inline]
-        fn add_edges_data<T: Clone>(&mut self, data: Weak<RefCell<EdgeData<T, Self>>>) {
+        fn add_edges_data<T: Clone + 'static>(&mut self, data: Weak<RefCell<EdgeData<T, Self>>>) {
             self.edges_data.push(data);
         }
 
         #[inline]
-        fn remove_edges_data<T: Clone>(&mut self, remove: &EdgeData<T, Self>) {
+        fn remove_edges_data<T: Clone + 'static>(&mut self, remove: &EdgeData<T, Self>) {
             self.edges_data.retain(|data| {
                 data.upgrade()
                     .map(|data| !std::ptr::eq(data.as_ptr(), remove))
@@ -188,12 +194,12 @@ macro_rules! build_connect_info {
         }
 
         #[inline]
-        fn add_faces_data<T: Clone>(&mut self, data: Weak<RefCell<FaceData<T, Self>>>) {
+        fn add_faces_data<T: Clone + 'static>(&mut self, data: Weak<RefCell<FaceData<T, Self>>>) {
             self.faces_data.push(data);
         }
 
         #[inline]
-        fn remove_faces_data<T: Clone>(&mut self, remove: &FaceData<T, Self>) {
+        fn remove_faces_data<T: Clone + 'static>(&mut self, remove: &FaceData<T, Self>) {
             self.faces_data.retain(|data| {
                 data.upgrade()
                     .map(|data| !std::ptr::eq(data.as_ptr(), remove))

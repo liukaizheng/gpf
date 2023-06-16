@@ -4,7 +4,7 @@ use bumpalo::Bump;
 use itertools::Itertools;
 
 use crate::{
-    mesh::{EdgeData, EdgeId, Face, FaceData, Mesh, SurfaceMesh},
+    mesh::{EdgeData, EdgeId, Face, FaceData, Mesh, SurfaceMesh, VertexId},
     predicates::{
         orient3d::orient3d, sign_reversed, ExplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
         Orientation, Point3D,
@@ -17,11 +17,11 @@ use super::conforming_mesh::Constraints;
 
 #[derive(Clone)]
 struct BSPEdgeData {
-    parents: Vec<usize>,
+    parents: Vec<VertexId>,
 }
 
 impl BSPEdgeData {
-    fn new(parents: Vec<usize>) -> Self {
+    fn new(parents: Vec<VertexId>) -> Self {
         Self { parents }
     }
 }
@@ -66,13 +66,14 @@ impl BSPCellData {
     }
 }
 
-pub(crate) struct BSPComplex<'a, 'b> {
+pub(crate) struct BSPComplex<'b> {
     points: Vec<Point3D<'b>>,
     mesh: Rc<RefCell<SurfaceMesh>>,
     edge_data: Rc<RefCell<EdgeData<BSPEdgeData, SurfaceMesh>>>,
     face_data: Rc<RefCell<FaceData<BSPFaceData, SurfaceMesh>>>,
-    cell_data: Vec<BSPCellData>>,
-    constraints: &'a Constraints<'b>,
+    cell_data: Vec<BSPCellData>,
+    constraints: Vec<VertexId>,
+    n_ori_triangles: usize,
 
     vert_orientations: Vec<Orientation>,
     vert_visits: Vec<bool>,
@@ -85,46 +86,44 @@ fn tet_face_is_new(tid: usize, adj_tid: usize, adj_cid: usize) -> bool {
     adj_tid > tid || adj_cid == INVALID_IND
 }
 
-impl<'a, 'b> BSPComplex<'a, 'b> {
+impl<'b> BSPComplex<'b> {
     pub(crate) fn new(
         tet_mesh: TetMesh<'_, 'b>,
-        constraints: &'a Constraints<'b>,
+        constraints_data: Constraints<'b>,
         tet_mark: [bumpalo::collections::Vec<'b, bumpalo::collections::Vec<'b, usize>>; 5],
     ) -> Self {
-        let bump = tet_mesh.tets.bump();
-        let points = Vec::from_iter_in(
+        let points = Vec::from_iter(
             tet_mesh
                 .points
                 .chunks(3)
                 .map(|data| Point3D::Explicit(ExplicitPoint3D::from(data))),
-            bump,
         );
 
         let (_, new_tet_orders) = remove_ghost_tets(&tet_mesh);
-        let mut face_positions = bumpalo::vec![in bump; INVALID_IND; tet_mesh.tets.len() << 2];
-        let mut faces: Vec<'b, Vec<'b, usize>> = Vec::new_in(bump);
-        let mut face_data: Vec<'b, BSPFaceData<'b>> = Vec::new_in(bump);
-        let mut cell_data: Vec<'b, BSPCellData<'b>> = Vec::new_in(bump);
+        let mut face_positions = vec![INVALID_IND; tet_mesh.tets.len() << 2];
+        let mut faces: Vec<Vec<usize>> = Vec::new();
+        let mut face_data: Vec<BSPFaceData> = Vec::new();
+        let mut cell_data: Vec<BSPCellData> = Vec::new();
         for (tid, tet) in tet_mesh.tets.iter().enumerate() {
             let cell_idx = new_tet_orders[tid];
             if cell_idx == INVALID_IND {
                 continue;
             }
 
-            let mut cell_faces = Vec::new_in(bump);
+            let mut cell_faces = Vec::new();
             for (i, nei) in tet.nei.iter().enumerate() {
                 let adj_cell_idx = new_tet_orders[nei.tet];
                 if tet_face_is_new(tid, nei.tet, adj_cell_idx) {
-                    faces.push(bumpalo::vec![in bump;
+                    faces.push(vec![
                         tet_mesh.org(nei),
                         tet_mesh.dest(nei),
-                        tet_mesh.apex(nei)
+                        tet_mesh.apex(nei),
                     ]);
-                    let mut face = BSPFaceData::new(cell_idx, adj_cell_idx, bumpalo::vec![in bump]);
+                    let mut face = BSPFaceData::new(cell_idx, adj_cell_idx, Vec::new());
                     insert_coplanar_triangles(
                         &tet_mark[i][tid],
                         &mut face.triangles,
-                        constraints.n_ori_triangles,
+                        constraints_data.n_ori_triangles,
                     );
                     let fid = face_data.len();
                     face_positions[(tid << 2) + i] = fid;
@@ -137,28 +136,23 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
                     insert_coplanar_triangles(
                         &tet_mark[j][nei.tet],
                         &mut face.triangles,
-                        constraints.n_ori_triangles,
+                        constraints_data.n_ori_triangles,
                     );
                     cell_faces.push(fid);
                 }
             }
-            cell_data.push(BSPCellData::new(cell_faces, tet_mark[4][tid].clone()))
+            cell_data.push(BSPCellData::new(cell_faces, tet_mark[4][tid].to_vec()));
         }
 
         let mesh = SurfaceMesh::from(faces);
 
-        let vert_orientations = bumpalo::vec![in bump; Orientation::Undefined; points.len()];
-        let vert_visits = bumpalo::vec![in bump; false; points.len()];
+        let vert_orientations = vec![Orientation::Undefined; points.len()];
+        let vert_visits = vec![false; points.len()];
 
-        let edge_visits = bumpalo::vec![in bump; false; mesh.n_edges()];
-        let edge_data = Vec::from_iter_in(
-            mesh.edges().map(|eid| {
-                BSPEdgeData::new(Vec::from_iter_in(
-                    mesh.e_vertices(eid).map(|vid| vid.0),
-                    bump,
-                ))
-            }),
-            bump,
+        let edge_visits = vec![false; mesh.n_edges()];
+        let edge_data = Vec::from_iter(
+            mesh.edges()
+                .map(|eid| BSPEdgeData::new(Vec::from_iter(mesh.e_vertices(eid)))),
         );
 
         let mesh = Rc::new(RefCell::new(mesh));
@@ -166,13 +160,15 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
         let edge_data = EdgeData::from_data(
             Rc::downgrade(&mesh),
             edge_data,
-            BSPEdgeData::new(Vec::new_in(bump)),
+            BSPEdgeData::new(Vec::new()),
         );
         let face_data = FaceData::from_data(
             Rc::downgrade(&mesh),
             face_data,
-            BSPFaceData::new(INVALID_IND, INVALID_IND, bumpalo::vec![in bump]),
+            BSPFaceData::new(INVALID_IND, INVALID_IND, Vec::new()),
         );
+        let constraints =
+            Vec::from_iter(constraints_data.triangles.into_iter().map(|idx| idx.into()));
         Self {
             points,
             mesh,
@@ -180,6 +176,7 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
             face_data,
             cell_data,
             constraints,
+            n_ori_triangles: constraints_data.n_ori_triangles,
             edge_visits,
             vert_orientations,
             vert_visits,
@@ -196,22 +193,20 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
         !self.cell_data[cid].inner_triangles.is_empty()
     }
 
-    pub(crate) fn split_cell(&mut self, cid: usize) {
-        let bump = self.points.bump();
+    pub(crate) fn split_cell(&mut self, cid: usize, bump: &Bump) {
         let tid = *self.cell_data[cid].inner_triangles.last().unwrap();
-        let tri = self.constraints.triangle(tid);
+        let tri = self.triangle(tid).to_vec_in(bump);
         self.cell_data[cid].inner_triangles.pop();
-        let mut coplanar_triangles = separate_out_coplanar_triangles(
+        let mut coplanar_triangles = self.separate_out_coplanar_triangles(
             tid,
             &mut self.cell_data[cid].inner_triangles,
-            &self.points,
             &mut self.vert_orientations,
-            &self.constraints,
+            bump,
         );
-        if !self.constraints.is_virtual(tid) {
+        if !self.is_virtual(tid) {
             coplanar_triangles.push(tid);
         }
-        let (cell_verts, cell_edges) = self.cell_verts_and_edges(cid);
+        let (cell_verts, cell_edges) = self.cell_verts_and_edges(cid, bump);
         verts_orient_wrt_plane(
             &self.points[tri[0]],
             &self.points[tri[1]],
@@ -245,21 +240,72 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
                 self.vert_orientations[e_verts[0]],
                 self.vert_orientations[e_verts[1]],
             ) {
-                self.split_edge(eid, tri);
+                self.split_edge(eid, &tri, &bump);
             }
         }
 
         self.vert_orientations.fill(Orientation::Undefined);
     }
 
+    #[inline(always)]
+    fn triangle(&self, tid: usize) -> &[VertexId] {
+        let start = tid * 3;
+        &self.constraints[start..(start + 3)]
+    }
+
+    #[inline(always)]
+    fn is_virtual(&self, tid: usize) -> bool {
+        tid >= self.n_ori_triangles
+    }
+
+    fn separate_out_coplanar_triangles(
+        &mut self,
+        pivot_tid: usize,
+        triangles: &mut Vec<usize>,
+        vert_orientations: &mut [Orientation],
+        bump: &Bump,
+    ) -> Vec<usize> {
+        let mut plane_pts = Vec::with_capacity_in(3, bump);
+        plane_pts.extend(
+            self.triangle(pivot_tid)
+                .iter()
+                .map(|&vid| &self.points[vid]),
+        );
+        let mut coplanar_triangles: Vec<usize> = Vec::new();
+        triangles.retain(|&tid| {
+            let tri = self.triangle(tid);
+            verts_orient_wrt_plane(
+                plane_pts[0],
+                plane_pts[1],
+                plane_pts[2],
+                tri,
+                &self.points,
+                vert_orientations,
+                bump,
+            );
+            let coplanar = vert_orientations[tri[0]] == Orientation::Zero
+                && vert_orientations[tri[1]] == Orientation::Zero
+                && vert_orientations[tri[2]] == Orientation::Zero;
+            if coplanar && !self.is_virtual(tid) {
+                coplanar_triangles.push(tid);
+            }
+            !coplanar
+        });
+        coplanar_triangles
+    }
+
     #[inline]
-    fn cell_verts_and_edges(&mut self, cid: usize) -> (Vec<usize>, Vec<EdgeId>) {
+    fn cell_verts_and_edges<'bb>(
+        &mut self,
+        cid: usize,
+        bump: &'b Bump,
+    ) -> (Vec<VertexId, &'bb Bump>, Vec<EdgeId, &'bb Bump>) {
         let mesh = self.mesh.borrow();
-        let mut verts = Vec::new();
-        let mut edges = Vec::new();
+        let mut verts = Vec::new_in(bump);
+        let mut edges = Vec::new_in(bump);
         for &fid in &self.cell_data[cid].faces {
             for hid in mesh.face(fid.into()).halfedges() {
-                let vid = mesh.he_vertex(hid).0;
+                let vid = mesh.he_vertex(hid);
                 if !self.vert_visits[vid] {
                     self.vert_visits[vid] = true;
                     verts.push(vid);
@@ -281,8 +327,8 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
     }
 
     #[inline]
-    fn split_edge(&mut self, eid: EdgeId, tri: &[usize]) {
-        self.mesh.borrow_mut().split_edge(eid);
+    fn split_edge(&mut self, eid: EdgeId, tri: &[VertexId], bump: &Bump) {
+        self.mesh.borrow_mut().split_edge(eid, bump);
         self.edge_visits.push(false);
         let p0 = self.points[tri[0]].explicit().unwrap().clone();
         let p1 = self.points[tri[1]].explicit().unwrap().clone();
@@ -292,7 +338,7 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
             self.points.push(three_planes_intersection(
                 [&ori_edge_parents[..3], &ori_edge_parents[3..], tri],
                 &self.points,
-                ori_edge_parents.bump(),
+                bump,
             ));
         } else {
             self.points.push(Point3D::LPI(ImplicitPointLPI::new(
@@ -301,7 +347,7 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
                 p0,
                 p1,
                 p2,
-                ori_edge_parents.bump(),
+                bump,
             )));
         }
         self.vert_orientations.push(Orientation::Zero);
@@ -314,7 +360,7 @@ impl<'a, 'b> BSPComplex<'a, 'b> {
 fn remove_ghost_tets<'b>(mesh: &TetMesh<'_, 'b>) -> (usize, Vec<usize>) {
     let tets = &mesh.tets;
     let mut idx = 0;
-    let mut new_orders = bumpalo::vec![in tets.bump(); INVALID_IND; tets.len()];
+    let mut new_orders = vec![INVALID_IND; tets.len()];
     for tid in 0..tets.len() {
         if !mesh.is_hull_tet(tid) {
             new_orders[tid] = idx;
@@ -334,48 +380,12 @@ fn insert_coplanar_triangles(src: &[usize], dest: &mut Vec<usize>, n_constraints
     }
 }
 
-fn separate_out_coplanar_triangles<'b>(
-    pivot_tid: usize,
-    triangles: &mut Vec<usize>,
-    points: &[Point3D<'b>],
-    vert_orientations: &mut [Orientation],
-    constraints: &Constraints,
-) -> Vec<usize> {
-    let plane_pts = Vec::from_iter(
-        constraints
-            .triangle(pivot_tid)
-            .iter()
-            .map(|&vid| &points[vid]),
-    );
-    let mut coplanar_triangles: Vec<usize> = Vec::new();
-    triangles.retain(|&tid| {
-        let tri = constraints.triangle(tid);
-        verts_orient_wrt_plane(
-            plane_pts[0],
-            plane_pts[1],
-            plane_pts[2],
-            tri,
-            points,
-            vert_orientations,
-            bump,
-        );
-        let coplanar = vert_orientations[tri[0]] == Orientation::Zero
-            && vert_orientations[tri[1]] == Orientation::Zero
-            && vert_orientations[tri[2]] == Orientation::Zero;
-        if coplanar && !constraints.is_virtual(tid) {
-            coplanar_triangles.push(tid);
-        }
-        !coplanar
-    });
-    coplanar_triangles
-}
-
 #[inline]
 fn verts_orient_wrt_plane<'b>(
     pa: &Point3D<'b>,
     pb: &Point3D<'b>,
     pc: &Point3D<'b>,
-    verts: &[usize],
+    verts: &[VertexId],
     points: &[Point3D<'b>],
     vert_orientations: &mut [Orientation],
     bump: &'b Bump,
@@ -431,7 +441,7 @@ fn is_point_built_from_plane(
 
 #[inline]
 fn three_planes_intersection<'b>(
-    planes: [&[usize]; 3],
+    planes: [&[VertexId]; 3],
     points: &[Point3D<'b>],
     bump: &'b Bump,
 ) -> Point3D<'b> {

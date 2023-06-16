@@ -13,22 +13,21 @@ pub trait MeshData {
 
 macro_rules! mesh_data {
     (struct $name: ident, $n_elements: ident, $add_ele_data: ident, $remove_ele_data: ident, $id: ty) => {
-        pub struct $name<T: Clone, M: Mesh> {
+        pub struct $name<T: Clone + 'static, M: Mesh> {
             default_val: T,
             pub data: Vec<T>,
             mesh: Weak<RefCell<M>>,
         }
 
-        impl<T: Clone, M: Mesh> $name<T, M> {
+        impl<T: Clone + 'static, M: Mesh> $name<T, M> {
             #[inline(always)]
             pub fn new(mesh: Weak<RefCell<M>>, default_val: T) -> Rc<RefCell<Self>> {
                 let m = mesh.upgrade().unwrap();
                 let n_elements = m.borrow().$n_elements();
-                let bump = m.borrow().bump();
                 let default_val_clone = default_val.clone();
                 let data = Rc::new(RefCell::new(Self {
                     default_val,
-                    data: bumpalo::vec![in bump; default_val_clone; n_elements],
+                    data: vec![default_val_clone; n_elements],
                     mesh: mesh.clone(),
                 }));
                 if let Some(mesh) = mesh.upgrade() {
@@ -37,7 +36,11 @@ macro_rules! mesh_data {
                 data
             }
             #[inline(always)]
-            pub fn from_data(mesh: Weak<RefCell<M>>, mut data: Vec<T>, default_val: T) -> Rc<RefCell<Self>> {
+            pub fn from_data(
+                mesh: Weak<RefCell<M>>,
+                mut data: Vec<T>,
+                default_val: T,
+            ) -> Rc<RefCell<Self>> {
                 let m = mesh.upgrade().unwrap();
                 let n_elements = m.borrow().$n_elements();
                 data.resize(n_elements, default_val.clone());
@@ -52,7 +55,7 @@ macro_rules! mesh_data {
                 mesh_data
             }
         }
-        impl<T: Clone, M: Mesh> Drop for $name<T, M> {
+        impl<T: Clone + 'static, M: Mesh> Drop for $name<T, M> {
             fn drop(&mut self) {
                 if let Some(mesh) = self.mesh.upgrade() {
                     mesh.borrow_mut().$remove_ele_data(self);
@@ -73,7 +76,7 @@ macro_rules! mesh_data {
                 self.data.len()
             }
         }
-    }
+    };
 }
 
 mesh_data! {struct VertexData, n_vertices_capacity, add_vertices_data, remove_vertices_data, VertexId}

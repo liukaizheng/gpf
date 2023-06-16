@@ -82,12 +82,14 @@ fn make_mesh_for_triangles<'a, 'b: 'a>(points: &'a [f64], triangles: Vec<'b, usi
     );
     constraints.place_virtual_constraints(&tet_mesh);
     let tet_marks = constraints.insert_constraints(&mut tet_mesh);
-    let mut complex = BSPComplex::new(tet_mesh, &constraints, tet_marks);
+    let mut complex = BSPComplex::new(tet_mesh, constraints, tet_marks);
     let mut cid = 0;
+    let mut split_bump = Bump::new();
     while cid < complex.n_cells() {
         if complex.splittable(cid) {
             println!("split cell {}", cid);
-            complex.split_cell(cid);
+            split_bump.reset();
+            complex.split_cell(cid, &split_bump);
         } else {
             cid += 1;
         }
