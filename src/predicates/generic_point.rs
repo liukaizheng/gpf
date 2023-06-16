@@ -1,9 +1,8 @@
 use std::{
+    alloc::Allocator,
     cell::{Ref, RefCell},
     ops::Deref,
 };
-
-use bumpalo::{collections::Vec, vec, Bump};
 
 use super::{
     abs_max, dummy_abs_max, estimate, get_exponent, ExpansionNum, GenericNum, IntervalNumber,
@@ -57,15 +56,28 @@ pub struct Implicit3DCache<T> {
     pub d: T,
 }
 
-pub trait ImplicitPoint3D<'b> {
+#[inline(always)]
+fn copy_exact_cache<A: Allocator + Copy>(
+    cache: &Implicit3DCache<ExpansionNum>,
+    allocator: A,
+) -> Implicit3DCache<ExpansionNum<A>> {
+    Implicit3DCache {
+        x: cache.x.to_vec_in(allocator).into(),
+        y: cache.y.to_vec_in(allocator).into(),
+        z: cache.z.to_vec_in(allocator).into(),
+        d: cache.d.to_vec_in(allocator).into(),
+    }
+}
+
+pub trait ImplicitPoint3D {
     fn static_filter(&self) -> Option<&(Implicit3DCache<f64>, f64)>;
     fn dynamic_filter(&self) -> Option<&Implicit3DCache<IntervalNumber>>;
-    fn exact(&self) -> Option<&Implicit3DCache<ExpansionNum<'b>>>;
+    fn exact<A: Allocator + Copy>(&self, allocator: A) -> Option<Implicit3DCache<ExpansionNum<A>>>;
 }
 
 /// A point in 3D space representing the intersection of a line and a plane.
 #[derive(Clone)]
-pub struct ImplicitPointLPI<'b> {
+pub struct ImplicitPointLPI {
     /// line
     pub p: ExplicitPoint3D,
     pub q: ExplicitPoint3D,
@@ -74,21 +86,18 @@ pub struct ImplicitPointLPI<'b> {
     pub s: ExplicitPoint3D,
     pub t: ExplicitPoint3D,
 
-    bump: &'b Bump,
-
     ss_filter: RefCell<Option<(Implicit3DCache<f64>, f64)>>,
     d_filter: RefCell<Option<Implicit3DCache<IntervalNumber>>>,
-    exact: RefCell<Option<Implicit3DCache<ExpansionNum<'b>>>>,
+    exact: RefCell<Option<Implicit3DCache<ExpansionNum>>>,
 }
 
-impl<'b> ImplicitPointLPI<'b> {
+impl ImplicitPointLPI {
     pub fn new(
         p: ExplicitPoint3D,
         q: ExplicitPoint3D,
         r: ExplicitPoint3D,
         s: ExplicitPoint3D,
         t: ExplicitPoint3D,
-        bump: &'b Bump,
     ) -> Self {
         Self {
             p,
@@ -99,12 +108,11 @@ impl<'b> ImplicitPointLPI<'b> {
             ss_filter: RefCell::new(None),
             d_filter: RefCell::new(None),
             exact: RefCell::new(None),
-            bump,
         }
     }
 }
 
-fn lpi_lambda<'b, const NEED_MAX: bool, T: GenericNum + 'b, F>(
+fn lpi_lambda<const NEED_MAX: bool, T: GenericNum, F>(
     px: T,
     py: T,
     pz: T,
@@ -121,10 +129,9 @@ fn lpi_lambda<'b, const NEED_MAX: bool, T: GenericNum + 'b, F>(
     ty: T,
     tz: T,
     abs_max: F,
-    bump: &'b Bump,
 ) -> (Implicit3DCache<T>, Option<T>)
 where
-    F: FnOnce(Vec<'b, T>) -> Option<T>,
+    F: FnOnce(&[T]) -> Option<T>,
 {
     let a11 = &px - &qx;
     let a12 = &py - &qy;
@@ -169,11 +176,8 @@ where
     let y = dpy - ay;
     let z = dpz - az;
     let max_var = if NEED_MAX {
-        abs_max(vec![
-            in bump;
-            px, py, pz,
-            a11, a12, a13, a21, a22, a23, a31, a32, a33,
-            px_rx, py_ry, pz_rz
+        abs_max(&[
+            px, py, pz, a11, a12, a13, a21, a22, a23, a31, a32, a33, px_rx, py_ry, pz_rz,
         ])
     } else {
         None
@@ -181,7 +185,7 @@ where
     (Implicit3DCache { x, y, z, d }, max_var)
 }
 
-impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
+impl ImplicitPoint3D for ImplicitPointLPI {
     fn static_filter(&self) -> Option<&(Implicit3DCache<f64>, f64)> {
         if self.ss_filter.borrow().is_some() {
             let filter = self.ss_filter.borrow();
@@ -191,7 +195,7 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
                 return Ref::leak(filter).as_ref();
             }
         } else {
-            let (mut filter, max_var) = lpi_lambda::<'_, true, _, _>(
+            let (mut filter, max_var) = lpi_lambda::<true, _, _>(
                 self.p.data[0],
                 self.p.data[1],
                 self.p.data[2],
@@ -208,7 +212,6 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
                 self.t.data[1],
                 self.t.data[2],
                 abs_max,
-                &self.bump,
             );
             let max_var = max_var.unwrap();
             let mut lambda_d_eps = max_var;
@@ -265,7 +268,6 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
                 self.t.data[1].into(),
                 self.t.data[2].into(),
                 dummy_abs_max,
-                &self.bump,
             );
             if filter.d.negative() {
                 filter.x.neg();
@@ -282,33 +284,33 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
         }
     }
 
-    fn exact(&self) -> Option<&Implicit3DCache<ExpansionNum<'b>>> {
+    fn exact<A: Allocator + Copy>(&self, allocator: A) -> Option<Implicit3DCache<ExpansionNum<A>>> {
         if self.exact.borrow().is_some() {
             let exact = self.exact.borrow();
-            if exact.as_ref().unwrap().d.not_zero() {
-                return Ref::leak(exact).as_ref();
+            let exact = exact.as_ref().unwrap();
+            if exact.d.not_zero() {
+                return Some(copy_exact_cache(exact, allocator));
             } else {
                 return None;
             }
         } else {
-            let (mut exact, _) = lpi_lambda::<'_, false, ExpansionNum<'_>, _>(
-                vec![in self.bump; self.p.data[0]].into(),
-                vec![in self.bump; self.p.data[1]].into(),
-                vec![in self.bump; self.p.data[2]].into(),
-                vec![in self.bump; self.q.data[0]].into(),
-                vec![in self.bump; self.q.data[1]].into(),
-                vec![in self.bump; self.q.data[2]].into(),
-                vec![in self.bump; self.r.data[0]].into(),
-                vec![in self.bump; self.r.data[1]].into(),
-                vec![in self.bump; self.r.data[2]].into(),
-                vec![in self.bump; self.s.data[0]].into(),
-                vec![in self.bump; self.s.data[1]].into(),
-                vec![in self.bump; self.s.data[2]].into(),
-                vec![in self.bump; self.t.data[0]].into(),
-                vec![in self.bump; self.t.data[1]].into(),
-                vec![in self.bump; self.t.data[2]].into(),
+            let (mut exact, _) = lpi_lambda::<false, ExpansionNum, _>(
+                vec![self.p.data[0]].into(),
+                vec![self.p.data[1]].into(),
+                vec![self.p.data[2]].into(),
+                vec![self.q.data[0]].into(),
+                vec![self.q.data[1]].into(),
+                vec![self.q.data[2]].into(),
+                vec![self.r.data[0]].into(),
+                vec![self.r.data[1]].into(),
+                vec![self.r.data[2]].into(),
+                vec![self.s.data[0]].into(),
+                vec![self.s.data[1]].into(),
+                vec![self.s.data[2]].into(),
+                vec![self.t.data[0]].into(),
+                vec![self.t.data[1]].into(),
+                vec![self.t.data[2]].into(),
                 dummy_abs_max,
-                &self.bump,
             );
             if exact.d.negative() {
                 exact.x.neg();
@@ -320,7 +322,10 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
 
             self.exact.replace(Some(exact));
             if self.exact.borrow().as_ref().unwrap().d.not_zero() {
-                return Ref::leak(self.exact.borrow()).as_ref();
+                return Some(copy_exact_cache(
+                    self.exact.borrow().as_ref().unwrap(),
+                    allocator,
+                ));
             } else {
                 return None;
             }
@@ -330,7 +335,7 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointLPI<'b> {
 
 /// A point in 3D space representing the intersection of three planes.
 #[derive(Clone)]
-pub struct ImplicitPointTPI<'b> {
+pub struct ImplicitPointTPI {
     /// plane 1
     pub v1: ExplicitPoint3D,
     pub v2: ExplicitPoint3D,
@@ -346,12 +351,10 @@ pub struct ImplicitPointTPI<'b> {
 
     ss_filter: RefCell<Option<(Implicit3DCache<f64>, f64)>>,
     d_filter: RefCell<Option<Implicit3DCache<IntervalNumber>>>,
-    exact: RefCell<Option<Implicit3DCache<ExpansionNum<'b>>>>,
-
-    bump: &'b Bump,
+    exact: RefCell<Option<Implicit3DCache<ExpansionNum>>>,
 }
 
-impl<'b> ImplicitPointTPI<'b> {
+impl ImplicitPointTPI {
     pub fn new(
         v1: ExplicitPoint3D,
         v2: ExplicitPoint3D,
@@ -362,7 +365,6 @@ impl<'b> ImplicitPointTPI<'b> {
         u1: ExplicitPoint3D,
         u2: ExplicitPoint3D,
         u3: ExplicitPoint3D,
-        bump: &'b Bump,
     ) -> Self {
         Self {
             v1,
@@ -377,12 +379,11 @@ impl<'b> ImplicitPointTPI<'b> {
             ss_filter: RefCell::new(None),
             d_filter: RefCell::new(None),
             exact: RefCell::new(None),
-            bump,
         }
     }
 }
 
-fn tpi_lambda<'b, const NEED_MAX: bool, T: GenericNum + 'b, F>(
+fn tpi_lambda<const NEED_MAX: bool, T: GenericNum, F>(
     ov1x: T,
     ov1y: T,
     ov1z: T,
@@ -411,10 +412,9 @@ fn tpi_lambda<'b, const NEED_MAX: bool, T: GenericNum + 'b, F>(
     ou3y: T,
     ou3z: T,
     abs_max: F,
-    bump: &'b Bump,
 ) -> (Implicit3DCache<T>, Option<T>)
 where
-    F: FnOnce(Vec<'b, T>) -> Option<T>,
+    F: FnOnce(&[T]) -> Option<T>,
 {
     let v3x = ov3x - &ov2x;
     let v3y = ov3y - &ov2y;
@@ -525,14 +525,9 @@ where
     let d = dab - dc;
 
     let max_var = if NEED_MAX {
-        abs_max(vec![
-            in bump;
-            ov1x, ov1y, ov1z,
-            ow1x, ow1y, ow1z,
-            ou1x, ou1y, ou1z,
-            v3x, v3y, v3z, v2x, v2y, v2z,
-            w3x, w3y, w3z, w2x, w2y, w2z,
-            u3x, u3y, u3z, u2x, u2y, u2z,
+        abs_max(&[
+            ov1x, ov1y, ov1z, ow1x, ow1y, ow1z, ou1x, ou1y, ou1z, v3x, v3y, v3z, v2x, v2y, v2z,
+            w3x, w3y, w3z, w2x, w2y, w2z, u3x, u3y, u3z, u2x, u2y, u2z,
         ])
     } else {
         None
@@ -540,7 +535,7 @@ where
     (Implicit3DCache { x, y, z, d }, max_var)
 }
 
-impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
+impl ImplicitPoint3D for ImplicitPointTPI {
     fn static_filter(&self) -> Option<&(Implicit3DCache<f64>, f64)> {
         if self.ss_filter.borrow().is_some() {
             let filter = self.ss_filter.borrow();
@@ -550,7 +545,7 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
                 return Ref::leak(filter).as_ref();
             }
         } else {
-            let (mut filter, max_var) = tpi_lambda::<'_, true, _, _>(
+            let (mut filter, max_var) = tpi_lambda::<true, _, _>(
                 self.v1.data[0],
                 self.v1.data[1],
                 self.v1.data[2],
@@ -579,7 +574,6 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
                 self.u3.data[1],
                 self.u3.data[2],
                 abs_max,
-                self.bump,
             );
             let max_var = max_var.unwrap();
             let mut lambda_d_eps = max_var;
@@ -650,7 +644,6 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
                 self.u3.data[1].into(),
                 self.u3.data[2].into(),
                 dummy_abs_max,
-                &self.bump,
             );
 
             if filter.d.negative() {
@@ -669,45 +662,45 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
         }
     }
 
-    fn exact(&self) -> Option<&Implicit3DCache<ExpansionNum<'b>>> {
+    fn exact<A: Allocator + Copy>(&self, allocator: A) -> Option<Implicit3DCache<ExpansionNum<A>>> {
         if self.exact.borrow().is_some() {
             let exact = self.exact.borrow();
-            if exact.as_ref().unwrap().d.not_zero() {
-                return Ref::leak(exact).as_ref();
+            let exact = exact.as_ref().unwrap();
+            if exact.d.not_zero() {
+                return Some(copy_exact_cache(exact, allocator));
             } else {
                 return None;
             }
         } else {
-            let (mut exact, _) = tpi_lambda::<false, ExpansionNum<'_>, _>(
-                vec![in self.bump; self.v1.data[0]].into(),
-                vec![in self.bump; self.v1.data[1]].into(),
-                vec![in self.bump; self.v1.data[2]].into(),
-                vec![in self.bump; self.v2.data[0]].into(),
-                vec![in self.bump; self.v2.data[1]].into(),
-                vec![in self.bump; self.v2.data[2]].into(),
-                vec![in self.bump; self.v3.data[0]].into(),
-                vec![in self.bump; self.v3.data[1]].into(),
-                vec![in self.bump; self.v3.data[2]].into(),
-                vec![in self.bump; self.w1.data[0]].into(),
-                vec![in self.bump; self.w1.data[1]].into(),
-                vec![in self.bump; self.w1.data[2]].into(),
-                vec![in self.bump; self.w2.data[0]].into(),
-                vec![in self.bump; self.w2.data[1]].into(),
-                vec![in self.bump; self.w2.data[2]].into(),
-                vec![in self.bump; self.w3.data[0]].into(),
-                vec![in self.bump; self.w3.data[1]].into(),
-                vec![in self.bump; self.w3.data[2]].into(),
-                vec![in self.bump; self.u1.data[0]].into(),
-                vec![in self.bump; self.u1.data[1]].into(),
-                vec![in self.bump; self.u1.data[2]].into(),
-                vec![in self.bump; self.u2.data[0]].into(),
-                vec![in self.bump; self.u2.data[1]].into(),
-                vec![in self.bump; self.u2.data[2]].into(),
-                vec![in self.bump; self.u3.data[0]].into(),
-                vec![in self.bump; self.u3.data[1]].into(),
-                vec![in self.bump; self.u3.data[2]].into(),
+            let (mut exact, _) = tpi_lambda::<false, ExpansionNum, _>(
+                vec![self.v1.data[0]].into(),
+                vec![self.v1.data[1]].into(),
+                vec![self.v1.data[2]].into(),
+                vec![self.v2.data[0]].into(),
+                vec![self.v2.data[1]].into(),
+                vec![self.v2.data[2]].into(),
+                vec![self.v3.data[0]].into(),
+                vec![self.v3.data[1]].into(),
+                vec![self.v3.data[2]].into(),
+                vec![self.w1.data[0]].into(),
+                vec![self.w1.data[1]].into(),
+                vec![self.w1.data[2]].into(),
+                vec![self.w2.data[0]].into(),
+                vec![self.w2.data[1]].into(),
+                vec![self.w2.data[2]].into(),
+                vec![self.w3.data[0]].into(),
+                vec![self.w3.data[1]].into(),
+                vec![self.w3.data[2]].into(),
+                vec![self.u1.data[0]].into(),
+                vec![self.u1.data[1]].into(),
+                vec![self.u1.data[2]].into(),
+                vec![self.u2.data[0]].into(),
+                vec![self.u2.data[1]].into(),
+                vec![self.u2.data[2]].into(),
+                vec![self.u3.data[0]].into(),
+                vec![self.u3.data[1]].into(),
+                vec![self.u3.data[2]].into(),
                 dummy_abs_max,
-                &self.bump,
             );
             if exact.d.negative() {
                 exact.x.neg();
@@ -719,7 +712,10 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
 
             self.exact.replace(Some(exact));
             if self.exact.borrow().as_ref().unwrap().d.not_zero() {
-                return Ref::leak(self.exact.borrow()).as_ref();
+                return Some(copy_exact_cache(
+                    self.exact.borrow().as_ref().unwrap(),
+                    allocator,
+                ));
             } else {
                 return None;
             }
@@ -728,13 +724,13 @@ impl<'b> ImplicitPoint3D<'b> for ImplicitPointTPI<'b> {
 }
 
 #[derive(Clone)]
-pub enum Point3D<'b> {
+pub enum Point3D {
     Explicit(ExplicitPoint3D),
-    LPI(ImplicitPointLPI<'b>),
-    TPI(ImplicitPointTPI<'b>),
+    LPI(ImplicitPointLPI),
+    TPI(ImplicitPointTPI),
 }
 
-impl<'b> Point3D<'b> {
+impl Point3D {
     #[inline(always)]
     pub fn explicit(&self) -> Option<&ExplicitPoint3D> {
         if let Point3D::Explicit(p) = self {
@@ -762,7 +758,6 @@ fn test_get_filter() {
     let t = ExplicitPoint3D {
         data: [0.0, 1.0, 0.0],
     };
-    let bump = Bump::new();
-    let point = ImplicitPointLPI::new(p, q, r, s, t, &bump);
+    let point = ImplicitPointLPI::new(p, q, r, s, t);
     assert!(point.static_filter().is_some());
 }

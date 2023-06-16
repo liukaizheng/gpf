@@ -1,24 +1,25 @@
-use std::ops::{Add, Deref, DerefMut, Mul, Sub};
-
-use bumpalo::{collections::vec::Vec, Bump};
+use std::{
+    alloc::{Allocator, Global},
+    ops::{Add, Deref, DerefMut, Mul, Sub},
+};
 
 use super::predicates::{
     fast_expansion_diff_zeroelim, fast_expansion_sum_zeroelim, mul_expansion_zeroelim,
 };
 
 #[derive(Clone)]
-pub struct ExpansionNum<'b> {
-    pub vec: Vec<'b, f64>,
+pub struct ExpansionNum<A: Allocator + Copy = Global> {
+    pub vec: Vec<f64, A>,
 }
 
-impl<'b> ExpansionNum<'b> {
+impl<A: Allocator + Copy> ExpansionNum<A> {
     #[inline(always)]
-    pub fn bump(&self) -> &'b Bump {
-        self.vec.bump()
+    pub fn allocator(&self) -> &A {
+        self.vec.allocator()
     }
 }
 
-impl<'b> Deref for ExpansionNum<'b> {
+impl<A: Allocator + Copy> Deref for ExpansionNum<A> {
     type Target = [f64];
 
     #[inline(always)]
@@ -27,21 +28,21 @@ impl<'b> Deref for ExpansionNum<'b> {
     }
 }
 
-impl<'b> DerefMut for ExpansionNum<'b> {
+impl<A: Allocator + Copy> DerefMut for ExpansionNum<A> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.vec
     }
 }
 
-impl<'b> From<Vec<'b, f64>> for ExpansionNum<'b> {
+impl<A: Allocator + Copy> From<Vec<f64, A>> for ExpansionNum<A> {
     #[inline(always)]
-    fn from(vec: Vec<'b, f64>) -> Self {
+    fn from(vec: Vec<f64, A>) -> Self {
         Self { vec }
     }
 }
 
-impl<'b> ExpansionNum<'b> {
+impl<A: Allocator + Copy> ExpansionNum<A> {
     #[inline(always)]
     pub fn not_zero(&self) -> bool {
         *self.last().unwrap() != 0.0
@@ -60,62 +61,62 @@ impl<'b> ExpansionNum<'b> {
 }
 
 #[inline(always)]
-fn add<'b>(a: &[f64], b: &[f64], bump: &'b Bump) -> Vec<'b, f64> {
-    fast_expansion_sum_zeroelim(a, b, bump)
+fn add<A: Allocator + Copy>(a: &[f64], b: &[f64], allocator: A) -> Vec<f64, A> {
+    fast_expansion_sum_zeroelim(a, b, allocator)
 }
 
 #[inline(always)]
-fn sub<'b>(a: &[f64], b: &[f64], bump: &'b Bump) -> Vec<'b, f64> {
-    fast_expansion_diff_zeroelim(a, b, bump)
+fn sub<A: Allocator + Copy>(a: &[f64], b: &[f64], allocator: A) -> Vec<f64, A> {
+    fast_expansion_diff_zeroelim(a, b, allocator)
 }
 
 #[inline(always)]
-fn mul<'b>(a: &[f64], b: &[f64], bump: &'b Bump) -> Vec<'b, f64> {
-    mul_expansion_zeroelim(a, b, bump)
+fn mul<A: Allocator + Copy>(a: &[f64], b: &[f64], allocator: A) -> Vec<f64, A> {
+    mul_expansion_zeroelim(a, b, allocator)
 }
 
 macro_rules! impl_op {
     (trait $op: ident, $func: ident) => {
-        impl<'b> $op for ExpansionNum<'b> {
-            type Output = ExpansionNum<'b>;
+        impl<A: Allocator + Copy> $op for ExpansionNum<A> {
+            type Output = ExpansionNum<A>;
 
             #[inline(always)]
             fn $func(self, rhs: Self) -> Self::Output {
                 Self::Output {
-                    vec: $func(&self, &rhs, self.bump()),
+                    vec: $func(&self, &rhs, *self.allocator()),
                 }
             }
         }
 
-        impl<'b> $op for &ExpansionNum<'b> {
-            type Output = ExpansionNum<'b>;
+        impl<A: Allocator + Copy> $op for &ExpansionNum<A> {
+            type Output = ExpansionNum<A>;
 
             #[inline(always)]
             fn $func(self, rhs: Self) -> Self::Output {
                 Self::Output {
-                    vec: $func(self, rhs, self.bump()),
+                    vec: $func(self, rhs, *self.allocator()),
                 }
             }
         }
 
-        impl<'b> $op<&ExpansionNum<'b>> for ExpansionNum<'b> {
-            type Output = ExpansionNum<'b>;
+        impl<A: Allocator + Copy> $op<&ExpansionNum<A>> for ExpansionNum<A> {
+            type Output = ExpansionNum<A>;
 
             #[inline(always)]
             fn $func(self, rhs: &Self) -> Self::Output {
                 Self::Output {
-                    vec: $func(&self, rhs, self.bump()),
+                    vec: $func(&self, rhs, *self.allocator()),
                 }
             }
         }
 
-        impl<'b> $op<ExpansionNum<'b>> for &ExpansionNum<'b> {
-            type Output = ExpansionNum<'b>;
+        impl<A: Allocator + Copy> $op<ExpansionNum<A>> for &ExpansionNum<A> {
+            type Output = ExpansionNum<A>;
 
             #[inline(always)]
-            fn $func(self, rhs: ExpansionNum<'b>) -> Self::Output {
+            fn $func(self, rhs: ExpansionNum<A>) -> Self::Output {
                 Self::Output {
-                    vec: $func(self, &rhs, self.bump()),
+                    vec: $func(self, &rhs, *self.allocator()),
                 }
             }
         }
@@ -128,13 +129,8 @@ impl_op!(trait Mul, mul);
 
 #[test]
 fn test_expansion_operations() {
-    let bump = Bump::new();
-    let v1 = ExpansionNum {
-        vec: bumpalo::vec![in &bump; 2.0; 1],
-    };
-    let v2 = ExpansionNum {
-        vec: bumpalo::vec![in &bump; 1.0; 1],
-    };
+    let v1 = ExpansionNum { vec: vec![2.0; 1] };
+    let v2 = ExpansionNum { vec: vec![1.0; 1] };
     let v3 = v1 + &v2;
     assert_eq!(v3[0], 3.0);
     let v4 = v3 + v2;

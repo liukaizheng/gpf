@@ -5,8 +5,10 @@ mod orient2d;
 pub mod orient3d;
 mod predicates;
 
-use bumpalo::{collections::Vec, Bump};
-use std::ops::{Add, Mul, Sub};
+use std::{
+    alloc::Allocator,
+    ops::{Add, Mul, Sub},
+};
 
 pub use expansion_number::*;
 pub use generic_point::*;
@@ -34,12 +36,12 @@ where
         + Mul<Self, Output = Self>;
 
 #[inline(always)]
-fn abs_max(vec: Vec<'_, f64>) -> Option<f64> {
+fn abs_max(vec: &[f64]) -> Option<f64> {
     vec.into_iter().map(|e| e.abs()).reduce(|acc, e| acc.max(e))
 }
 
 #[inline(always)]
-fn dummy_abs_max<T>(_: Vec<'_, T>) -> Option<T> {
+fn dummy_abs_max<T>(_: &[T]) -> Option<T> {
     None
 }
 
@@ -79,10 +81,9 @@ pub fn get_exponent(x: f64) -> i32 {
 }
 
 fn max_comp_in_tri_normal_impl<
-    'b,
     const NEED_MAX: bool,
-    T: 'b + GenericNum,
-    F: FnOnce(Vec<'b, T>) -> Option<T>,
+    T: GenericNum,
+    F: FnOnce(&[T]) -> Option<T>,
 >(
     ov1x: T,
     ov1y: T,
@@ -94,7 +95,6 @@ fn max_comp_in_tri_normal_impl<
     ov3y: T,
     ov3z: T,
     abs_max: F,
-    bump: &'b Bump,
 ) -> (T, T, T, Option<T>) {
     let v3x = ov3x - &ov2x;
     let v3y = ov3y - &ov2y;
@@ -112,7 +112,7 @@ fn max_comp_in_tri_normal_impl<
     let nvz2 = &v2y * &v3x;
     let nvz = nvz1 - nvz2;
     let max_var = if NEED_MAX {
-        abs_max(bumpalo::vec![in bump;v3x, v3y, v3z, v2x, v2y, v2z])
+        abs_max(&[v3x, v3y, v3z, v2x, v2y, v2z])
     } else {
         None
     };
@@ -120,7 +120,7 @@ fn max_comp_in_tri_normal_impl<
 }
 
 #[inline(always)]
-fn max_comp_in_tri_normal_filter<'b>(
+fn max_comp_in_tri_normal_filter(
     ov1x: f64,
     ov1y: f64,
     ov1z: f64,
@@ -130,10 +130,9 @@ fn max_comp_in_tri_normal_filter<'b>(
     ov3x: f64,
     ov3y: f64,
     ov3z: f64,
-    bump: &'b Bump,
 ) -> usize {
-    let (nvx, nvy, nvz, max_var) = max_comp_in_tri_normal_impl::<'b, true, _, _>(
-        ov1x, ov1y, ov1z, ov2x, ov2y, ov2z, ov3x, ov3y, ov3z, abs_max, bump,
+    let (nvx, nvy, nvz, max_var) = max_comp_in_tri_normal_impl::<true, _, _>(
+        ov1x, ov1y, ov1z, ov2x, ov2y, ov2z, ov3x, ov3y, ov3z, abs_max,
     );
     let max_var = max_var.unwrap();
     let epsilon = 8.88395e-016 * max_var * max_var;
@@ -150,19 +149,18 @@ fn max_comp_in_tri_normal_filter<'b>(
 }
 
 #[inline(always)]
-fn max_comp_in_tri_normal_exact<'b>(
-    ov1x: ExpansionNum<'b>,
-    ov1y: ExpansionNum<'b>,
-    ov1z: ExpansionNum<'b>,
-    ov2x: ExpansionNum<'b>,
-    ov2y: ExpansionNum<'b>,
-    ov2z: ExpansionNum<'b>,
-    ov3x: ExpansionNum<'b>,
-    ov3y: ExpansionNum<'b>,
-    ov3z: ExpansionNum<'b>,
+fn max_comp_in_tri_normal_exact<A: Allocator + Copy>(
+    ov1x: ExpansionNum<A>,
+    ov1y: ExpansionNum<A>,
+    ov1z: ExpansionNum<A>,
+    ov2x: ExpansionNum<A>,
+    ov2y: ExpansionNum<A>,
+    ov2z: ExpansionNum<A>,
+    ov3x: ExpansionNum<A>,
+    ov3y: ExpansionNum<A>,
+    ov3z: ExpansionNum<A>,
 ) -> usize {
-    let bump = ov1x.bump();
-    let (nvx, nvy, nvz, _) = max_comp_in_tri_normal_impl::<'b, false, _, _>(
+    let (nvx, nvy, nvz, _) = max_comp_in_tri_normal_impl::<false, _, _>(
         ov1x,
         ov1y,
         ov1z,
@@ -173,7 +171,6 @@ fn max_comp_in_tri_normal_exact<'b>(
         ov3y,
         ov3z,
         dummy_abs_max,
-        bump,
     );
     let (max_comp, _) = [nvx, nvy, nvz]
         .into_iter()
@@ -185,39 +182,55 @@ fn max_comp_in_tri_normal_exact<'b>(
 }
 
 #[inline(always)]
-pub fn max_comp_in_tri_normal<'b>(ov1: &[f64], ov2: &[f64], ov3: &[f64], bump: &'b Bump) -> usize {
+pub fn max_comp_in_tri_normal<A: Allocator + Copy>(
+    ov1: &[f64],
+    ov2: &[f64],
+    ov3: &[f64],
+    allocator: A,
+) -> usize {
     let max_comp = max_comp_in_tri_normal_filter(
-        ov1[0], ov1[1], ov1[2], ov2[0], ov2[1], ov2[2], ov3[0], ov3[1], ov3[2], bump,
+        ov1[0], ov1[1], ov1[2], ov2[0], ov2[1], ov2[2], ov3[0], ov3[1], ov3[2],
     );
     if max_comp < 4 {
         max_comp
     } else {
         max_comp_in_tri_normal_exact(
-            bumpalo::vec![in bump;ov1[0]].into(),
-            bumpalo::vec![in bump;ov1[1]].into(),
-            bumpalo::vec![in bump;ov1[2]].into(),
-            bumpalo::vec![in bump;ov2[0]].into(),
-            bumpalo::vec![in bump;ov2[1]].into(),
-            bumpalo::vec![in bump;ov2[2]].into(),
-            bumpalo::vec![in bump;ov3[0]].into(),
-            bumpalo::vec![in bump;ov3[1]].into(),
-            bumpalo::vec![in bump;ov3[2]].into(),
+            [ov1[0]].to_vec_in(allocator).into(),
+            [ov1[1]].to_vec_in(allocator).into(),
+            [ov1[2]].to_vec_in(allocator).into(),
+            [ov2[0]].to_vec_in(allocator).into(),
+            [ov2[1]].to_vec_in(allocator).into(),
+            [ov2[2]].to_vec_in(allocator).into(),
+            [ov3[0]].to_vec_in(allocator).into(),
+            [ov3[1]].to_vec_in(allocator).into(),
+            [ov3[2]].to_vec_in(allocator).into(),
         )
     }
 }
 
-pub fn point_in_inner_triangle(p: &[f64], v1: &[f64], v2: &[f64], v3: &[f64], bump: &Bump) -> bool {
+pub fn point_in_inner_triangle<A: Allocator + Copy>(
+    p: &[f64],
+    v1: &[f64],
+    v2: &[f64],
+    v3: &[f64],
+    allocator: A,
+) -> bool {
     // Projection on (x,y)-plane -> p VS v1
-    let mut o1 = double_to_sign(predicates::orient2d(p, v2, v3, bump));
-    let mut o2 = double_to_sign(predicates::orient2d(v1, v2, v3, bump));
+    let mut o1 = double_to_sign(predicates::orient2d(p, v2, v3, allocator));
+    let mut o2 = double_to_sign(predicates::orient2d(v1, v2, v3, allocator));
     let oo2 = o2;
     if o1 != o2 {
         return false;
     };
 
     // Projection on (y,z)-plane -> p VS v1
-    o1 = double_to_sign(predicates::orient2d(&p[1..], &v2[1..], &v3[1..], bump));
-    o2 = double_to_sign(predicates::orient2d(&v1[1..], &v2[1..], &v3[1..], bump));
+    o1 = double_to_sign(predicates::orient2d(&p[1..], &v2[1..], &v3[1..], allocator));
+    o2 = double_to_sign(predicates::orient2d(
+        &v1[1..],
+        &v2[1..],
+        &v3[1..],
+        allocator,
+    ));
     let oo4 = o2;
     if o1 != o2 {
         return false;
@@ -228,50 +241,50 @@ pub fn point_in_inner_triangle(p: &[f64], v1: &[f64], v2: &[f64], v3: &[f64], bu
     let v1xz = [v1[0], v1[2]];
     let v2xz = [v2[0], v2[2]];
     let v3xz = [v3[0], v3[2]];
-    o1 = double_to_sign(predicates::orient2d(&pxz, &v2xz, &v3xz, bump));
-    o2 = double_to_sign(predicates::orient2d(&v1xz, &v2xz, &v3xz, bump));
+    o1 = double_to_sign(predicates::orient2d(&pxz, &v2xz, &v3xz, allocator));
+    o2 = double_to_sign(predicates::orient2d(&v1xz, &v2xz, &v3xz, allocator));
     let oo6 = o2;
     if o1 != o2 {
         return false;
     };
 
     // Projection on (x,y)-plane -> p VS v2
-    o1 = double_to_sign(predicates::orient2d(p, v3, v1, bump));
+    o1 = double_to_sign(predicates::orient2d(p, v3, v1, allocator));
     o2 = oo2;
     if o1 != o2 {
         return false;
     };
 
     // Projection on (y,z)-plane -> p VS v2
-    o1 = double_to_sign(predicates::orient2d(&p[1..], &v3[1..], &v1[1..], bump));
+    o1 = double_to_sign(predicates::orient2d(&p[1..], &v3[1..], &v1[1..], allocator));
     o2 = oo4;
     if o1 != o2 {
         return false;
     };
 
     // Projection on (x,z)-plane -> p VS v2
-    o1 = double_to_sign(predicates::orient2d(&pxz, &v3xz, &v1xz, bump));
+    o1 = double_to_sign(predicates::orient2d(&pxz, &v3xz, &v1xz, allocator));
     o2 = oo6;
     if o1 != o2 {
         return false;
     };
 
     // Projection on (x,y)-plane -> p VS v3
-    o1 = double_to_sign(predicates::orient2d(p, v1, v2, bump));
+    o1 = double_to_sign(predicates::orient2d(p, v1, v2, allocator));
     o2 = oo2;
     if o1 != o2 {
         return false;
     };
 
     // Projection on (y,z)-plane -> p VS v3
-    o1 = double_to_sign(predicates::orient2d(&p[1..], &v1[1..], &v2[1..], bump));
+    o1 = double_to_sign(predicates::orient2d(&p[1..], &v1[1..], &v2[1..], allocator));
     o2 = oo4;
     if o1 != o2 {
         return false;
     };
 
     // Projection on (x,z)-plane -> p VS v3
-    o1 = double_to_sign(predicates::orient2d(&pxz, &v1xz, &v2xz, bump));
+    o1 = double_to_sign(predicates::orient2d(&pxz, &v1xz, &v2xz, allocator));
     o2 = oo6;
     if o1 != o2 {
         return false;
@@ -281,13 +294,13 @@ pub fn point_in_inner_triangle(p: &[f64], v1: &[f64], v2: &[f64], v3: &[f64], bu
 }
 
 #[inline]
-pub fn inner_segment_cross_inner_triangle(
+pub fn inner_segment_cross_inner_triangle<A: Allocator + Copy>(
     u1: &[f64],
     u2: &[f64],
     v1: &[f64],
     v2: &[f64],
     v3: &[f64],
-    bump: &Bump,
+    allocator: A,
 ) -> bool {
     let mut bound = u1[0].min(u2[0]); // min(u1,u2) alogng x-axis
     if v1[0] <= bound && v2[0] <= bound && v3[0] <= bound {
@@ -314,8 +327,8 @@ pub fn inner_segment_cross_inner_triangle(
         return false;
     }
 
-    let orient_u1_tri = double_to_sign(predicates::orient3d(u1, v1, v2, v3, bump));
-    let orient_u2_tri = double_to_sign(predicates::orient3d(u2, v1, v2, v3, bump));
+    let orient_u1_tri = double_to_sign(predicates::orient3d(u1, v1, v2, v3, allocator));
+    let orient_u2_tri = double_to_sign(predicates::orient3d(u2, v1, v2, v3, allocator));
 
     // Check if triangle vertices and at least one of the segment endpoints are coplanar:
     // in this case there is no proper intersection.
@@ -332,8 +345,8 @@ pub fn inner_segment_cross_inner_triangle(
 
     // Intersection between segment and triangle sides are not proper.
     // Check also if segment intersect the triangle-plane outside the triangle.
-    let orient_u_v1v2 = double_to_sign(predicates::orient3d(u1, u2, v1, v2, bump));
-    let orient_u_v2v3 = double_to_sign(predicates::orient3d(u1, u2, v2, v3, bump));
+    let orient_u_v1v2 = double_to_sign(predicates::orient3d(u1, u2, v1, v2, allocator));
+    let orient_u_v2v3 = double_to_sign(predicates::orient3d(u1, u2, v2, v3, allocator));
 
     if orient_u_v1v2 == Orientation::Zero || orient_u_v2v3 == Orientation::Zero {
         return false;
@@ -343,7 +356,7 @@ pub fn inner_segment_cross_inner_triangle(
         return false;
     }
 
-    let orient_u_v3v1 = double_to_sign(predicates::orient3d(u1, u2, v3, v1, bump));
+    let orient_u_v3v1 = double_to_sign(predicates::orient3d(u1, u2, v3, v1, allocator));
 
     if orient_u_v3v1 == Orientation::Zero {
         return false;
@@ -361,17 +374,23 @@ pub fn same_point(p: &[f64], q: &[f64]) -> bool {
     p[0] == q[0] && p[1] == q[1] && p[2] == q[2]
 }
 
-pub fn same_half_plane(p: &[f64], q: &[f64], v1: &[f64], v2: &[f64], bump: &Bump) -> bool {
+pub fn same_half_plane<A: Allocator + Copy>(
+    p: &[f64],
+    q: &[f64],
+    v1: &[f64],
+    v2: &[f64],
+    allocator: A,
+) -> bool {
     // Projection on (x,y)-plane
-    if double_to_sign(predicates::orient2d(p, v1, v2, bump))
-        != double_to_sign(predicates::orient2d(q, v1, v2, bump))
+    if double_to_sign(predicates::orient2d(p, v1, v2, allocator))
+        != double_to_sign(predicates::orient2d(q, v1, v2, allocator))
     {
         return false;
     }
 
     // Projection on (y,z)-plane
-    if double_to_sign(predicates::orient2d(&p[1..], &v1[1..], &v2[1..], bump))
-        != double_to_sign(predicates::orient2d(&q[1..], &v1[1..], &v2[1..], bump))
+    if double_to_sign(predicates::orient2d(&p[1..], &v1[1..], &v2[1..], allocator))
+        != double_to_sign(predicates::orient2d(&q[1..], &v1[1..], &v2[1..], allocator))
     {
         return false;
     }
@@ -381,19 +400,19 @@ pub fn same_half_plane(p: &[f64], q: &[f64], v1: &[f64], v2: &[f64], bump: &Bump
     let qxz = [q[0], q[2]];
     let v1xz = [v1[0], v1[2]];
     let v2xz = [v2[0], v2[2]];
-    return double_to_sign(predicates::orient2d(&pxz, &v1xz, &v2xz, bump))
-        == double_to_sign(predicates::orient2d(&qxz, &v1xz, &v2xz, bump));
+    return double_to_sign(predicates::orient2d(&pxz, &v1xz, &v2xz, allocator))
+        == double_to_sign(predicates::orient2d(&qxz, &v1xz, &v2xz, allocator));
 }
 
 #[inline]
-fn mis_alignment(p: &[f64], q: &[f64], r: &[f64], bump: &Bump) -> bool {
+fn mis_alignment<A: Allocator + Copy>(p: &[f64], q: &[f64], r: &[f64], allocator: A) -> bool {
     // Projection on (x,y)-plane
-    if predicates::orient2d(p, q, r, bump) != 0.0 {
+    if predicates::orient2d(p, q, r, allocator) != 0.0 {
         return true;
     }
 
     // Projection on (y,z)-plane
-    if predicates::orient2d(&p[1..], &q[1..], &r[1..], bump) != 0.0 {
+    if predicates::orient2d(&p[1..], &q[1..], &r[1..], allocator) != 0.0 {
         return true;
     }
 
@@ -401,48 +420,54 @@ fn mis_alignment(p: &[f64], q: &[f64], r: &[f64], bump: &Bump) -> bool {
     let pxz = [p[0], p[2]];
     let qxz = [q[0], q[2]];
     let rxz = [r[0], r[2]];
-    return predicates::orient2d(&pxz, &qxz, &rxz, bump) != 0.0;
+    return predicates::orient2d(&pxz, &qxz, &rxz, allocator) != 0.0;
 }
 
 #[inline]
-pub fn inner_segments_cross(u1: &[f64], u2: &[f64], v1: &[f64], v2: &[f64], bump: &Bump) -> bool {
+pub fn inner_segments_cross<A: Allocator + Copy>(
+    u1: &[f64],
+    u2: &[f64],
+    v1: &[f64],
+    v2: &[f64],
+    allocator: A,
+) -> bool {
     // The 4 endpoints must be coplanar
-    if predicates::orient3d(u1, u2, v1, v2, bump) != 0.0 {
+    if predicates::orient3d(u1, u2, v1, v2, allocator) != 0.0 {
         return false;
     }
 
     // Endpoints of one segment cannot stay either on the same side of the other one.
-    if same_half_plane(u1, u2, v1, v2, bump) || same_half_plane(v1, v2, u1, u2, bump) {
+    if same_half_plane(u1, u2, v1, v2, allocator) || same_half_plane(v1, v2, u1, u2, allocator) {
         return false;
     }
 
     // Each segment endpoint cannot be aligned with the other segment.
-    if !mis_alignment(u1, v1, v2, bump) {
+    if !mis_alignment(u1, v1, v2, allocator) {
         return false;
     };
-    if !mis_alignment(u2, v1, v2, bump) {
+    if !mis_alignment(u2, v1, v2, allocator) {
         return false;
     };
-    if !mis_alignment(v1, u1, u2, bump) {
+    if !mis_alignment(v1, u1, u2, allocator) {
         return false;
     };
-    if !mis_alignment(v2, u1, u2, bump) {
+    if !mis_alignment(v2, u1, u2, allocator) {
         return false;
     };
 
     // If the segment projected on one coordinate plane cross -> segmant cross.
     // Projection on (x,y)-plane
-    if predicates::orient2d(u1, u2, v1, bump) != 0.0 {
+    if predicates::orient2d(u1, u2, v1, allocator) != 0.0 {
         return true;
     };
-    if predicates::orient2d(v1, v2, u2, bump) != 0.0 {
+    if predicates::orient2d(v1, v2, u2, allocator) != 0.0 {
         return true;
     };
     // Projection on (y,z)-plane
-    if predicates::orient2d(&u1[1..], &u2[1..], &v1[1..], bump) != 0.0 {
+    if predicates::orient2d(&u1[1..], &u2[1..], &v1[1..], allocator) != 0.0 {
         return true;
     };
-    if predicates::orient2d(&v1[1..], &v2[1..], &u2[1..], bump) != 0.0 {
+    if predicates::orient2d(&v1[1..], &v2[1..], &u2[1..], allocator) != 0.0 {
         return true;
     };
     // Projection on (z,x)-plane
@@ -450,10 +475,10 @@ pub fn inner_segments_cross(u1: &[f64], u2: &[f64], v1: &[f64], v2: &[f64], bump
     let u2xz = [u2[0], u2[2]];
     let v1xz = [v1[0], v1[2]];
     let v2xz = [v2[0], v2[2]];
-    if predicates::orient2d(&u1xz, &u2xz, &v1xz, bump) != 0.0 {
+    if predicates::orient2d(&u1xz, &u2xz, &v1xz, allocator) != 0.0 {
         return true;
     };
-    if predicates::orient2d(&v1xz, &v2xz, &u2xz, bump) != 0.0 {
+    if predicates::orient2d(&v1xz, &v2xz, &u2xz, allocator) != 0.0 {
         return true;
     };
 
@@ -461,8 +486,13 @@ pub fn inner_segments_cross(u1: &[f64], u2: &[f64], v1: &[f64], v2: &[f64], bump
 }
 
 #[inline(always)]
-pub fn point_in_inner_segment(p: &[f64], v1: &[f64], v2: &[f64], bump: &Bump) -> bool {
-    return !mis_alignment(p, v1, v2, bump)
+pub fn point_in_inner_segment<A: Allocator + Copy>(
+    p: &[f64],
+    v1: &[f64],
+    v2: &[f64],
+    allocator: A,
+) -> bool {
+    return !mis_alignment(p, v1, v2, allocator)
         && ((v1[0] < v2[0] && v1[0] < p[0] && p[0] < v2[0])
             || (v1[0] > v2[0] && v1[0] > p[0] && p[0] > v2[0])
             || (v1[1] < v2[1] && v1[1] < p[1] && p[1] < v2[1])
@@ -472,31 +502,42 @@ pub fn point_in_inner_segment(p: &[f64], v1: &[f64], v2: &[f64], bump: &Bump) ->
 }
 
 #[inline(always)]
-pub fn point_in_segment(p: &[f64], v1: &[f64], v2: &[f64], bump: &Bump) -> bool {
-    return same_point(p, v1) || same_point(p, v2) || point_in_inner_segment(p, v1, v2, bump);
+pub fn point_in_segment<A: Allocator + Copy>(
+    p: &[f64],
+    v1: &[f64],
+    v2: &[f64],
+    allocator: A,
+) -> bool {
+    return same_point(p, v1) || same_point(p, v2) || point_in_inner_segment(p, v1, v2, allocator);
 }
 
 #[inline(always)]
-pub fn inner_segment_cross_triangle(
+pub fn inner_segment_cross_triangle<A: Allocator + Copy>(
     u1: &[f64],
     u2: &[f64],
     v1: &[f64],
     v2: &[f64],
     v3: &[f64],
-    bump: &Bump,
+    allocator: A,
 ) -> bool {
-    return point_in_inner_segment(&v1, &u1, &u2, bump)
-        || point_in_inner_segment(&v2, &u1, &u2, bump)
-        || point_in_inner_segment(&v3, &u1, &u2, bump)
-        || inner_segments_cross(&v2, &v3, &u1, &u2, bump)
-        || inner_segments_cross(&v3, &v1, &u1, &u2, bump)
-        || inner_segments_cross(&v1, &v2, &u1, &u2, bump)
-        || inner_segment_cross_inner_triangle(&u1, &u2, &v1, &v2, &v3, bump);
+    return point_in_inner_segment(&v1, &u1, &u2, allocator)
+        || point_in_inner_segment(&v2, &u1, &u2, allocator)
+        || point_in_inner_segment(&v3, &u1, &u2, allocator)
+        || inner_segments_cross(&v2, &v3, &u1, &u2, allocator)
+        || inner_segments_cross(&v3, &v1, &u1, &u2, allocator)
+        || inner_segments_cross(&v1, &v2, &u1, &u2, allocator)
+        || inner_segment_cross_inner_triangle(&u1, &u2, &v1, &v2, &v3, allocator);
 }
 #[inline(always)]
-pub fn point_in_triangle(p: &[f64], v1: &[f64], v2: &[f64], v3: &[f64], bump: &Bump) -> bool {
-    return point_in_segment(p, v1, v2, bump)
-        || point_in_segment(p, v2, v3, bump)
-        || point_in_segment(p, v3, v1, bump)
-        || point_in_inner_triangle(p, v1, v2, v3, bump);
+pub fn point_in_triangle<A: Allocator + Copy>(
+    p: &[f64],
+    v1: &[f64],
+    v2: &[f64],
+    v3: &[f64],
+    allocator: A,
+) -> bool {
+    return point_in_segment(p, v1, v2, allocator)
+        || point_in_segment(p, v2, v3, allocator)
+        || point_in_segment(p, v3, v1, allocator)
+        || point_in_inner_triangle(p, v1, v2, v3, allocator);
 }

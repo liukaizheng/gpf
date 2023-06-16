@@ -1,4 +1,4 @@
-use bumpalo::{collections::Vec, vec, Bump};
+use std::alloc::Allocator;
 
 use super::{
     abs_max, double_to_sign, dummy_abs_max, predicates, sign_reverse, ExplicitPoint3D, GenericNum,
@@ -10,11 +10,11 @@ use super::{
 /// orientation is negative. If `pc` is below the line, then the
 /// orientation is positive. If `pc` is collinear with `pa` and `pb`,
 /// then the orientation is zero.
-pub fn orient2d_xy<'a, 'b: 'a>(
-    pa: &'a Point3D<'b>,
-    pb: &'a Point3D<'b>,
-    pc: &'a Point3D<'b>,
-    bump: &'b Bump,
+pub fn orient2d_xy<A: Allocator + Copy>(
+    pa: &Point3D,
+    pb: &Point3D,
+    pc: &Point3D,
+    bump: A,
 ) -> Orientation {
     match (pa, pb, pc) {
         (Point3D::Explicit(pa), Point3D::Explicit(pb), Point3D::Explicit(pc)) => {
@@ -56,13 +56,13 @@ pub fn orient2d_xy<'a, 'b: 'a>(
         (Point3D::LPI(pa), Point3D::LPI(pb), Point3D::Explicit(pc)) => {
             orient2d_lle_xy(pa, pb, pc, bump)
         }
-        (Point3D::LPI(pa), Point3D::LPI(pb), Point3D::LPI(pc)) => orient2d_lll_xy(pa, pb, pc),
-        (Point3D::LPI(pa), Point3D::LPI(pb), Point3D::TPI(pc)) => orient2d_llt_xy(pa, pb, pc),
+        (Point3D::LPI(pa), Point3D::LPI(pb), Point3D::LPI(pc)) => orient2d_lll_xy(pa, pb, pc, bump),
+        (Point3D::LPI(pa), Point3D::LPI(pb), Point3D::TPI(pc)) => orient2d_llt_xy(pa, pb, pc, bump),
         (Point3D::LPI(pa), Point3D::TPI(pb), Point3D::Explicit(pc)) => {
             orient2d_lte_xy(pa, pb, pc, bump)
         }
-        (Point3D::LPI(pa), Point3D::TPI(pb), Point3D::LPI(pc)) => orient2d_llt_xy(pc, pa, pb),
-        (Point3D::LPI(pa), Point3D::TPI(pb), Point3D::TPI(pc)) => orient2d_ltt_xy(pa, pb, pc),
+        (Point3D::LPI(pa), Point3D::TPI(pb), Point3D::LPI(pc)) => orient2d_llt_xy(pc, pa, pb, bump),
+        (Point3D::LPI(pa), Point3D::TPI(pb), Point3D::TPI(pc)) => orient2d_ltt_xy(pa, pb, pc, bump),
         (Point3D::TPI(pa), Point3D::Explicit(pb), Point3D::Explicit(pc)) => {
             orient2d_tee_xy(pa, pb, pc, bump)
         }
@@ -76,21 +76,21 @@ pub fn orient2d_xy<'a, 'b: 'a>(
             sign_reverse(orient2d_lte_xy(pb, pa, pc, bump))
         }
 
-        (Point3D::TPI(pa), Point3D::LPI(pb), Point3D::LPI(pc)) => orient2d_llt_xy(pb, pc, pa),
-        (Point3D::TPI(pa), Point3D::LPI(pb), Point3D::TPI(pc)) => orient2d_ltt_xy(pb, pc, pa),
+        (Point3D::TPI(pa), Point3D::LPI(pb), Point3D::LPI(pc)) => orient2d_llt_xy(pb, pc, pa, bump),
+        (Point3D::TPI(pa), Point3D::LPI(pb), Point3D::TPI(pc)) => orient2d_ltt_xy(pb, pc, pa, bump),
         (Point3D::TPI(pa), Point3D::TPI(pb), Point3D::Explicit(pc)) => {
             orient2d_tte_xy(pa, pb, pc, bump)
         }
-        (Point3D::TPI(pa), Point3D::TPI(pb), Point3D::LPI(pc)) => orient2d_ltt_xy(pc, pa, pb),
-        (Point3D::TPI(pa), Point3D::TPI(pb), Point3D::TPI(pc)) => orient2d_ttt_xy(pa, pb, pc),
+        (Point3D::TPI(pa), Point3D::TPI(pb), Point3D::LPI(pc)) => orient2d_ltt_xy(pc, pa, pb, bump),
+        (Point3D::TPI(pa), Point3D::TPI(pb), Point3D::TPI(pc)) => orient2d_ttt_xy(pa, pb, pc, bump),
     }
 }
 
-pub fn orient2d_zx<'a, 'b: 'a>(
-    pa: &'a Point3D<'b>,
-    pb: &'a Point3D<'b>,
-    pc: &'a Point3D<'b>,
-    bump: &'b Bump,
+pub fn orient2d_zx<A: Allocator + Copy>(
+    pa: &Point3D,
+    pb: &Point3D,
+    pc: &Point3D,
+    bump: A,
 ) -> Orientation {
     match (pa, pb, pc) {
         (Point3D::Explicit(pa), Point3D::Explicit(pb), Point3D::Explicit(pc)) => {
@@ -137,13 +137,13 @@ pub fn orient2d_zx<'a, 'b: 'a>(
         (Point3D::LPI(pa), Point3D::LPI(pb), Point3D::Explicit(pc)) => {
             orient2d_lle_zx(pa, pb, pc, bump)
         }
-        (Point3D::LPI(pa), Point3D::LPI(pb), Point3D::LPI(pc)) => orient2d_lll_zx(pa, pb, pc),
-        (Point3D::LPI(pa), Point3D::LPI(pb), Point3D::TPI(pc)) => orient2d_llt_zx(pa, pb, pc),
+        (Point3D::LPI(pa), Point3D::LPI(pb), Point3D::LPI(pc)) => orient2d_lll_zx(pa, pb, pc, bump),
+        (Point3D::LPI(pa), Point3D::LPI(pb), Point3D::TPI(pc)) => orient2d_llt_zx(pa, pb, pc, bump),
         (Point3D::LPI(pa), Point3D::TPI(pb), Point3D::Explicit(pc)) => {
             orient2d_lte_zx(pa, pb, pc, bump)
         }
-        (Point3D::LPI(pa), Point3D::TPI(pb), Point3D::LPI(pc)) => orient2d_llt_zx(pc, pa, pb),
-        (Point3D::LPI(pa), Point3D::TPI(pb), Point3D::TPI(pc)) => orient2d_ltt_zx(pa, pb, pc),
+        (Point3D::LPI(pa), Point3D::TPI(pb), Point3D::LPI(pc)) => orient2d_llt_zx(pc, pa, pb, bump),
+        (Point3D::LPI(pa), Point3D::TPI(pb), Point3D::TPI(pc)) => orient2d_ltt_zx(pa, pb, pc, bump),
         (Point3D::TPI(pa), Point3D::Explicit(pb), Point3D::Explicit(pc)) => {
             orient2d_tee_zx(pa, pb, pc, bump)
         }
@@ -157,21 +157,21 @@ pub fn orient2d_zx<'a, 'b: 'a>(
             sign_reverse(orient2d_lte_zx(pb, pa, pc, bump))
         }
 
-        (Point3D::TPI(pa), Point3D::LPI(pb), Point3D::LPI(pc)) => orient2d_llt_zx(pb, pc, pa),
-        (Point3D::TPI(pa), Point3D::LPI(pb), Point3D::TPI(pc)) => orient2d_ltt_zx(pb, pc, pa),
+        (Point3D::TPI(pa), Point3D::LPI(pb), Point3D::LPI(pc)) => orient2d_llt_zx(pb, pc, pa, bump),
+        (Point3D::TPI(pa), Point3D::LPI(pb), Point3D::TPI(pc)) => orient2d_ltt_zx(pb, pc, pa, bump),
         (Point3D::TPI(pa), Point3D::TPI(pb), Point3D::Explicit(pc)) => {
             orient2d_tte_zx(pa, pb, pc, bump)
         }
-        (Point3D::TPI(pa), Point3D::TPI(pb), Point3D::LPI(pc)) => orient2d_ltt_zx(pc, pa, pb),
-        (Point3D::TPI(pa), Point3D::TPI(pb), Point3D::TPI(pc)) => orient2d_ttt_zx(pa, pb, pc),
+        (Point3D::TPI(pa), Point3D::TPI(pb), Point3D::LPI(pc)) => orient2d_ltt_zx(pc, pa, pb, bump),
+        (Point3D::TPI(pa), Point3D::TPI(pb), Point3D::TPI(pc)) => orient2d_ttt_zx(pa, pb, pc, bump),
     }
 }
 
-pub fn orient2d_yz<'a, 'b: 'a>(
-    pa: &'a Point3D<'b>,
-    pb: &'a Point3D<'b>,
-    pc: &'a Point3D<'b>,
-    bump: &'b Bump,
+pub fn orient2d_yz<A: Allocator + Copy>(
+    pa: &Point3D,
+    pb: &Point3D,
+    pc: &Point3D,
+    bump: A,
 ) -> Orientation {
     match (pa, pb, pc) {
         (Point3D::Explicit(pa), Point3D::Explicit(pb), Point3D::Explicit(pc)) => {
@@ -213,13 +213,13 @@ pub fn orient2d_yz<'a, 'b: 'a>(
         (Point3D::LPI(pa), Point3D::LPI(pb), Point3D::Explicit(pc)) => {
             orient2d_lle_yz(pa, pb, pc, bump)
         }
-        (Point3D::LPI(pa), Point3D::LPI(pb), Point3D::LPI(pc)) => orient2d_lll_yz(pa, pb, pc),
-        (Point3D::LPI(pa), Point3D::LPI(pb), Point3D::TPI(pc)) => orient2d_llt_yz(pa, pb, pc),
+        (Point3D::LPI(pa), Point3D::LPI(pb), Point3D::LPI(pc)) => orient2d_lll_yz(pa, pb, pc, bump),
+        (Point3D::LPI(pa), Point3D::LPI(pb), Point3D::TPI(pc)) => orient2d_llt_yz(pa, pb, pc, bump),
         (Point3D::LPI(pa), Point3D::TPI(pb), Point3D::Explicit(pc)) => {
             orient2d_lte_yz(pa, pb, pc, bump)
         }
-        (Point3D::LPI(pa), Point3D::TPI(pb), Point3D::LPI(pc)) => orient2d_llt_yz(pc, pa, pb),
-        (Point3D::LPI(pa), Point3D::TPI(pb), Point3D::TPI(pc)) => orient2d_ltt_yz(pa, pb, pc),
+        (Point3D::LPI(pa), Point3D::TPI(pb), Point3D::LPI(pc)) => orient2d_llt_yz(pc, pa, pb, bump),
+        (Point3D::LPI(pa), Point3D::TPI(pb), Point3D::TPI(pc)) => orient2d_ltt_yz(pa, pb, pc, bump),
         (Point3D::TPI(pa), Point3D::Explicit(pb), Point3D::Explicit(pc)) => {
             orient2d_tee_yz(pa, pb, pc, bump)
         }
@@ -233,278 +233,289 @@ pub fn orient2d_yz<'a, 'b: 'a>(
             sign_reverse(orient2d_lte_yz(pb, pa, pc, bump))
         }
 
-        (Point3D::TPI(pa), Point3D::LPI(pb), Point3D::LPI(pc)) => orient2d_llt_yz(pb, pc, pa),
-        (Point3D::TPI(pa), Point3D::LPI(pb), Point3D::TPI(pc)) => orient2d_ltt_yz(pb, pc, pa),
+        (Point3D::TPI(pa), Point3D::LPI(pb), Point3D::LPI(pc)) => orient2d_llt_yz(pb, pc, pa, bump),
+        (Point3D::TPI(pa), Point3D::LPI(pb), Point3D::TPI(pc)) => orient2d_ltt_yz(pb, pc, pa, bump),
         (Point3D::TPI(pa), Point3D::TPI(pb), Point3D::Explicit(pc)) => {
             orient2d_tte_yz(pa, pb, pc, bump)
         }
-        (Point3D::TPI(pa), Point3D::TPI(pb), Point3D::LPI(pc)) => orient2d_ltt_yz(pc, pa, pb),
-        (Point3D::TPI(pa), Point3D::TPI(pb), Point3D::TPI(pc)) => orient2d_ttt_yz(pa, pb, pc),
+        (Point3D::TPI(pa), Point3D::TPI(pb), Point3D::LPI(pc)) => orient2d_ltt_yz(pc, pa, pb, bump),
+        (Point3D::TPI(pa), Point3D::TPI(pb), Point3D::TPI(pc)) => orient2d_ttt_yz(pa, pb, pc, bump),
     }
 }
 
 /// Implicit-Explicit-Explicit Orient2d for xy plane
 #[inline(always)]
-fn orient2d_lee_xy<'b>(
-    pa: &ImplicitPointLPI<'b>,
+fn orient2d_lee_xy<A: Allocator + Copy>(
+    pa: &ImplicitPointLPI,
     pb: &ExplicitPoint3D,
     pc: &ExplicitPoint3D,
-    bump: &'b Bump,
+    bump: A,
 ) -> Orientation {
-    orient2d_lee::<'_, '_, 2>(pa, pb, pc, bump)
+    orient2d_lee::<2, _>(pa, pb, pc, bump)
 }
 #[inline(always)]
-fn orient2d_tee_xy<'b>(
-    pa: &ImplicitPointTPI<'b>,
+fn orient2d_tee_xy<A: Allocator + Copy>(
+    pa: &ImplicitPointTPI,
     pb: &ExplicitPoint3D,
     pc: &ExplicitPoint3D,
-    bump: &'b Bump,
+    bump: A,
 ) -> Orientation {
-    orient2d_tee::<'_, '_, 2>(pa, pb, pc, bump)
+    orient2d_tee::<2, _>(pa, pb, pc, bump)
 }
 
 /// Implicit-Implicit-Explicit Orient2d for xy plane
 #[inline(always)]
-fn orient2d_lle_xy<'b>(
-    pa: &ImplicitPointLPI<'b>,
-    pb: &ImplicitPointLPI<'b>,
+fn orient2d_lle_xy<A: Allocator + Copy>(
+    pa: &ImplicitPointLPI,
+    pb: &ImplicitPointLPI,
     pc: &ExplicitPoint3D,
-    bump: &'b Bump,
+    bump: A,
 ) -> Orientation {
-    orient2d_lle::<'_, '_, 2>(pa, pb, pc, bump)
+    orient2d_lle::<2, _>(pa, pb, pc, bump)
 }
 #[inline(always)]
-fn orient2d_lte_xy<'b>(
-    pa: &ImplicitPointLPI<'b>,
-    pb: &ImplicitPointTPI<'b>,
+fn orient2d_lte_xy<A: Allocator + Copy>(
+    pa: &ImplicitPointLPI,
+    pb: &ImplicitPointTPI,
     pc: &ExplicitPoint3D,
-    bump: &'b Bump,
+    bump: A,
 ) -> Orientation {
-    orient2d_lte::<'_, '_, 2>(pa, pb, pc, bump)
+    orient2d_lte::<2, _>(pa, pb, pc, bump)
 }
 #[inline(always)]
-fn orient2d_tte_xy<'b>(
-    pa: &ImplicitPointTPI<'b>,
-    pb: &ImplicitPointTPI<'b>,
+fn orient2d_tte_xy<A: Allocator + Copy>(
+    pa: &ImplicitPointTPI,
+    pb: &ImplicitPointTPI,
     pc: &ExplicitPoint3D,
-    bump: &'b Bump,
+    bump: A,
 ) -> Orientation {
-    orient2d_tte::<'_, '_, 2>(pa, pb, pc, bump)
+    orient2d_tte::<2, _>(pa, pb, pc, bump)
 }
 
 /// Implicit-Implicit-Implicit Orient2d for xy plane
 #[inline(always)]
-fn orient2d_lll_xy<'a, 'b: 'a>(
-    pa: &'a ImplicitPointLPI<'b>,
-    pb: &'a ImplicitPointLPI<'b>,
-    pc: &'a ImplicitPointLPI<'b>,
+fn orient2d_lll_xy<A: Allocator + Copy>(
+    pa: &ImplicitPointLPI,
+    pb: &ImplicitPointLPI,
+    pc: &ImplicitPointLPI,
+    allocator: A,
 ) -> Orientation {
-    orient2d_lll::<'_, '_, 2>(pa, pb, pc)
+    orient2d_lll::<2, _>(pa, pb, pc, allocator)
 }
 #[inline(always)]
-fn orient2d_llt_xy<'a, 'b: 'a>(
-    pa: &'a ImplicitPointLPI<'b>,
-    pb: &'a ImplicitPointLPI<'b>,
-    pc: &'a ImplicitPointTPI<'b>,
+fn orient2d_llt_xy<A: Allocator + Copy>(
+    pa: &ImplicitPointLPI,
+    pb: &ImplicitPointLPI,
+    pc: &ImplicitPointTPI,
+    allocator: A,
 ) -> Orientation {
-    orient2d_llt::<'_, '_, 2>(pa, pb, pc)
+    orient2d_llt::<2, _>(pa, pb, pc, allocator)
 }
 #[inline(always)]
-fn orient2d_ltt_xy<'a, 'b: 'a>(
-    pa: &'a ImplicitPointLPI<'b>,
-    pb: &'a ImplicitPointTPI<'b>,
-    pc: &'a ImplicitPointTPI<'b>,
+fn orient2d_ltt_xy<A: Allocator + Copy>(
+    pa: &ImplicitPointLPI,
+    pb: &ImplicitPointTPI,
+    pc: &ImplicitPointTPI,
+    allocator: A,
 ) -> Orientation {
-    orient2d_ltt::<'_, '_, 2>(pa, pb, pc)
+    orient2d_ltt::<2, _>(pa, pb, pc, allocator)
 }
 #[inline(always)]
-fn orient2d_ttt_xy<'a, 'b: 'a>(
-    pa: &'a ImplicitPointTPI<'b>,
-    pb: &'a ImplicitPointTPI<'b>,
-    pc: &'a ImplicitPointTPI<'b>,
+fn orient2d_ttt_xy<A: Allocator + Copy>(
+    pa: &ImplicitPointTPI,
+    pb: &ImplicitPointTPI,
+    pc: &ImplicitPointTPI,
+    allocator: A,
 ) -> Orientation {
-    orient2d_ttt::<'_, '_, 2>(pa, pb, pc)
+    orient2d_ttt::<2, _>(pa, pb, pc, allocator)
 }
 
 /// Implicit-Explicit-Explicit Orient2d for zx plane
 #[inline(always)]
-fn orient2d_lee_zx<'b>(
-    pa: &ImplicitPointLPI<'b>,
+fn orient2d_lee_zx<A: Allocator + Copy>(
+    pa: &ImplicitPointLPI,
     pb: &ExplicitPoint3D,
     pc: &ExplicitPoint3D,
-    bump: &'b Bump,
+    bump: A,
 ) -> Orientation {
-    orient2d_lee::<'_, '_, 1>(pa, pb, pc, bump)
+    orient2d_lee::<1, _>(pa, pb, pc, bump)
 }
 #[inline(always)]
-fn orient2d_tee_zx<'b>(
-    pa: &ImplicitPointTPI<'b>,
+fn orient2d_tee_zx<A: Allocator + Copy>(
+    pa: &ImplicitPointTPI,
     pb: &ExplicitPoint3D,
     pc: &ExplicitPoint3D,
-    bump: &'b Bump,
+    bump: A,
 ) -> Orientation {
-    orient2d_tee::<'_, '_, 1>(pa, pb, pc, bump)
+    orient2d_tee::<1, _>(pa, pb, pc, bump)
 }
 
 /// Implicit-Implicit-Explicit Orient2d for zx plane
 #[inline(always)]
-fn orient2d_lle_zx<'b>(
-    pa: &ImplicitPointLPI<'b>,
-    pb: &ImplicitPointLPI<'b>,
+fn orient2d_lle_zx<A: Allocator + Copy>(
+    pa: &ImplicitPointLPI,
+    pb: &ImplicitPointLPI,
     pc: &ExplicitPoint3D,
-    bump: &'b Bump,
+    bump: A,
 ) -> Orientation {
-    orient2d_lle::<'_, '_, 1>(pa, pb, pc, bump)
+    orient2d_lle::<1, _>(pa, pb, pc, bump)
 }
 #[inline(always)]
-fn orient2d_lte_zx<'b>(
-    pa: &ImplicitPointLPI<'b>,
-    pb: &ImplicitPointTPI<'b>,
+fn orient2d_lte_zx<A: Allocator + Copy>(
+    pa: &ImplicitPointLPI,
+    pb: &ImplicitPointTPI,
     pc: &ExplicitPoint3D,
-    bump: &'b Bump,
+    bump: A,
 ) -> Orientation {
-    orient2d_lte::<'_, '_, 1>(pa, pb, pc, bump)
+    orient2d_lte::<1, _>(pa, pb, pc, bump)
 }
 #[inline(always)]
-fn orient2d_tte_zx<'b>(
-    pa: &ImplicitPointTPI<'b>,
-    pb: &ImplicitPointTPI<'b>,
+fn orient2d_tte_zx<A: Allocator + Copy>(
+    pa: &ImplicitPointTPI,
+    pb: &ImplicitPointTPI,
     pc: &ExplicitPoint3D,
-    bump: &'b Bump,
+    bump: A,
 ) -> Orientation {
-    orient2d_tte::<'_, '_, 1>(pa, pb, pc, bump)
+    orient2d_tte::<1, _>(pa, pb, pc, bump)
 }
 
 /// Implicit-Implicit-Implicit Orient2d for zx plane
 #[inline(always)]
-fn orient2d_lll_zx<'a, 'b: 'a>(
-    pa: &'a ImplicitPointLPI<'b>,
-    pb: &'a ImplicitPointLPI<'b>,
-    pc: &'a ImplicitPointLPI<'b>,
+fn orient2d_lll_zx<A: Allocator + Copy>(
+    pa: &ImplicitPointLPI,
+    pb: &ImplicitPointLPI,
+    pc: &ImplicitPointLPI,
+    bump: A,
 ) -> Orientation {
-    orient2d_lll::<'_, '_, 1>(pa, pb, pc)
+    orient2d_lll::<1, _>(pa, pb, pc, bump)
 }
 #[inline(always)]
-fn orient2d_llt_zx<'a, 'b: 'a>(
-    pa: &'a ImplicitPointLPI<'b>,
-    pb: &'a ImplicitPointLPI<'b>,
-    pc: &'a ImplicitPointTPI<'b>,
+fn orient2d_llt_zx<A: Allocator + Copy>(
+    pa: &ImplicitPointLPI,
+    pb: &ImplicitPointLPI,
+    pc: &ImplicitPointTPI,
+    bump: A,
 ) -> Orientation {
-    orient2d_llt::<'_, '_, 1>(pa, pb, pc)
+    orient2d_llt::<1, _>(pa, pb, pc, bump)
 }
 #[inline(always)]
-fn orient2d_ltt_zx<'a, 'b: 'a>(
-    pa: &'a ImplicitPointLPI<'b>,
-    pb: &'a ImplicitPointTPI<'b>,
-    pc: &'a ImplicitPointTPI<'b>,
+fn orient2d_ltt_zx<A: Allocator + Copy>(
+    pa: &ImplicitPointLPI,
+    pb: &ImplicitPointTPI,
+    pc: &ImplicitPointTPI,
+    bump: A,
 ) -> Orientation {
-    orient2d_ltt::<'_, '_, 1>(pa, pb, pc)
+    orient2d_ltt::<1, _>(pa, pb, pc, bump)
 }
 #[inline(always)]
-fn orient2d_ttt_zx<'a, 'b: 'a>(
-    pa: &'a ImplicitPointTPI<'b>,
-    pb: &'a ImplicitPointTPI<'b>,
-    pc: &'a ImplicitPointTPI<'b>,
+fn orient2d_ttt_zx<A: Allocator + Copy>(
+    pa: &ImplicitPointTPI,
+    pb: &ImplicitPointTPI,
+    pc: &ImplicitPointTPI,
+    bump: A,
 ) -> Orientation {
-    orient2d_ttt::<'_, '_, 1>(pa, pb, pc)
+    orient2d_ttt::<1, _>(pa, pb, pc, bump)
 }
 
 /// Implicit-Explicit-Explicit Orient2d for yz plane
 #[inline(always)]
-fn orient2d_lee_yz<'b>(
-    pa: &ImplicitPointLPI<'b>,
+fn orient2d_lee_yz<A: Allocator + Copy>(
+    pa: &ImplicitPointLPI,
     pb: &ExplicitPoint3D,
     pc: &ExplicitPoint3D,
-    bump: &'b Bump,
+    bump: A,
 ) -> Orientation {
-    orient2d_lee::<'_, '_, 0>(pa, pb, pc, bump)
+    orient2d_lee::<0, _>(pa, pb, pc, bump)
 }
 #[inline(always)]
-fn orient2d_tee_yz<'b>(
-    pa: &ImplicitPointTPI<'b>,
+fn orient2d_tee_yz<A: Allocator + Copy>(
+    pa: &ImplicitPointTPI,
     pb: &ExplicitPoint3D,
     pc: &ExplicitPoint3D,
-    bump: &'b Bump,
+    bump: A,
 ) -> Orientation {
-    orient2d_tee::<'_, '_, 0>(pa, pb, pc, bump)
+    orient2d_tee::<0, _>(pa, pb, pc, bump)
 }
 
 /// Implicit-Implicit-Explicit Orient2d for yz plane
 #[inline(always)]
-fn orient2d_lle_yz<'b>(
-    pa: &ImplicitPointLPI<'b>,
-    pb: &ImplicitPointLPI<'b>,
+fn orient2d_lle_yz<A: Allocator + Copy>(
+    pa: &ImplicitPointLPI,
+    pb: &ImplicitPointLPI,
     pc: &ExplicitPoint3D,
-    bump: &'b Bump,
+    bump: A,
 ) -> Orientation {
-    orient2d_lle::<'_, '_, 0>(pa, pb, pc, bump)
+    orient2d_lle::<0, _>(pa, pb, pc, bump)
 }
 #[inline(always)]
-fn orient2d_lte_yz<'b>(
-    pa: &ImplicitPointLPI<'b>,
-    pb: &ImplicitPointTPI<'b>,
+fn orient2d_lte_yz<A: Allocator + Copy>(
+    pa: &ImplicitPointLPI,
+    pb: &ImplicitPointTPI,
     pc: &ExplicitPoint3D,
-    bump: &'b Bump,
+    bump: A,
 ) -> Orientation {
-    orient2d_lte::<'_, '_, 0>(pa, pb, pc, bump)
+    orient2d_lte::<0, _>(pa, pb, pc, bump)
 }
 #[inline(always)]
-fn orient2d_tte_yz<'b>(
-    pa: &ImplicitPointTPI<'b>,
-    pb: &ImplicitPointTPI<'b>,
+fn orient2d_tte_yz<A: Allocator + Copy>(
+    pa: &ImplicitPointTPI,
+    pb: &ImplicitPointTPI,
     pc: &ExplicitPoint3D,
-    bump: &'b Bump,
+    bump: A,
 ) -> Orientation {
-    orient2d_tte::<'_, '_, 0>(pa, pb, pc, bump)
+    orient2d_tte::<0, _>(pa, pb, pc, bump)
 }
 
 /// Implicit-Implicit-Implicit Orient2d for yz plane
 #[inline(always)]
-fn orient2d_lll_yz<'a, 'b: 'a>(
-    pa: &'a ImplicitPointLPI<'b>,
-    pb: &'a ImplicitPointLPI<'b>,
-    pc: &'a ImplicitPointLPI<'b>,
+fn orient2d_lll_yz<A: Allocator + Copy>(
+    pa: &ImplicitPointLPI,
+    pb: &ImplicitPointLPI,
+    pc: &ImplicitPointLPI,
+    bump: A,
 ) -> Orientation {
-    orient2d_lll::<'_, '_, 0>(pa, pb, pc)
+    orient2d_lll::<0, _>(pa, pb, pc, bump)
 }
 #[inline(always)]
-fn orient2d_llt_yz<'a, 'b: 'a>(
-    pa: &'a ImplicitPointLPI<'b>,
-    pb: &'a ImplicitPointLPI<'b>,
-    pc: &'a ImplicitPointTPI<'b>,
+fn orient2d_llt_yz<A: Allocator + Copy>(
+    pa: &ImplicitPointLPI,
+    pb: &ImplicitPointLPI,
+    pc: &ImplicitPointTPI,
+    bump: A,
 ) -> Orientation {
-    orient2d_llt::<'_, '_, 0>(pa, pb, pc)
+    orient2d_llt::<0, _>(pa, pb, pc, bump)
 }
 #[inline(always)]
-fn orient2d_ltt_yz<'a, 'b: 'a>(
-    pa: &'a ImplicitPointLPI<'b>,
-    pb: &'a ImplicitPointTPI<'b>,
-    pc: &'a ImplicitPointTPI<'b>,
+fn orient2d_ltt_yz<A: Allocator + Copy>(
+    pa: &ImplicitPointLPI,
+    pb: &ImplicitPointTPI,
+    pc: &ImplicitPointTPI,
+    bump: A,
 ) -> Orientation {
-    orient2d_ltt::<'_, '_, 0>(pa, pb, pc)
+    orient2d_ltt::<0, _>(pa, pb, pc, bump)
 }
 #[inline(always)]
-fn orient2d_ttt_yz<'a, 'b: 'a>(
-    pa: &'a ImplicitPointTPI<'b>,
-    pb: &'a ImplicitPointTPI<'b>,
-    pc: &'a ImplicitPointTPI<'b>,
+fn orient2d_ttt_yz<A: Allocator + Copy>(
+    pa: &ImplicitPointTPI,
+    pb: &ImplicitPointTPI,
+    pc: &ImplicitPointTPI,
+    bump: A,
 ) -> Orientation {
-    orient2d_ttt::<'_, '_, 0>(pa, pb, pc)
+    orient2d_ttt::<0, _>(pa, pb, pc, bump)
 }
 
-fn orient2d_iee_impl<'a, 'b: 'a, const NEED_MAX: bool, T: 'b + GenericNum, F>(
-    l1x: &'a T,
-    l1y: &'a T,
-    d1: &'a T,
+fn orient2d_iee_impl<const NEED_MAX: bool, T: GenericNum, F>(
+    l1x: &T,
+    l1y: &T,
+    d1: &T,
     p2x: T,
     p2y: T,
     p3x: T,
     p3y: T,
     abs_max: F,
-    bump: &'b Bump,
 ) -> (T, Option<T>)
 where
-    F: FnOnce(Vec<'b, T>) -> Option<T>,
+    F: FnOnce(&[T]) -> Option<T>,
 {
     let t1x = &p2y - &p3y;
     let t1y = &p3x - &p2x;
@@ -518,22 +529,27 @@ where
     let det = dpr + e;
 
     let max_var = if NEED_MAX {
-        abs_max(vec![in bump; p2x, p2y, p3x, p3y, t1x, t1y])
+        abs_max(&[p2x, p2y, p3x, p3y, t1x, t1y])
     } else {
         None
     };
     (det, max_var)
 }
-fn orient2d_iee<'a, 'b: 'a, const AXIS: u32, IP: ImplicitPoint3D<'b>, F: FnOnce(f64) -> f64>(
-    p1: &'a IP,
-    p2: &'a ExplicitPoint3D,
-    p3: &'a ExplicitPoint3D,
+fn orient2d_iee<
+    const AXIS: u32,
+    IP: ImplicitPoint3D,
+    F: FnOnce(f64) -> f64,
+    A: Allocator + Copy,
+>(
+    p1: &IP,
+    p2: &ExplicitPoint3D,
+    p3: &ExplicitPoint3D,
     static_filter_func: F,
-    bump: &'b Bump,
+    bump: A,
 ) -> Orientation {
     if let Some(p1_static) = p1.static_filter() {
         let ret = if AXIS == 2 {
-            orient2d_iee_impl::<'_, '_, true, _, _>(
+            orient2d_iee_impl::<true, _, _>(
                 &p1_static.0.x,
                 &p1_static.0.y,
                 &p1_static.0.d,
@@ -542,10 +558,9 @@ fn orient2d_iee<'a, 'b: 'a, const AXIS: u32, IP: ImplicitPoint3D<'b>, F: FnOnce(
                 p3.data[0],
                 p3.data[1],
                 abs_max,
-                bump,
             )
         } else if AXIS == 1 {
-            orient2d_iee_impl::<'_, '_, true, _, _>(
+            orient2d_iee_impl::<true, _, _>(
                 &p1_static.0.z,
                 &p1_static.0.x,
                 &p1_static.0.d,
@@ -554,10 +569,9 @@ fn orient2d_iee<'a, 'b: 'a, const AXIS: u32, IP: ImplicitPoint3D<'b>, F: FnOnce(
                 p3.data[2],
                 p3.data[0],
                 abs_max,
-                bump,
             )
         } else {
-            orient2d_iee_impl::<'_, '_, true, _, _>(
+            orient2d_iee_impl::<true, _, _>(
                 &p1_static.0.y,
                 &p1_static.0.z,
                 &p1_static.0.d,
@@ -566,7 +580,6 @@ fn orient2d_iee<'a, 'b: 'a, const AXIS: u32, IP: ImplicitPoint3D<'b>, F: FnOnce(
                 p3.data[1],
                 p3.data[2],
                 abs_max,
-                bump,
             )
         };
         let max_var = ret.1.unwrap().max(p1_static.1);
@@ -580,7 +593,7 @@ fn orient2d_iee<'a, 'b: 'a, const AXIS: u32, IP: ImplicitPoint3D<'b>, F: FnOnce(
 
     if let Some(p1_dynamic) = p1.dynamic_filter() {
         let (det, _) = if AXIS == 2 {
-            orient2d_iee_impl::<'_, '_, false, _, _>(
+            orient2d_iee_impl::<false, _, _>(
                 &p1_dynamic.x,
                 &p1_dynamic.y,
                 &p1_dynamic.d,
@@ -589,10 +602,9 @@ fn orient2d_iee<'a, 'b: 'a, const AXIS: u32, IP: ImplicitPoint3D<'b>, F: FnOnce(
                 p3.data[0].into(),
                 p3.data[1].into(),
                 dummy_abs_max,
-                bump,
             )
         } else if AXIS == 1 {
-            orient2d_iee_impl::<'_, '_, false, _, _>(
+            orient2d_iee_impl::<false, _, _>(
                 &p1_dynamic.z,
                 &p1_dynamic.x,
                 &p1_dynamic.d,
@@ -601,10 +613,9 @@ fn orient2d_iee<'a, 'b: 'a, const AXIS: u32, IP: ImplicitPoint3D<'b>, F: FnOnce(
                 p3.data[2].into(),
                 p3.data[0].into(),
                 dummy_abs_max,
-                bump,
             )
         } else {
-            orient2d_iee_impl::<'_, '_, false, _, _>(
+            orient2d_iee_impl::<false, _, _>(
                 &p1_dynamic.y,
                 &p1_dynamic.z,
                 &p1_dynamic.d,
@@ -613,7 +624,6 @@ fn orient2d_iee<'a, 'b: 'a, const AXIS: u32, IP: ImplicitPoint3D<'b>, F: FnOnce(
                 p3.data[1].into(),
                 p3.data[2].into(),
                 dummy_abs_max,
-                bump,
             )
         };
         if det.not_zero() {
@@ -625,42 +635,39 @@ fn orient2d_iee<'a, 'b: 'a, const AXIS: u32, IP: ImplicitPoint3D<'b>, F: FnOnce(
         }
     }
 
-    if let Some(p1_exact) = p1.exact() {
+    if let Some(p1_exact) = p1.exact(bump) {
         let (det, _) = if AXIS == 2 {
-            orient2d_iee_impl::<'_, '_, false, _, _>(
+            orient2d_iee_impl::<false, _, _>(
                 &p1_exact.x,
                 &p1_exact.y,
                 &p1_exact.d,
-                vec![in bump; p2.data[0]].into(),
-                vec![in bump; p2.data[1]].into(),
-                vec![in bump; p3.data[0]].into(),
-                vec![in bump; p3.data[1]].into(),
+                [p2.data[0]].to_vec_in(bump).into(),
+                [p2.data[1]].to_vec_in(bump).into(),
+                [p3.data[0]].to_vec_in(bump).into(),
+                [p3.data[1]].to_vec_in(bump).into(),
                 dummy_abs_max,
-                bump,
             )
         } else if AXIS == 1 {
-            orient2d_iee_impl::<'_, '_, false, _, _>(
+            orient2d_iee_impl::<false, _, _>(
                 &p1_exact.z,
                 &p1_exact.x,
                 &p1_exact.d,
-                vec![in bump; p2.data[2]].into(),
-                vec![in bump; p2.data[0]].into(),
-                vec![in bump; p3.data[2]].into(),
-                vec![in bump; p3.data[0]].into(),
+                [p2.data[2]].to_vec_in(bump).into(),
+                [p2.data[0]].to_vec_in(bump).into(),
+                [p3.data[2]].to_vec_in(bump).into(),
+                [p3.data[0]].to_vec_in(bump).into(),
                 dummy_abs_max,
-                bump,
             )
         } else {
-            orient2d_iee_impl::<'_, '_, false, _, _>(
+            orient2d_iee_impl::<false, _, _>(
                 &p1_exact.y,
                 &p1_exact.z,
                 &p1_exact.d,
-                vec![in bump; p2.data[1]].into(),
-                vec![in bump; p2.data[2]].into(),
-                vec![in bump; p3.data[1]].into(),
-                vec![in bump; p3.data[2]].into(),
+                [p2.data[1]].to_vec_in(bump).into(),
+                [p2.data[2]].to_vec_in(bump).into(),
+                [p3.data[1]].to_vec_in(bump).into(),
+                [p3.data[2]].to_vec_in(bump).into(),
                 dummy_abs_max,
-                bump,
             )
         };
         return double_to_sign(*det.last().unwrap());
@@ -669,13 +676,13 @@ fn orient2d_iee<'a, 'b: 'a, const AXIS: u32, IP: ImplicitPoint3D<'b>, F: FnOnce(
     Orientation::Undefined
 }
 
-fn orient2d_lee<'a, 'b: 'a, const AXIS: u32>(
-    p1: &'a ImplicitPointLPI<'b>,
-    p2: &'a ExplicitPoint3D,
-    p3: &'a ExplicitPoint3D,
-    bump: &'b Bump,
+fn orient2d_lee<const AXIS: u32, A: Allocator + Copy>(
+    p1: &ImplicitPointLPI,
+    p2: &ExplicitPoint3D,
+    p3: &ExplicitPoint3D,
+    bump: A,
 ) -> Orientation {
-    orient2d_iee::<'_, '_, AXIS, _, _>(
+    orient2d_iee::<AXIS, _, _, _>(
         p1,
         p2,
         p3,
@@ -690,13 +697,13 @@ fn orient2d_lee<'a, 'b: 'a, const AXIS: u32>(
     )
 }
 
-fn orient2d_tee<'a, 'b: 'a, const AXIS: u32>(
-    p1: &'a ImplicitPointTPI<'b>,
-    p2: &'a ExplicitPoint3D,
-    p3: &'a ExplicitPoint3D,
-    bump: &'b Bump,
+fn orient2d_tee<const AXIS: u32, A: Allocator + Copy>(
+    p1: &ImplicitPointTPI,
+    p2: &ExplicitPoint3D,
+    p3: &ExplicitPoint3D,
+    bump: A,
 ) -> Orientation {
-    orient2d_iee::<'_, '_, AXIS, _, _>(
+    orient2d_iee::<AXIS, _, _, _>(
         p1,
         p2,
         p3,
@@ -711,23 +718,16 @@ fn orient2d_tee<'a, 'b: 'a, const AXIS: u32>(
     )
 }
 
-fn orient2d_iie_impl<
-    'a,
-    'b: 'a,
-    const NEED_MAX: bool,
-    T: 'b + GenericNum,
-    F: FnOnce(Vec<'b, T>) -> Option<T>,
->(
-    l1x: &'a T,
-    l1y: &'a T,
-    d1: &'a T,
-    l2x: &'a T,
-    l2y: &'a T,
-    d2: &'a T,
+fn orient2d_iie_impl<const NEED_MAX: bool, T: GenericNum, F: FnOnce(&[T]) -> Option<T>>(
+    l1x: &T,
+    l1y: &T,
+    d1: &T,
+    l2x: &T,
+    l2y: &T,
+    d2: &T,
     op3x: T,
     op3y: T,
     abs_max: F,
-    bump: &'b Bump,
 ) -> (T, Option<T>) {
     let a = d1 * l2x;
     let b = d2 * l1x;
@@ -743,7 +743,7 @@ fn orient2d_iie_impl<
     let efgh = ef * gh;
     let det = abcd - efgh;
     let max_var = if NEED_MAX {
-        abs_max(vec![in bump; op3x, op3y])
+        abs_max(&[op3x, op3y])
     } else {
         None
     };
@@ -751,22 +751,21 @@ fn orient2d_iie_impl<
 }
 
 fn orient2d_iie<
-    'a,
-    'b: 'a,
     const AXIS: u32,
-    IP1: ImplicitPoint3D<'b>,
-    IP2: ImplicitPoint3D<'b>,
+    IP1: ImplicitPoint3D,
+    IP2: ImplicitPoint3D,
+    A: Allocator + Copy,
     F: FnOnce(f64) -> f64,
 >(
-    p1: &'a IP1,
-    p2: &'a IP2,
-    p3: &'a ExplicitPoint3D,
+    p1: &IP1,
+    p2: &IP2,
+    p3: &ExplicitPoint3D,
     static_filter_func: F,
-    bump: &'b Bump,
+    bump: A,
 ) -> Orientation {
     if let Some((p1_static, p2_static)) = p1.static_filter().zip(p2.static_filter()) {
         let ret = if AXIS == 2 {
-            orient2d_iie_impl::<'_, '_, true, _, _>(
+            orient2d_iie_impl::<true, _, _>(
                 &p1_static.0.x,
                 &p1_static.0.y,
                 &p1_static.0.d,
@@ -776,10 +775,9 @@ fn orient2d_iie<
                 p3.data[0],
                 p3.data[1],
                 abs_max,
-                bump,
             )
         } else if AXIS == 1 {
-            orient2d_iie_impl::<'_, '_, true, _, _>(
+            orient2d_iie_impl::<true, _, _>(
                 &p1_static.0.z,
                 &p1_static.0.x,
                 &p1_static.0.d,
@@ -789,10 +787,9 @@ fn orient2d_iie<
                 p3.data[2],
                 p3.data[0],
                 abs_max,
-                bump,
             )
         } else {
-            orient2d_iie_impl::<'_, '_, true, _, _>(
+            orient2d_iie_impl::<true, _, _>(
                 &p1_static.0.y,
                 &p1_static.0.z,
                 &p1_static.0.d,
@@ -802,7 +799,6 @@ fn orient2d_iie<
                 p3.data[1],
                 p3.data[2],
                 abs_max,
-                bump,
             )
         };
         let max_var = ret.1.unwrap().max(p1_static.1).max(p2_static.1);
@@ -816,7 +812,7 @@ fn orient2d_iie<
 
     if let Some((p1_dynamic, p2_dynamic)) = p1.dynamic_filter().zip(p2.dynamic_filter()) {
         let (det, _) = if AXIS == 2 {
-            orient2d_iie_impl::<'_, '_, false, _, _>(
+            orient2d_iie_impl::<false, _, _>(
                 &p1_dynamic.x,
                 &p1_dynamic.y,
                 &p1_dynamic.d,
@@ -826,10 +822,9 @@ fn orient2d_iie<
                 p3.data[0].into(),
                 p3.data[1].into(),
                 dummy_abs_max,
-                bump,
             )
         } else if AXIS == 1 {
-            orient2d_iie_impl::<'_, '_, false, _, _>(
+            orient2d_iie_impl::<false, _, _>(
                 &p1_dynamic.z,
                 &p1_dynamic.x,
                 &p1_dynamic.d,
@@ -839,10 +834,9 @@ fn orient2d_iie<
                 p3.data[2].into(),
                 p3.data[0].into(),
                 dummy_abs_max,
-                bump,
             )
         } else {
-            orient2d_iie_impl::<'_, '_, false, _, _>(
+            orient2d_iie_impl::<false, _, _>(
                 &p1_dynamic.y,
                 &p1_dynamic.z,
                 &p1_dynamic.d,
@@ -852,7 +846,6 @@ fn orient2d_iie<
                 p3.data[1].into(),
                 p3.data[2].into(),
                 dummy_abs_max,
-                bump,
             )
         };
         if det.not_zero() {
@@ -864,45 +857,42 @@ fn orient2d_iie<
         }
     }
 
-    if let Some((p1_exact, p2_exact)) = p1.exact().zip(p2.exact()) {
+    if let Some((p1_exact, p2_exact)) = p1.exact(bump).zip(p2.exact(bump)) {
         let (det, _) = if AXIS == 2 {
-            orient2d_iie_impl::<'_, '_, false, _, _>(
+            orient2d_iie_impl::<false, _, _>(
                 &p1_exact.x,
                 &p1_exact.y,
                 &p1_exact.d,
                 &p2_exact.x,
                 &p2_exact.y,
                 &p2_exact.d,
-                vec![in bump; p3.data[0]].into(),
-                vec![in bump; p3.data[1]].into(),
+                [p3.data[0]].to_vec_in(bump).into(),
+                [p3.data[1]].to_vec_in(bump).into(),
                 dummy_abs_max,
-                bump,
             )
         } else if AXIS == 1 {
-            orient2d_iie_impl::<'_, '_, false, _, _>(
+            orient2d_iie_impl::<false, _, _>(
                 &p1_exact.z,
                 &p1_exact.x,
                 &p1_exact.d,
                 &p2_exact.z,
                 &p2_exact.x,
                 &p2_exact.d,
-                vec![in bump; p3.data[2]].into(),
-                vec![in bump; p3.data[0]].into(),
+                [p3.data[2]].to_vec_in(bump).into(),
+                [p3.data[0]].to_vec_in(bump).into(),
                 dummy_abs_max,
-                bump,
             )
         } else {
-            orient2d_iie_impl::<'_, '_, false, _, _>(
+            orient2d_iie_impl::<false, _, _>(
                 &p1_exact.y,
                 &p1_exact.z,
                 &p1_exact.d,
                 &p2_exact.y,
                 &p2_exact.z,
                 &p2_exact.d,
-                vec![in bump; p3.data[1]].into(),
-                vec![in bump; p3.data[2]].into(),
+                [p3.data[1]].to_vec_in(bump).into(),
+                [p3.data[2]].to_vec_in(bump).into(),
                 dummy_abs_max,
-                bump,
             )
         };
         return double_to_sign(*det.last().unwrap());
@@ -911,13 +901,13 @@ fn orient2d_iie<
 }
 
 #[inline(always)]
-fn orient2d_lle<'a, 'b: 'a, const AXIS: u32>(
-    p1: &'a ImplicitPointLPI<'b>,
-    p2: &'a ImplicitPointLPI<'b>,
-    p3: &'a ExplicitPoint3D,
-    bump: &'b Bump,
+fn orient2d_lle<const AXIS: u32, A: Allocator + Copy>(
+    p1: &ImplicitPointLPI,
+    p2: &ImplicitPointLPI,
+    p3: &ExplicitPoint3D,
+    bump: A,
 ) -> Orientation {
-    orient2d_iie::<'_, '_, AXIS, _, _, _>(
+    orient2d_iie::<AXIS, _, _, _, _>(
         p1,
         p2,
         p3,
@@ -936,13 +926,13 @@ fn orient2d_lle<'a, 'b: 'a, const AXIS: u32>(
 }
 
 #[inline(always)]
-fn orient2d_lte<'a, 'b: 'a, const AXIS: u32>(
-    p1: &'a ImplicitPointLPI<'b>,
-    p2: &'a ImplicitPointTPI<'b>,
-    p3: &'a ExplicitPoint3D,
-    bump: &'b Bump,
+fn orient2d_lte<const AXIS: u32, A: Allocator + Copy>(
+    p1: &ImplicitPointLPI,
+    p2: &ImplicitPointTPI,
+    p3: &ExplicitPoint3D,
+    bump: A,
 ) -> Orientation {
-    orient2d_iie::<'_, '_, AXIS, _, _, _>(
+    orient2d_iie::<AXIS, _, _, _, _>(
         p1,
         p2,
         p3,
@@ -964,13 +954,13 @@ fn orient2d_lte<'a, 'b: 'a, const AXIS: u32>(
 }
 
 #[inline(always)]
-fn orient2d_tte<'a, 'b: 'a, const AXIS: u32>(
-    p1: &'a ImplicitPointTPI<'b>,
-    p2: &'a ImplicitPointTPI<'b>,
-    p3: &'a ExplicitPoint3D,
-    bump: &'b Bump,
+fn orient2d_tte<const AXIS: u32, A: Allocator + Copy>(
+    p1: &ImplicitPointTPI,
+    p2: &ImplicitPointTPI,
+    p3: &ExplicitPoint3D,
+    bump: A,
 ) -> Orientation {
-    orient2d_iie::<'_, '_, AXIS, _, _, _>(
+    orient2d_iie::<AXIS, _, _, _, _>(
         p1,
         p2,
         p3,
@@ -1020,18 +1010,18 @@ fn orient2d_iii_impl<T: GenericNum>(
 }
 
 fn orient2d_iii<
-    'a,
-    'b: 'a,
     const AXIS: u32,
-    IP1: ImplicitPoint3D<'b>,
-    IP2: ImplicitPoint3D<'b>,
-    IP3: ImplicitPoint3D<'b>,
+    IP1: ImplicitPoint3D,
+    IP2: ImplicitPoint3D,
+    IP3: ImplicitPoint3D,
     F: FnOnce(f64) -> f64,
+    A: Allocator + Copy,
 >(
-    p1: &'a IP1,
-    p2: &'a IP2,
-    p3: &'a IP3,
+    p1: &IP1,
+    p2: &IP2,
+    p3: &IP3,
     static_filter_func: F,
+    bump: A,
 ) -> Orientation {
     if let Some(((p1_static, p2_static), p3_static)) = p1
         .static_filter()
@@ -1135,7 +1125,9 @@ fn orient2d_iii<
         }
     }
 
-    if let Some(((p1_exact, p2_exact), p3_exact)) = p1.exact().zip(p2.exact()).zip(p3.exact()) {
+    if let Some(((p1_exact, p2_exact), p3_exact)) =
+        p1.exact(bump).zip(p2.exact(bump)).zip(p3.exact(bump))
+    {
         let det = if AXIS == 2 {
             orient2d_iii_impl(
                 &p1_exact.x,
@@ -1179,85 +1171,113 @@ fn orient2d_iii<
 }
 
 #[inline(always)]
-fn orient2d_lll<'a, 'b: 'a, const AXIS: u32>(
-    p1: &'a ImplicitPointLPI<'b>,
-    p2: &'a ImplicitPointLPI<'b>,
-    p3: &'a ImplicitPointLPI<'b>,
+fn orient2d_lll<const AXIS: u32, A: Allocator + Copy>(
+    p1: &ImplicitPointLPI,
+    p2: &ImplicitPointLPI,
+    p3: &ImplicitPointLPI,
+    allocator: A,
 ) -> Orientation {
-    orient2d_iii::<'_, '_, AXIS, _, _, _, _>(p1, p2, p3, |max_var| {
-        let mut epsilon = max_var;
-        epsilon *= epsilon;
-        epsilon *= epsilon;
-        epsilon *= epsilon;
-        epsilon *= max_var;
-        epsilon *= max_var;
-        epsilon *= max_var;
-        epsilon *= max_var;
-        epsilon *= max_var;
-        epsilon *= max_var;
-        epsilon * 1.75634284893534e-10
-    })
+    orient2d_iii::<AXIS, _, _, _, _, _>(
+        p1,
+        p2,
+        p3,
+        |max_var| {
+            let mut epsilon = max_var;
+            epsilon *= epsilon;
+            epsilon *= epsilon;
+            epsilon *= epsilon;
+            epsilon *= max_var;
+            epsilon *= max_var;
+            epsilon *= max_var;
+            epsilon *= max_var;
+            epsilon *= max_var;
+            epsilon *= max_var;
+            epsilon * 1.75634284893534e-10
+        },
+        allocator,
+    )
 }
 
 #[inline(always)]
-fn orient2d_llt<'a, 'b: 'a, const AXIS: u32>(
-    p1: &'a ImplicitPointLPI<'b>,
-    p2: &'a ImplicitPointLPI<'b>,
-    p3: &'a ImplicitPointTPI<'b>,
+fn orient2d_llt<const AXIS: u32, A: Allocator + Copy>(
+    p1: &ImplicitPointLPI,
+    p2: &ImplicitPointLPI,
+    p3: &ImplicitPointTPI,
+    allocator: A,
 ) -> Orientation {
-    orient2d_iii::<'_, '_, AXIS, _, _, _, _>(p1, p2, p3, |max_var| {
-        let mut epsilon = max_var;
-        epsilon *= epsilon;
-        epsilon *= epsilon;
-        epsilon *= epsilon;
-        epsilon *= epsilon;
-        epsilon *= max_var;
-        epsilon * 2.144556754402072e-09
-    })
+    orient2d_iii::<AXIS, _, _, _, _, _>(
+        p1,
+        p2,
+        p3,
+        |max_var| {
+            let mut epsilon = max_var;
+            epsilon *= epsilon;
+            epsilon *= epsilon;
+            epsilon *= epsilon;
+            epsilon *= epsilon;
+            epsilon *= max_var;
+            epsilon * 2.144556754402072e-09
+        },
+        allocator,
+    )
 }
 
 #[inline(always)]
-fn orient2d_ltt<'a, 'b: 'a, const AXIS: u32>(
-    p1: &'a ImplicitPointLPI<'b>,
-    p2: &'a ImplicitPointTPI<'b>,
-    p3: &'a ImplicitPointTPI<'b>,
+fn orient2d_ltt<const AXIS: u32, A: Allocator + Copy>(
+    p1: &ImplicitPointLPI,
+    p2: &ImplicitPointTPI,
+    p3: &ImplicitPointTPI,
+    allocator: A,
 ) -> Orientation {
-    orient2d_iii::<'_, '_, AXIS, _, _, _, _>(p1, p2, p3, |max_var| {
-        let mut epsilon = max_var;
-        epsilon *= epsilon;
-        epsilon *= epsilon;
-        epsilon *= epsilon;
-        epsilon *= epsilon;
-        epsilon *= max_var;
-        epsilon *= max_var;
-        epsilon *= max_var;
-        epsilon *= max_var;
-        epsilon * 2.535681042914479e-08
-    })
+    orient2d_iii::<AXIS, _, _, _, _, _>(
+        p1,
+        p2,
+        p3,
+        |max_var| {
+            let mut epsilon = max_var;
+            epsilon *= epsilon;
+            epsilon *= epsilon;
+            epsilon *= epsilon;
+            epsilon *= epsilon;
+            epsilon *= max_var;
+            epsilon *= max_var;
+            epsilon *= max_var;
+            epsilon *= max_var;
+            epsilon * 2.535681042914479e-08
+        },
+        allocator,
+    )
 }
 
 #[inline(always)]
-fn orient2d_ttt<'a, 'b: 'a, const AXIS: u32>(
-    p1: &'a ImplicitPointTPI<'b>,
-    p2: &'a ImplicitPointTPI<'b>,
-    p3: &'a ImplicitPointTPI<'b>,
+fn orient2d_ttt<const AXIS: u32, A: Allocator + Copy>(
+    p1: &ImplicitPointTPI,
+    p2: &ImplicitPointTPI,
+    p3: &ImplicitPointTPI,
+    allocator: A,
 ) -> Orientation {
-    orient2d_iii::<'_, '_, AXIS, _, _, _, _>(p1, p2, p3, |max_var| {
-        let mut epsilon = max_var;
-        epsilon *= epsilon;
-        epsilon *= epsilon;
-        epsilon *= epsilon;
-        epsilon *= epsilon;
-        epsilon *= max_var;
-        epsilon *= max_var;
-        epsilon *= max_var;
-        epsilon *= max_var;
-        epsilon *= max_var;
-        epsilon *= max_var;
-        epsilon *= max_var;
-        epsilon *= max_var;
-        epsilon *= max_var;
-        epsilon *= max_var;
-        epsilon * 3.103174776697445e-06
-    })
+    orient2d_iii::<AXIS, _, _, _, _, _>(
+        p1,
+        p2,
+        p3,
+        |max_var| {
+            let mut epsilon = max_var;
+            epsilon *= epsilon;
+            epsilon *= epsilon;
+            epsilon *= epsilon;
+            epsilon *= epsilon;
+            epsilon *= max_var;
+            epsilon *= max_var;
+            epsilon *= max_var;
+            epsilon *= max_var;
+            epsilon *= max_var;
+            epsilon *= max_var;
+            epsilon *= max_var;
+            epsilon *= max_var;
+            epsilon *= max_var;
+            epsilon *= max_var;
+            epsilon * 3.103174776697445e-06
+        },
+        allocator,
+    )
 }

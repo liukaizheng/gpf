@@ -1,7 +1,4 @@
-use std::{
-    marker::PhantomData,
-    ops::{Deref, DerefMut, Index, IndexMut},
-};
+use std::ops::{Deref, DerefMut, Index, IndexMut};
 
 use super::{iter_next, Element, ElementId, HalfedgeId, HalfedgeIter};
 use crate::{element_id, element_iterator, halfedges_iterator, mesh::Mesh, INVALID_IND};

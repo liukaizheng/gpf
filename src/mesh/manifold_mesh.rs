@@ -8,8 +8,6 @@ use super::{
     VertexData, VertexId, VertexIter,
 };
 
-use bumpalo::Bump;
-
 pub struct ManifoldMesh {
     v_halfedge_arr: Vec<HalfedgeId>,
     he_next_arr: Vec<HalfedgeId>,
