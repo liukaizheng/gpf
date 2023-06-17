@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::{alloc::Allocator, collections::HashMap};
 
 use crate::{
     math::{cross, norm, sub},
     predicates::{self, double_to_sign, sign_reverse, Orientation},
     INVALID_IND,
 };
-use bumpalo::{collections::Vec, vec, Bump};
+use bumpalo::Bump;
 use rand::seq::SliceRandom;
 
 #[derive(Clone)]
@@ -105,21 +105,21 @@ impl Tet {
     }
 }
 
-pub struct TetMesh<'a, 'b: 'a> {
+pub struct TetMesh<'a> {
     pub points: &'a [f64],
     pub n_points: usize,
-    pub tets: Vec<'b, Tet>,
-    pub p2t: Vec<'b, usize>,
+    pub tets: Vec<Tet>,
+    pub p2t: Vec<usize>,
 }
 
-impl<'a, 'b: 'a> TetMesh<'a, 'b> {
-    fn new(points: &'a [f64], bump: &'b Bump) -> Self {
+impl<'a> TetMesh<'a> {
+    fn new(points: &'a [f64]) -> Self {
         let n_points = points.len() / 3;
         Self {
             points,
             n_points,
-            tets: Vec::new_in(bump),
-            p2t: vec![in bump; INVALID_IND; n_points + 1],
+            tets: Vec::new(),
+            p2t: vec![INVALID_IND; n_points + 1],
         }
     }
 
@@ -212,20 +212,26 @@ impl<'a, 'b: 'a> TetMesh<'a, 'b> {
     }
 
     #[inline(always)]
-    pub fn orient3d(&self, pa: usize, pb: usize, pc: usize, pd: usize) -> f64 {
+    pub fn orient3d<A: Allocator + Copy>(
+        &self,
+        pa: usize,
+        pb: usize,
+        pc: usize,
+        pd: usize,
+        allocator: A,
+    ) -> f64 {
         predicates::orient3d(
             &self.points[(pa * 3)..],
             &self.points[(pb * 3)..],
             &self.points[(pc * 3)..],
             &self.points[(pd * 3)..],
-            self.tets.bump(),
+            allocator,
         )
     }
 
     #[inline(always)]
-    pub fn incident(&mut self, vid: usize) -> Vec<'b, usize> {
-        let bump = self.tets.bump();
-        let mut result = bumpalo::vec![in bump; self.p2t[vid]];
+    pub fn incident<A: Allocator + Copy>(&mut self, vid: usize, bump: A) -> Vec<usize, A> {
+        let mut result = [self.p2t[vid]].to_vec_in(bump);
         self.mark_test(result[0]);
         let mut idx = 0;
         while idx < result.len() {
@@ -700,7 +706,7 @@ enum LocateResult {
     INTETRAHEDRON,
 }
 
-fn locate_dt(tets: &TetMesh, pid: usize, searchtet: &mut TriFace) -> LocateResult {
+fn locate_dt(tets: &TetMesh, pid: usize, searchtet: &mut TriFace, bump: &Bump) -> LocateResult {
     if tets.is_hull_tet(searchtet.tet) {
         searchtet.tet = tets.tets[searchtet.tet].nei[3].tet;
     }
@@ -712,6 +718,7 @@ fn locate_dt(tets: &TetMesh, pid: usize, searchtet: &mut TriFace) -> LocateResul
             tets.dest(searchtet),
             tets.apex(searchtet),
             pid,
+            bump,
         );
         if ori < 0.0 {
             break;
@@ -732,15 +739,17 @@ fn locate_dt(tets: &TetMesh, pid: usize, searchtet: &mut TriFace) -> LocateResul
             break;
         }
 
-        let oriorg = tets.orient3d(tets.dest(searchtet), tets.apex(searchtet), toppo, pid);
+        let oriorg = tets.orient3d(tets.dest(searchtet), tets.apex(searchtet), toppo, pid, bump);
         if oriorg < 0.0 {
             searchtet.enext_esym_self();
         } else {
-            let oridest = tets.orient3d(tets.apex(searchtet), tets.org(searchtet), toppo, pid);
+            let oridest =
+                tets.orient3d(tets.apex(searchtet), tets.org(searchtet), toppo, pid, bump);
             if oridest < 0.0 {
                 searchtet.eprev_esym_self();
             } else {
-                let oriapex = tets.orient3d(tets.org(searchtet), tets.dest(searchtet), toppo, pid);
+                let oriapex =
+                    tets.orient3d(tets.org(searchtet), tets.dest(searchtet), toppo, pid, bump);
                 if oriapex < 0.0 {
                     searchtet.esym_self();
                 } else {
@@ -811,6 +820,7 @@ fn insphere_s(
     pc: usize,
     pd: usize,
     pe: usize,
+    bump: &Bump,
 ) -> Orientation {
     let points = tets.points;
     let sign = predicates::insphere(
@@ -819,7 +829,7 @@ fn insphere_s(
         &points[(pc * 3)..],
         &points[(pd * 3)..],
         &points[(pe * 3)..],
-        tets.tets.bump(),
+        bump,
     );
     if sign != 0.0 {
         return double_to_sign(sign);
@@ -847,9 +857,9 @@ fn insphere_s(
         }
     }
 
-    let mut ori = tets.orient3d(pt[1], pt[2], pt[3], pt[4]);
+    let mut ori = tets.orient3d(pt[1], pt[2], pt[3], pt[4], bump);
     if ori == 0.0 {
-        ori = -tets.orient3d(pt[0], pt[2], pt[3], pt[4]);
+        ori = -tets.orient3d(pt[0], pt[2], pt[3], pt[4], bump);
     }
 
     if (swaps & 1) != 0 {
@@ -865,11 +875,11 @@ fn insert_vertex_bw(
     pid: usize,
     searchtet: &mut TriFace,
     bw_face_map: &mut HashMap<(usize, usize), TriFace>,
+    bump: &Bump,
 ) -> bool {
-    let bump = tets.tets.bump();
     let mut cave_oldtet_list = Vec::new_in(bump);
 
-    match locate_dt(tets, pid, searchtet) {
+    match locate_dt(tets, pid, searchtet, bump) {
         LocateResult::OUTSIDE | LocateResult::INTETRAHEDRON => {
             tets.infect(searchtet.tet);
             cave_oldtet_list.push(searchtet.tet);
@@ -911,18 +921,18 @@ fn insert_vertex_bw(
             if !tets.mark_tested(neightid) {
                 let pts = &tets.tets[neightid].data;
                 if !tets.is_hull_tet(neightid) {
-                    enqflag = insphere_s(tets, pts[0], pts[1], pts[2], pts[3], pid)
+                    enqflag = insphere_s(tets, pts[0], pts[1], pts[2], pts[3], pid, bump)
                         == Orientation::Negative;
                 } else {
-                    let ori = tets.orient3d(pts[0], pts[1], pts[2], pid);
+                    let ori = tets.orient3d(pts[0], pts[1], pts[2], pid, bump);
                     if ori < 0.0 {
                         enqflag = true;
                     } else if ori == 0.0 {
                         let neineitet = tets.tets[neightid].nei[3].tet;
                         let nei_pts = &tets.tets[neineitet].data;
-                        enqflag =
-                            insphere_s(tets, nei_pts[0], nei_pts[1], nei_pts[2], nei_pts[3], pid)
-                                == Orientation::Negative;
+                        enqflag = insphere_s(
+                            tets, nei_pts[0], nei_pts[1], nei_pts[2], nei_pts[3], pid, bump,
+                        ) == Orientation::Negative;
                     }
                 }
                 tets.mark_test(neightid);
@@ -1094,7 +1104,7 @@ fn insert_vertex_bw(
     return true;
 }
 
-pub fn tetrahedralize<'a, 'b: 'a>(points: &'a [f64], bump: &'b Bump) -> TetMesh<'a, 'b> {
+pub fn tetrahedralize<'a>(points: &'a [f64]) -> TetMesh<'a> {
     let cmp = |x: &&f64, y: &&f64| x.partial_cmp(y).unwrap();
     let bbox = [
         // min_corner
@@ -1106,8 +1116,8 @@ pub fn tetrahedralize<'a, 'b: 'a>(points: &'a [f64], bump: &'b Bump) -> TetMesh<
         *points[1..].iter().step_by(3).max_by(cmp).unwrap(),
         *points[2..].iter().step_by(3).max_by(cmp).unwrap(),
     ];
-    let mut mesh = TetMesh::new(points, bump);
-    let mut sorted_pt_inds = Vec::from_iter_in(0..mesh.n_points, bump);
+    let mut mesh = TetMesh::new(points);
+    let mut sorted_pt_inds = Vec::from_iter(0..mesh.n_points);
     // sorted_pt_inds.shuffle(&mut rand::thread_rng());
     const SORT_OPTION: SortOption = SortOption {
         threshold: 64,
@@ -1125,7 +1135,7 @@ pub fn tetrahedralize<'a, 'b: 'a>(points: &'a [f64], bump: &'b Bump) -> TetMesh<
         &mut n_group,
     );
 
-    let mut temp_vec3 = vec![in bump; 0.0, 0.0, 0.0];
+    let mut temp_vec3 = [0.0, 0.0, 0.0];
     let bbox_size1 = {
         sub(&bbox[3..6], &bbox, &mut temp_vec3);
         norm(&temp_vec3)
@@ -1156,9 +1166,9 @@ pub fn tetrahedralize<'a, 'b: 'a>(points: &'a [f64], bump: &'b Bump) -> TetMesh<
         sub(p1, p0, &mut temp_vec3);
         while i < mesh.n_points {
             let pi = point(points, sorted_pt_inds[i]);
-            let mut v2 = vec![in bump; 0.0; 3];
+            let mut v2 = [0.0; 3];
             sub(pi, p0, &mut v2);
-            let mut n = vec![in bump; 0.0; 3];
+            let mut n = [0.0; 3];
             cross(&temp_vec3, &v2, &mut n);
             if norm(&n) / bbox_size2 < EPS {
                 i += 1;
@@ -1208,19 +1218,22 @@ pub fn tetrahedralize<'a, 'b: 'a>(points: &'a [f64], bump: &'b Bump) -> TetMesh<
         sorted_pt_inds[3],
     );
     let mut bw_face_map = HashMap::new();
+    let mut bump = Bump::new();
     for i in 4..mesh.n_points {
+        bump.reset();
         if !insert_vertex_bw(
             &mut mesh,
             sorted_pt_inds[i],
             &mut search_tet,
             &mut bw_face_map,
+            &bump,
         ) {
             break;
         }
     }
 
     let mut count = 0;
-    let mut tet_map = vec![in bump; 0; mesh.tets.len()];
+    let mut tet_map = vec![0; mesh.tets.len()];
     for i in 0..tet_map.len() {
         let t = &mesh.tets[i];
         if t.mask != !0 {

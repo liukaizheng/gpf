@@ -90,7 +90,7 @@ impl BSPComplex {
     pub(crate) fn new(
         tet_mesh: TetMesh,
         constraints_data: &Constraints,
-        tet_mark: [bumpalo::collections::Vec<bumpalo::collections::Vec<usize>>; 5],
+        tet_mark: [Vec<Vec<usize>>; 5],
     ) -> Self {
         let points = Vec::from_iter(
             tet_mesh
@@ -141,7 +141,7 @@ impl BSPComplex {
                     cell_faces.push(fid);
                 }
             }
-            cell_data.push(BSPCellData::new(cell_faces, tet_mark[4][tid].to_vec()));
+            cell_data.push(BSPCellData::new(cell_faces, tet_mark[4][tid].clone()));
         }
 
         let mesh = SurfaceMesh::from(faces);
@@ -353,7 +353,7 @@ impl BSPComplex {
     }
 }
 
-fn remove_ghost_tets<'b>(mesh: &TetMesh<'_, 'b>) -> (usize, Vec<usize>) {
+fn remove_ghost_tets<'b>(mesh: &TetMesh) -> (usize, Vec<usize>) {
     let tets = &mesh.tets;
     let mut idx = 0;
     let mut new_orders = vec![INVALID_IND; tets.len()];
