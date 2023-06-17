@@ -1,4 +1,8 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use bumpalo::Bump;
 use itertools::Itertools;
@@ -79,6 +83,9 @@ pub(crate) struct BSPComplex {
     vert_visits: Vec<bool>,
 
     edge_visits: Vec<bool>,
+
+    pub ori_duration: Duration,
+    pub split_duration: Duration,
 }
 
 #[inline(always)]
@@ -179,6 +186,9 @@ impl BSPComplex {
             edge_visits,
             vert_orientations,
             vert_visits,
+
+            ori_duration: Duration::from_millis(0),
+            split_duration: Duration::from_millis(0),
         }
     }
 
@@ -195,6 +205,7 @@ impl BSPComplex {
     pub(crate) fn split_cell(&mut self, cid: usize, bump: &Bump) {
         let tid = *self.cell_data[cid].inner_triangles.last().unwrap();
         let tri = self.triangle(tid).to_vec_in(bump);
+        let start = Instant::now();
         self.cell_data[cid].inner_triangles.pop();
         let mut coplanar_triangles = self.separate_out_coplanar_triangles(
             tid, // &mut self.cell_data[cid].inner_triangles,
@@ -213,6 +224,8 @@ impl BSPComplex {
             &mut self.vert_orientations,
             bump,
         );
+        self.ori_duration += start.elapsed();
+        let start = Instant::now();
 
         let (mut n_over, mut n_under) = (0, 0);
         for &vid in &cell_verts {
@@ -240,6 +253,7 @@ impl BSPComplex {
                 self.split_edge(eid, &tri, &bump);
             }
         }
+        self.split_duration += start.elapsed();
 
         self.vert_orientations.fill(Orientation::Undefined);
     }

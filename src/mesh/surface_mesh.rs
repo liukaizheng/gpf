@@ -1,6 +1,6 @@
-use std::{cell::RefCell, collections::HashMap, rc::Weak};
-
 use crate::{build_connect_info, mesh::Mesh, INVALID_IND};
+use hashbrown::HashMap;
+use std::{cell::RefCell, rc::Weak};
 
 use super::{
     ele_ranges, Edge, EdgeData, EdgeId, EdgeIter, ElementId, Face, FaceData, FaceId, FaceIter,
@@ -155,9 +155,8 @@ impl SurfaceMesh {
         }
 
         // h-h
-        let he_pos_map = HashMap::<HalfedgeId, usize>::from_iter(
-            e_halfedges.iter().enumerate().map(|(i, &hid)| (hid, i)),
-        );
+        let mut he_pos_map = HashMap::<HalfedgeId, usize, _, _>::with_capacity_in(e_halfedges.len(), bump);
+        he_pos_map.extend(e_halfedges.iter().enumerate().map(|(i, &hid)| (hid, i)));
         let to_new_halfedge = |hid: HalfedgeId, positions: &mut Vec<usize, _>| -> HalfedgeId {
             if let Some(&pos) = he_pos_map.get(&hid) {
                 positions.push(pos);

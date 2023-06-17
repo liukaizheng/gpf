@@ -1,5 +1,5 @@
+use hashbrown::HashMap;
 use std::alloc::Allocator;
-use std::collections::HashMap;
 
 use bumpalo::Bump;
 
@@ -1205,8 +1205,7 @@ fn form_skeleton<A: Allocator + Copy>(m: &mut Mesh<A>, ghost: &[bool], segment: 
 
 fn unique_indices<A: Allocator + Copy>(indices: &[usize], bump: A) -> [Vec<usize, A>; 2] {
     let mut count = 0;
-    let mut map = HashMap::new();
-    map.reserve(indices.len());
+    let mut map = HashMap::with_capacity_in(indices.len(), bump);
     let mut result = Vec::with_capacity_in(indices.len(), bump);
     result.reserve(indices.len());
     for old in indices {

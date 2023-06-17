@@ -63,13 +63,16 @@ fn make_mesh_for_triangles(points: &[f64], triangles: Vec<usize>) {
     let mut bump = Bump::new();
     while cid < complex.n_cells() {
         if complex.splittable(cid) {
-            println!("split cell {}", cid);
+            // println!("split cell {}", cid);
             bump.reset();
             complex.split_cell(cid, &bump);
         } else {
             cid += 1;
         }
     }
+
+    println!("ori is {:?}", complex.ori_duration);
+    println!("split is {:?}", complex.split_duration);
 }
 
 pub fn make_polyhedra_mesh(

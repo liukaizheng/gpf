@@ -1,4 +1,6 @@
-use std::{alloc::Allocator, collections::HashMap};
+use std::alloc::Allocator;
+
+use hashbrown::HashMap;
 
 use crate::{
     math::{cross, norm, sub},
@@ -870,13 +872,7 @@ fn insphere_s(
 }
 
 // Insert a vertex using the Bowyer-Watson algorithm
-fn insert_vertex_bw(
-    tets: &mut TetMesh,
-    pid: usize,
-    searchtet: &mut TriFace,
-    bw_face_map: &mut HashMap<(usize, usize), TriFace>,
-    bump: &Bump,
-) -> bool {
+fn insert_vertex_bw(tets: &mut TetMesh, pid: usize, searchtet: &mut TriFace, bump: &Bump) -> bool {
     let mut cave_oldtet_list = Vec::new_in(bump);
 
     match locate_dt(tets, pid, searchtet, bump) {
@@ -959,7 +955,7 @@ fn insert_vertex_bw(
     let f_out = cave_bdry_list.len();
     let v_out = (f_out + 4) >> 1;
 
-    bw_face_map.clear();
+    let mut bw_face_map = HashMap::new_in(bump);
 
     if v_out < 1024 {
         // pid to local vertex id
@@ -1217,17 +1213,10 @@ pub fn tetrahedralize<'a>(points: &'a [f64]) -> TetMesh<'a> {
         sorted_pt_inds[2],
         sorted_pt_inds[3],
     );
-    let mut bw_face_map = HashMap::new();
     let mut bump = Bump::new();
     for i in 4..mesh.n_points {
         bump.reset();
-        if !insert_vertex_bw(
-            &mut mesh,
-            sorted_pt_inds[i],
-            &mut search_tet,
-            &mut bw_face_map,
-            &bump,
-        ) {
+        if !insert_vertex_bw(&mut mesh, sorted_pt_inds[i], &mut search_tet, &bump) {
             break;
         }
     }

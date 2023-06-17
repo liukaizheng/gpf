@@ -1,4 +1,6 @@
-use std::{alloc::Allocator, collections::HashMap};
+use std::{alloc::Allocator};
+
+use hashbrown::HashMap;
 
 use bumpalo::Bump;
 
