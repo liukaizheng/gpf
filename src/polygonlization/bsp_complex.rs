@@ -8,7 +8,7 @@ use bumpalo::Bump;
 use itertools::Itertools;
 
 use crate::{
-    mesh::{EdgeData, EdgeId, Face, FaceData, Mesh, SurfaceMesh, VertexId},
+    mesh::{EdgeData, EdgeId, Face, FaceData, FaceId, Mesh, SurfaceMesh, VertexId},
     predicates::{
         orient3d::orient3d, sign_reversed, ExplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
         Orientation, Point3D,
@@ -253,6 +253,15 @@ impl BSPComplex {
                 self.split_edge(eid, &tri, &bump);
             }
         }
+
+        for &fid in &self.cell_data[cid].faces {
+            let fid = fid.into();
+            if let Some([va, vb]) =
+                split_face_verts(&self.mesh.borrow(), fid, &self.vert_orientations)
+            {
+                self.mesh.borrow_mut().split_face(fid, va, vb, bump);
+            }
+        }
         self.split_duration += start.elapsed();
 
         self.vert_orientations.fill(Orientation::Undefined);
@@ -487,4 +496,44 @@ fn three_planes_intersection<'b>(
         points[t2[1]].explicit().unwrap().clone(),
         points[t2[2]].explicit().unwrap().clone(),
     ))
+}
+
+#[inline]
+fn split_face_verts(
+    mesh: &SurfaceMesh,
+    fid: FaceId,
+    vert_orientations: &[Orientation],
+) -> Option<[VertexId; 2]> {
+    let (mut first, mut second) = (None, None);
+    let (mut has_pos, mut has_neg) = (false, false);
+    for hid in mesh.face(fid).halfedges() {
+        let vid = mesh.he_vertex(hid);
+        match vert_orientations[vid] {
+            Orientation::Positive => {
+                has_pos = true;
+                if has_neg && let Some(first) = first && let Some(second) = second {
+                    return Some([first, second]);
+                }
+            }
+            Orientation::Negative => {
+                has_neg = true;
+                if has_pos && let Some(first) = first && let Some(second) = second {
+                    return Some([first, second]);
+                }
+            }
+            Orientation::Zero => {
+                if first.is_none() {
+                    first = Some(vid);
+                } else if second.is_none() {
+                    if has_pos && has_neg {
+                        return Some([*first.unwrap(), vid]);
+                    } else {
+                        second = Some(vid);
+                    }
+                }
+            }
+            Orientation::Undefined => {}
+        }
+    }
+    None
 }
