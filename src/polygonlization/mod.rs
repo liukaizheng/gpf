@@ -71,8 +71,8 @@ fn make_mesh_for_triangles(points: &[f64], triangles: Vec<usize>) {
         }
     }
 
-    println!("ori is {:?}", complex.ori_duration);
-    println!("split is {:?}", complex.split_duration);
+    // println!("ori is {:?}", complex.ori_duration);
+    // println!("split is {:?}", complex.split_duration);
 }
 
 pub fn make_polyhedra_mesh(
@@ -101,3 +101,4 @@ pub fn make_polyhedra_mesh(
     let (triangles, tri_parents) = triangulate_polygon_soup(&points, &face_edges, axis_data);
     make_mesh_for_triangles(&points, triangles);
 }
+

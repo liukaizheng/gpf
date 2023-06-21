@@ -4,6 +4,7 @@
 #![feature(trait_alias)]
 #![feature(iter_partition_in_place)]
 #![feature(allocator_api)]
+#![feature(portable_simd)]
 
 pub mod math;
 pub mod mesh;
