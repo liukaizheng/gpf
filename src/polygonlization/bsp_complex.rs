@@ -254,14 +254,14 @@ impl BSPComplex {
             }
         }
 
-        for &fid in &self.cell_data[cid].faces {
+        /*for &fid in &self.cell_data[cid].faces {
             let fid = fid.into();
             if let Some([va, vb]) =
                 split_face_verts(&self.mesh.borrow(), fid, &self.vert_orientations)
             {
                 self.mesh.borrow_mut().split_face(fid, va, vb, bump);
             }
-        }
+        }*/
         self.split_duration += start.elapsed();
 
         self.vert_orientations.fill(Orientation::Undefined);
@@ -498,7 +498,7 @@ fn three_planes_intersection<'b>(
     ))
 }
 
-#[inline]
+/*#[inline]
 fn split_face_verts(
     mesh: &SurfaceMesh,
     fid: FaceId,
@@ -536,4 +536,4 @@ fn split_face_verts(
         }
     }
     None
-}
+}*/
