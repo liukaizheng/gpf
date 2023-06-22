@@ -108,28 +108,28 @@ fn mul(a: &IntervalNumber, b: &IntervalNumber) -> IntervalNumber {
         4 => f64x2::from([a.data[1], a.data[1]]) * b.data.reverse(),
 
         5 => {
-            let mut ai = a.data.cast::<u64>();
+            let mut ai = a.data.to_bits();
             ai ^= SIGN_HIGH_MASK;
-            (ai.cast::<f64>() * b.data).reverse()
+            (f64x2::from_bits(ai) * b.data).reverse()
         }
 
         6 => {
-            let mut bi = b.data.cast::<u64>();
-            bi ^= SIGN_LOW_MASK;
-            a.data * bi.cast::<f64>()
+            let mut bi = b.data.to_bits();
+             bi ^= SIGN_LOW_MASK;
+            a.data * f64x2::from_bits(bi).reverse()
         }
 
         8 => (f64x2::from([a.data[0]; 2]) * b.data).reverse(),
 
         9 => {
-            let mut ai = a.data.cast::<u64>();
+            let mut ai = a.data.to_bits();
             ai ^= SIGN_LOW_MASK;
-            ai.cast::<f64>().reverse() * b.data
+            f64x2::from_bits(ai).reverse() * b.data
         }
         10 => {
-            let mut bi = b.data.cast::<u64>();
+            let mut bi = b.data.to_bits();
             bi ^= SIGN_LOW_MASK;
-            a.data * bi.cast::<f64>()
+            a.data * f64x2::from_bits(bi)
         }
 
         _ => {
