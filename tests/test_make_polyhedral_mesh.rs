@@ -1,7 +1,5 @@
-use bumpalo::Bump;
 use gpf::polygonlization::make_polyhedra_mesh;
 use serde::Deserialize;
-type BVec<'b, T> = bumpalo::collections::Vec<'b, T>;
 
 #[allow(non_snake_case)]
 #[derive(Deserialize)]
@@ -13,17 +11,12 @@ struct PolygonsData {
     axesData: Vec<f64>,
 }
 
-fn make_two_dim_arr<'b, T: 'b + Clone>(
-    arr: &[T],
-    separators: &[usize],
-    bump: &'b Bump,
-) -> BVec<'b, BVec<'b, T>> {
-    BVec::from_iter_in(
+fn make_two_dim_arr<T: Clone>(arr: &[T], separators: &[usize]) -> Vec<Vec<T>> {
+    Vec::from_iter(
         separators
             .windows(2)
             .into_iter()
-            .map(|a| BVec::from_iter_in(arr[a[0]..a[1]].iter().map(|t| t.clone()), bump)),
-        bump,
+            .map(|a| Vec::from_iter(arr[a[0]..a[1]].iter().map(|t| t.clone()))),
     )
 }
 
@@ -32,22 +25,19 @@ fn two_models() {
     let f = std::fs::File::open("tests/data/solidFix.json").expect("read file");
     let reader = std::io::BufReader::new(f);
     let data = serde_json::from_reader::<_, PolygonsData>(reader).expect("failed to read");
-    let bump = Bump::new();
-    let edges = make_two_dim_arr(&data.edgesData, &data.separators, &bump);
+    let edges = make_two_dim_arr(&data.edgesData, &data.separators);
     make_polyhedra_mesh(
         &data.pointsData,
         &data.axesData,
         &data.faceInShellData,
         &edges,
-        &bump,
         1e-6,
     );
 }
 
 #[test]
 fn test_make_polyhedra_mesh() {
-    let bump = Bump::new();
-    let points = bumpalo::vec![ in &bump;
+    let points = vec![
         0.0, 0.0, 0.0, // 0
         1.0, 0.0, 0.0, // 1
         1.0, 1.0, 0.0, // 2
@@ -58,15 +48,15 @@ fn test_make_polyhedra_mesh() {
         0.0, 1.0, 1.0, // 7
     ];
 
-    let edges = bumpalo::vec![in &bump;
-        bumpalo::vec![in &bump; 0, 3, 3, 2, 2, 1, 1, 0], // bottom
-        bumpalo::vec![in &bump; 4, 5, 5, 6, 6, 7, 7, 4], // top
-        bumpalo::vec![in &bump; 0, 4, 4, 7, 7, 3, 3, 0], // left
-        bumpalo::vec![in &bump; 1, 2, 2, 6, 6, 5, 5, 1], // right
-        bumpalo::vec![in &bump; 0, 1, 1, 5, 5, 4, 4, 0], // front
+    let edges = vec![
+        vec![0, 3, 3, 2, 2, 1, 1, 0], // bottom
+        vec![4, 5, 5, 6, 6, 7, 7, 4], // top
+        vec![0, 4, 4, 7, 7, 3, 3, 0], // left
+        vec![1, 2, 2, 6, 6, 5, 5, 1], // right
+        vec![0, 1, 1, 5, 5, 4, 4, 0], // front
     ];
 
-    let axis = bumpalo::vec![in &bump;
+    let axis = vec![
         0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, // bottom
         0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, // top
         0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, // left
@@ -74,9 +64,6 @@ fn test_make_polyhedra_mesh() {
         0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, // front
     ];
 
-    let poly_in_shell = bumpalo::vec![in &bump;
-        0, 0, 0, 0,0
-    ];
-    make_polyhedra_mesh(&points, &axis, &poly_in_shell, &edges, &bump, 1e-6);
-    let a = 2;
+    let poly_in_shell = vec![0, 0, 0, 0, 0];
+    make_polyhedra_mesh(&points, &axis, &poly_in_shell, &edges, 1e-6);
 }

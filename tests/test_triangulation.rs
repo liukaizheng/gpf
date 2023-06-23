@@ -1,6 +1,6 @@
 #![feature(test)]
 
-use bumpalo::{collections::Vec, Bump};
+use bumpalo::Bump;
 use gpf::triangle::{tetrahedralize, triangulate};
 use rand::{distributions::Uniform, rngs::SmallRng, Rng, SeedableRng};
 use std::fs::File;
@@ -31,10 +31,8 @@ fn test_triangulate() {
     let rng = SmallRng::seed_from_u64(5489);
     let uniform = Uniform::new_inclusive(-1.0, 1.0);
     let n_points = 1_0000;
-    let bump = Bump::new();
-    let points: Vec<'_, f64> =
-        Vec::from_iter_in(rng.sample_iter(uniform).take(n_points * 2), &bump);
-    let indices = Vec::from_iter_in(0..n_points, &bump);
+    let points: Vec<f64> = Vec::from_iter(rng.sample_iter(uniform).take(n_points * 2));
+    let indices = Vec::from_iter(0..n_points);
     let start_idx = *indices
         .iter()
         .min_by(|&&a, &&b| {
@@ -56,6 +54,7 @@ fn test_triangulate() {
         })
         .unwrap();
     let start = Instant::now();
+    let bump = Bump::new();
     let triangles = triangulate(&points, &[start_idx, end_idx], &bump);
     println!("Time elapsed in {:?}", start.elapsed());
     assert_eq!(triangles.len(), 54684);
@@ -63,11 +62,11 @@ fn test_triangulate() {
 }
 
 #[allow(dead_code)]
-fn read_points<'b>(name: &str, bump: &'b Bump) -> Vec<'b, f64> {
+fn read_points(name: &str) -> Vec<f64> {
     let f = File::open(name).unwrap();
 
     let reader = BufReader::new(f);
-    let mut points = Vec::new_in(bump);
+    let mut points = Vec::new();
     for line in reader.lines() {
         let line = line.unwrap();
         let mut parts = line.split_whitespace();
@@ -88,9 +87,8 @@ fn test_tetrahedralize() {
     let rng = SmallRng::seed_from_u64(5489);
     let uniform = Uniform::new_inclusive(-1.0, 1.0);
     let n_points = 1_0000;
-    let bump = Bump::new();
     // let points: Vec<'_, f64> = read_points("123.xyz", &bump);
-    let points = Vec::from_iter_in(rng.sample_iter(uniform).take(n_points * 3), &bump);
-    let tets = tetrahedralize(&points, &bump);
+    let points = Vec::from_iter(rng.sample_iter(uniform).take(n_points * 3));
+    let tets = tetrahedralize(&points);
     assert!(tets.tets.len() > 0);
 }

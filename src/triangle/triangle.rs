@@ -1,13 +1,19 @@
-use std::collections::HashMap;
+use hashbrown::HashMap;
+use std::alloc::Allocator;
 
-use bumpalo::{collections::Vec, vec, Bump};
+use bumpalo::Bump;
 
 use crate::math::{dot, sub};
 use crate::{predicates, INVALID_IND};
 
-pub fn triangulate<'b>(points: &[f64], segments: &[usize], bump: &'b Bump) -> Vec<'b, usize> {
+pub fn triangulate<A: Allocator + Copy>(
+    points: &[f64],
+    segments: &[usize],
+    bump: A,
+) -> Vec<usize, A> {
     let n_points = points.len() >> 1;
-    let mut sorted_pt_inds = Vec::from_iter_in(0..n_points, bump);
+    let mut sorted_pt_inds = Vec::with_capacity_in(n_points, bump);
+    sorted_pt_inds.extend(0..n_points);
     sorted_pt_inds.sort_unstable_by(|&i, &j| {
         let i = i << 1;
         let j = j << 1;
@@ -35,13 +41,13 @@ pub fn triangulate<'b>(points: &[f64], segments: &[usize], bump: &'b Bump) -> Ve
 
     let mut ghost = mark_ghost(&mesh.triangles, &mut hull_left, bump);
     form_skeleton(&mut mesh, &ghost, segments, bump);
-    let mut visited = vec![in bump; false; mesh.triangles.len()];
+    let mut visited = std::vec::from_elem_in(false, mesh.triangles.len(), bump);
     for i in 0..visited.len() {
         if visited[i] || ghost[i] {
             continue;
         }
         visited[i] = true;
-        let mut queue: Vec<'_, usize> = vec![in bump; i];
+        let mut queue = [i].to_vec_in(bump);
         let mut idx = 0;
         let mut flag = 2;
         while idx < queue.len() {
@@ -68,7 +74,8 @@ pub fn triangulate<'b>(points: &[f64], segments: &[usize], bump: &'b Bump) -> Ve
             }
         }
     }
-    Vec::from_iter_in(
+    let mut result = Vec::new_in(bump);
+    result.extend(
         mesh.triangles
             .iter()
             .zip(ghost)
@@ -81,8 +88,8 @@ pub fn triangulate<'b>(points: &[f64], segments: &[usize], bump: &'b Bump) -> Ve
                 }
             })
             .flatten(),
-        bump,
-    )
+    );
+    result
 }
 
 #[inline(always)]
@@ -92,53 +99,54 @@ fn point3(points: &[f64], idx: usize) -> &[f64] {
 }
 
 #[inline]
-pub fn triangulate_polygon<'b>(
+pub fn triangulate_polygon<A: Allocator + Copy>(
     points: &[f64],
     segments: &[usize],
     o: &[f64],
     x: &[f64],
     y: &[f64],
-    bump: &'b Bump,
-) -> Vec<'b, usize> {
+    bump: A,
+) -> Vec<usize, A> {
     let [new_segments, new_to_ori_map] = unique_indices(segments, bump);
-
-    let points_2d = Vec::from_iter_in(
+    let mut points_2d = Vec::new_in(bump);
+    points_2d.extend(
         new_to_ori_map
             .iter()
             .map(|&idx| {
                 let p = point3(points, idx);
-                let mut v = vec![in bump; 0.0; 3];
+                let mut v = std::vec::from_elem_in(0.0, 3, bump);
                 sub(p, o, &mut v);
                 [dot(&v, x), dot(&v, y)]
             })
             .flatten(),
-        bump,
     );
-    Vec::from_iter_in(
+    let mut result = Vec::new_in(bump);
+    result.extend(
         triangulate(&points_2d, &new_segments, bump)
             .into_iter()
             .map(|idx| new_to_ori_map[idx]),
-        bump,
-    )
+    );
+    result
 }
 
 #[inline]
-pub fn triangulate_polygon_soup<'b>(
+pub fn triangulate_polygon_soup(
     points: &[f64],
-    edges: &[Vec<'b, usize>],
+    edges: &[Vec<usize>],
     axes: &[f64],
-    bump: &'b Bump,
-) -> (Vec<'b, usize>, Vec<'b, usize>) {
-    let mut triangles = Vec::new_in(bump);
-    let mut parents = Vec::new_in(bump);
+) -> (Vec<usize>, Vec<usize>) {
+    let mut triangles = Vec::new();
+    let mut parents = Vec::new();
+    let mut bump = Bump::new();
     for (idx, (segments, axis_data)) in edges.iter().zip(axes.chunks(9)).enumerate() {
+        bump.reset();
         let face_triangles = triangulate_polygon(
             points,
             segments,
             &axis_data[0..3],
             &axis_data[3..6],
             &axis_data[6..9],
-            bump,
+            &bump,
         );
         parents.resize(parents.len() + face_triangles.len() / 3, idx);
         triangles.extend(face_triangles);
@@ -175,9 +183,9 @@ impl Default for Triangle {
     }
 }
 
-struct Mesh<'a, 'b: 'a> {
+struct Mesh<'a, A: Allocator + Copy> {
     points: &'a [f64],
-    triangles: Vec<'b, Triangle>,
+    triangles: Vec<Triangle, A>,
 }
 
 fn alternate_axes(points: &[f64], indices: &mut [usize], mut axis: usize) {
@@ -203,7 +211,7 @@ fn alternate_axes(points: &[f64], indices: &mut [usize], mut axis: usize) {
 }
 
 #[inline(always)]
-fn make_triangle(triangles: &mut Vec<'_, Triangle>, he: &mut HEdge) {
+fn make_triangle<A: Allocator + Copy>(triangles: &mut Vec<Triangle, A>, he: &mut HEdge) {
     he.tri = triangles.len();
     triangles.push(Triangle::default());
     he.ori = 0;
@@ -315,12 +323,25 @@ fn copy(src: &HEdge, dest: &mut HEdge) {
 }
 
 #[inline(always)]
-fn counterclockwise(points: &[f64], i: usize, j: usize, k: usize, bump: &Bump) -> f64 {
+fn counterclockwise<A: Allocator + Copy>(
+    points: &[f64],
+    i: usize,
+    j: usize,
+    k: usize,
+    bump: A,
+) -> f64 {
     predicates::orient2d(point(points, i), point(points, j), point(points, k), bump)
 }
 
 #[inline(always)]
-fn incircle(points: &[f64], a: usize, b: usize, c: usize, d: usize, bump: &Bump) -> f64 {
+fn incircle<A: Allocator + Copy>(
+    points: &[f64],
+    a: usize,
+    b: usize,
+    c: usize,
+    d: usize,
+    bump: A,
+) -> f64 {
     predicates::incircle(
         point(points, a),
         point(points, b),
@@ -330,14 +351,14 @@ fn incircle(points: &[f64], a: usize, b: usize, c: usize, d: usize, bump: &Bump)
     )
 }
 
-fn merge_hulls(
-    m: &mut Mesh,
+fn merge_hulls<A: Allocator + Copy>(
+    m: &mut Mesh<A>,
     axis: usize,
     far_left: &mut HEdge,
     inner_left: &mut HEdge,
     inner_right: &mut HEdge,
     far_right: &mut HEdge,
-    bump: &Bump,
+    bump: A,
 ) {
     let mut inner_left_dest = dest(&m.triangles, inner_left);
     let mut inner_left_apex = apex(&m.triangles, inner_left);
@@ -658,13 +679,13 @@ fn merge_hulls(
     }
 }
 
-fn div_conq_recurse(
-    m: &mut Mesh,
+fn div_conq_recurse<A: Allocator + Copy>(
+    m: &mut Mesh<'_, A>,
     sorted_pt_inds: &[usize],
     axis: usize,
     far_left: &mut HEdge,
     far_right: &mut HEdge,
-    bump: &Bump,
+    bump: A,
 ) {
     let len = sorted_pt_inds.len();
     if len == 2 {
@@ -801,9 +822,9 @@ fn div_conq_recurse(
     }
 }
 
-fn mark_ghost<'b>(triangles: &[Triangle], start: &HEdge, bump: &'b Bump) -> Vec<'b, bool> {
+fn mark_ghost<A: Allocator + Copy>(triangles: &[Triangle], start: &HEdge, bump: A) -> Vec<bool, A> {
     let mut dissolve_edge = start.clone();
-    let mut ghost = vec![in bump; false; triangles.len()];
+    let mut ghost = std::vec::from_elem_in(false, triangles.len(), bump);
     loop {
         ghost[dissolve_edge.tri] = true;
         next_self(&mut dissolve_edge);
@@ -815,13 +836,13 @@ fn mark_ghost<'b>(triangles: &[Triangle], start: &HEdge, bump: &'b Bump) -> Vec<
     ghost
 }
 
-fn make_vertex_map<'b>(
+fn make_vertex_map<A: Allocator + Copy>(
     triangles: &[Triangle],
     ghost: &[bool],
     n_points: usize,
-    bump: &'b Bump,
-) -> Vec<'b, HEdge> {
-    let mut vertex_map = vec![in bump; HEdge::default(); n_points];
+    bump: A,
+) -> Vec<HEdge, A> {
+    let mut vertex_map = std::vec::from_elem_in(HEdge::default(), n_points, bump);
     for idx in 0..triangles.len() {
         if ghost[idx] {
             continue;
@@ -850,7 +871,12 @@ enum Direction {
     RIGHTCOLLINEAR,
 }
 
-fn find_direction(m: &Mesh, search_tri: &mut HEdge, search_point: usize, bump: &Bump) -> Direction {
+fn find_direction<A: Allocator + Copy>(
+    m: &Mesh<A>,
+    search_tri: &mut HEdge,
+    search_point: usize,
+    bump: A,
+) -> Direction {
     let start_vertex = org(&m.triangles, search_tri);
     let mut right_vertex = dest(&m.triangles, search_tri);
     let mut left_vertex = apex(&m.triangles, search_tri);
@@ -921,12 +947,12 @@ fn set_mark(triangles: &mut [Triangle], he: &HEdge, mark: usize, reverse: bool) 
     }
 }
 
-fn scout_segment(
-    m: &mut Mesh,
+fn scout_segment<A: Allocator + Copy>(
+    m: &mut Mesh<A>,
     search_tri: &mut HEdge,
     endpoint2: usize,
     mark: usize,
-    bump: &Bump,
+    bump: A,
 ) -> bool {
     let collinear = find_direction(m, search_tri, endpoint2, bump);
     let right_vertex = dest(&m.triangles, search_tri);
@@ -955,7 +981,7 @@ fn scout_segment(
     }
 }
 
-fn flip(m: &mut Mesh, flip_edge: &HEdge, vertex_map: &mut [HEdge]) {
+fn flip<A: Allocator + Copy>(m: &mut Mesh<A>, flip_edge: &HEdge, vertex_map: &mut [HEdge]) {
     let right_vertex = org(&m.triangles, flip_edge);
     let left_vertex = dest(&m.triangles, flip_edge);
     let bot_vertex = apex(&m.triangles, flip_edge);
@@ -1017,13 +1043,13 @@ fn flip(m: &mut Mesh, flip_edge: &HEdge, vertex_map: &mut [HEdge]) {
     set_apex(&mut m.triangles, &top, left_vertex);
 }
 
-fn delaunay_fixup(
-    m: &mut Mesh,
+fn delaunay_fixup<A: Allocator + Copy>(
+    m: &mut Mesh<A>,
     ghost: &[bool],
     fixup_tri: &mut HEdge,
     left_side: bool,
     vertex_map: &mut [HEdge],
-    bump: &Bump,
+    bump: A,
 ) {
     let mut near_tri = HEdge::default();
     next(fixup_tri, &mut near_tri);
@@ -1074,14 +1100,14 @@ fn delaunay_fixup(
     delaunay_fixup(m, ghost, &mut far_tri, left_side, vertex_map, bump);
 }
 
-fn constrained_edge(
-    m: &mut Mesh,
+fn constrained_edge<A: Allocator + Copy>(
+    m: &mut Mesh<A>,
     ghost: &[bool],
     start_tri: &mut HEdge,
     endpoint2: usize,
     mark: usize,
     vertex_map: &mut [HEdge],
-    bump: &Bump,
+    bump: A,
 ) {
     let endpoint1 = org(&m.triangles, start_tri);
     let mut fixup_tri = HEdge::default();
@@ -1142,14 +1168,14 @@ fn constrained_edge(
     }
 }
 
-fn insert_segment(
-    m: &mut Mesh,
+fn insert_segment<A: Allocator + Copy>(
+    m: &mut Mesh<A>,
     vertex_map: &mut [HEdge],
     ghost: &[bool],
     mut start: usize,
     mut end: usize,
     mark: usize,
-    bump: &Bump,
+    bump: A,
 ) {
     let mut searchtri1 = vertex_map[start].clone();
     if scout_segment(m, &mut searchtri1, end, mark, bump) {
@@ -1168,7 +1194,7 @@ fn insert_segment(
     constrained_edge(m, ghost, &mut searchtri1, end, mark, vertex_map, bump);
 }
 
-fn form_skeleton(m: &mut Mesh, ghost: &[bool], segment: &[usize], bump: &Bump) {
+fn form_skeleton<A: Allocator + Copy>(m: &mut Mesh<A>, ghost: &[bool], segment: &[usize], bump: A) {
     let mut vertex_map = make_vertex_map(&m.triangles, ghost, m.points.len() >> 1, bump);
     for (i, seg) in segment.chunks(2).enumerate() {
         if seg[0] != seg[1] {
@@ -1177,11 +1203,10 @@ fn form_skeleton(m: &mut Mesh, ghost: &[bool], segment: &[usize], bump: &Bump) {
     }
 }
 
-fn unique_indices<'b>(indices: &[usize], bump: &'b Bump) -> [Vec<'b, usize>; 2] {
+fn unique_indices<A: Allocator + Copy>(indices: &[usize], bump: A) -> [Vec<usize, A>; 2] {
     let mut count = 0;
-    let mut map = HashMap::new();
-    map.reserve(indices.len());
-    let mut result = Vec::new_in(bump);
+    let mut map = HashMap::with_capacity_in(indices.len(), bump);
+    let mut result = Vec::with_capacity_in(indices.len(), bump);
     result.reserve(indices.len());
     for old in indices {
         if let Some(&now) = map.get(old) {
@@ -1192,7 +1217,7 @@ fn unique_indices<'b>(indices: &[usize], bump: &'b Bump) -> [Vec<'b, usize>; 2] 
             count += 1;
         }
     }
-    let mut new_to_ori_map = vec![in bump; 0; map.len()];
+    let mut new_to_ori_map = std::vec::from_elem_in(0, map.len(), bump);
     for (k, v) in map {
         new_to_ori_map[v] = k;
     }

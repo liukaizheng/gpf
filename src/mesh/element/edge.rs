@@ -1,7 +1,4 @@
-use std::{
-    marker::PhantomData,
-    ops::{Deref, DerefMut, Index, IndexMut},
-};
+use std::ops::{Deref, DerefMut, Index, IndexMut};
 
 use super::{iter_next, Element, ElementId, HalfedgeId, HalfedgeIter};
 use crate::{element_id, element_iterator, halfedges_iterator, mesh::Mesh, INVALID_IND};
@@ -11,19 +8,14 @@ pub struct EdgeId(pub usize);
 
 element_id! {struct EdgeId}
 
-pub struct EdgeIter<'a, 'b: 'a, M: Mesh<'b>> {
-    phantom: PhantomData<&'b M>,
+pub struct EdgeIter<'a, M: Mesh> {
     id: EdgeId,
     mesh: &'a M,
 }
 
-impl<'a, 'b: 'a, M: Mesh<'b>> EdgeIter<'a, 'b, M> {
+impl<'a, M: Mesh> EdgeIter<'a, M> {
     pub fn new(id: EdgeId, mesh: &'a M) -> Self {
-        Self {
-            id,
-            mesh,
-            phantom: PhantomData,
-        }
+        Self { id, mesh }
     }
 
     #[allow(dead_code)]
@@ -37,7 +29,7 @@ impl<'a, 'b: 'a, M: Mesh<'b>> EdgeIter<'a, 'b, M> {
     }
 }
 
-impl<'a, 'b: 'a, M: Mesh<'b>> Deref for EdgeIter<'a, 'b, M> {
+impl<'a, M: Mesh> Deref for EdgeIter<'a, M> {
     type Target = EdgeId;
 
     fn deref(&self) -> &Self::Target {
@@ -65,32 +57,30 @@ element_iterator! {
     }
 }
 
-pub trait Edge<'b>: Element<'b> {
-    fn halfedge(&self) -> HalfedgeIter<'_, 'b, Self::M>;
-    fn halfedges(&self) -> EHalfedgesIter<'_, 'b, Self::M>;
+pub trait Edge: Element {
+    fn halfedge(&self) -> HalfedgeIter<Self::M>;
+    fn halfedges(&self) -> EHalfedgesIter<Self::M>;
 }
 
-impl<'a, 'b: 'a, M: Mesh<'b>> Edge<'b> for EdgeIter<'a, 'b, M> {
-    fn halfedge(&self) -> HalfedgeIter<'_, 'b, Self::M> {
+impl<'a, M: Mesh> Edge for EdgeIter<'a, M> {
+    fn halfedge(&self) -> HalfedgeIter<Self::M> {
         HalfedgeIter::new(self.mesh.e_halfedge(self.id), self.mesh)
     }
-    fn halfedges(&self) -> EHalfedgesIter<'_, 'b, Self::M> {
+    fn halfedges(&self) -> EHalfedgesIter<Self::M> {
         EHalfedgesIter::new(self.mesh.e_halfedge(self.id), self.mesh)
     }
 }
 
-pub struct EHalfedgesIter<'a, 'b: 'a, M: Mesh<'b>> {
-    phantom: PhantomData<&'b M>,
+pub struct EHalfedgesIter<'a, M: Mesh> {
     mesh: &'a M,
     just_start: bool,
     first_he: HalfedgeId,
     curr_he: HalfedgeId,
 }
 
-impl<'a, 'b: 'a, M: Mesh<'b>> EHalfedgesIter<'a, 'b, M> {
+impl<'a, M: Mesh> EHalfedgesIter<'a, M> {
     pub fn new(he: HalfedgeId, mesh: &'a M) -> Self {
         Self {
-            phantom: PhantomData,
             mesh,
             just_start: true,
             first_he: he,

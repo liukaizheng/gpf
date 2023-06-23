@@ -1,4 +1,4 @@
-use bumpalo::{collections::Vec, Bump};
+use std::alloc::Allocator;
 
 struct Bound {
     splitter: f64,
@@ -204,35 +204,31 @@ pub const fn two_two_diff(a1: f64, a0: f64, b1: f64, b0: f64) -> (f64, f64, f64,
 }
 
 #[inline]
-pub fn grow_expansion<'a>(earr: &[f64], b: f64, bump: &'a Bump) -> Vec<'a, f64> {
+pub fn grow_expansion<A: Allocator>(earr: &[f64], b: f64, allocator: A) -> Vec<f64, A> {
     let mut q = b;
-    let mut harr = Vec::from_iter_in(
-        earr.iter().map(|&enow| {
-            let (qnew, h) = two_sum(q, enow);
-            q = qnew;
-            h
-        }),
-        bump,
-    );
+    let mut harr = Vec::new_in(allocator);
+    harr.extend(earr.iter().map(|&enow| {
+        let (qnew, h) = two_sum(q, enow);
+        q = qnew;
+        h
+    }));
     harr.push(q);
     harr
 }
 
 #[inline]
-pub fn grow_expansion_zeroelim<'a>(earr: &[f64], b: f64, bump: &'a Bump) -> Vec<'a, f64> {
+pub fn grow_expansion_zeroelim<A: Allocator>(earr: &[f64], b: f64, allocator: A) -> Vec<f64, A> {
     let mut q = b;
-    let mut h = Vec::from_iter_in(
-        earr.iter().filter_map(|&enow| {
-            let (qnew, r) = two_sum(q, enow);
-            q = qnew;
-            if r != 0.0 {
-                Some(r)
-            } else {
-                None
-            }
-        }),
-        bump,
-    );
+    let mut h = Vec::new_in(allocator);
+    h.extend(earr.iter().filter_map(|&enow| {
+        let (qnew, r) = two_sum(q, enow);
+        q = qnew;
+        if r != 0.0 {
+            Some(r)
+        } else {
+            None
+        }
+    }));
     if q != 0.0 {
         h.push(q);
     }
@@ -240,9 +236,9 @@ pub fn grow_expansion_zeroelim<'a>(earr: &[f64], b: f64, bump: &'a Bump) -> Vec<
 }
 
 #[inline]
-pub fn expansion_sum<'a>(earr: &[f64], farr: &[f64], bump: &'a Bump) -> Vec<'a, f64> {
+pub fn expansion_sum<A: Allocator>(earr: &[f64], farr: &[f64], allocator: A) -> Vec<f64, A> {
     let mut q = farr[0];
-    let mut h_arr = Vec::with_capacity_in(earr.len() + farr.len(), bump);
+    let mut h_arr = Vec::with_capacity_in(earr.len() + farr.len(), allocator);
     h_arr.extend(earr.iter().map(|&enow| {
         let (qnew, r) = two_sum(q, enow);
         q = qnew;
@@ -316,7 +312,11 @@ impl<'a> Iterator for TwoArr<'a> {
     }
 }
 
-pub fn fast_expansion_sum_zeroelim<'a>(earr: &[f64], farr: &[f64], bump: &'a Bump) -> Vec<'a, f64> {
+pub fn fast_expansion_sum_zeroelim<A: Allocator>(
+    earr: &[f64],
+    farr: &[f64],
+    allocator: A,
+) -> Vec<f64, A> {
     let mut iter = TwoArr {
         arr1: earr,
         arr2: farr,
@@ -327,7 +327,7 @@ pub fn fast_expansion_sum_zeroelim<'a>(earr: &[f64], farr: &[f64], bump: &'a Bum
         // init
         let (qnew, h) = fast_two_sum(now, q);
         q = qnew;
-        let mut harr = Vec::with_capacity_in(earr.len() * farr.len(), bump);
+        let mut harr = Vec::with_capacity_in(earr.len() * farr.len(), allocator);
         if h != 0.0 {
             harr.push(h);
         }
@@ -344,25 +344,30 @@ pub fn fast_expansion_sum_zeroelim<'a>(earr: &[f64], farr: &[f64], bump: &'a Bum
         }
         harr
     } else {
-        Vec::new_in(bump)
+        Vec::new_in(allocator)
     }
 }
 
 #[inline]
-pub fn fast_expansion_diff_zeroelim<'a>(
+pub fn fast_expansion_diff_zeroelim<A: Allocator + Copy>(
     earr: &[f64],
     farr: &[f64],
-    bump: &'a Bump,
-) -> Vec<'a, f64> {
-    let farr_oppo = Vec::from_iter_in(farr.iter().map(|&f| -f), bump);
-    fast_expansion_sum_zeroelim(earr, &farr_oppo, bump)
+    allocator: A,
+) -> Vec<f64, A> {
+    let mut farr_oppo = Vec::new_in(allocator);
+    farr_oppo.extend(farr.iter().map(|&f| -f));
+    fast_expansion_sum_zeroelim(earr, &farr_oppo, allocator)
 }
 
-pub fn scale_expansion_zeroelim<'a>(earr: &[f64], b: f64, bump: &'a Bump) -> Vec<'a, f64> {
+pub fn scale_expansion_zeroelim<A: Allocator + Copy>(
+    earr: &[f64],
+    b: f64,
+    allocator: A,
+) -> Vec<f64, A> {
     let (bhi, blo) = split(b);
     let (&efirst, earr) = earr.split_first().unwrap();
     let (mut q, h) = two_product_pre_split(efirst, b, bhi, blo);
-    let mut harr = Vec::new_in(bump);
+    let mut harr = Vec::new_in(allocator);
     if h != 0.0 {
         harr.push(h);
     }
@@ -372,7 +377,7 @@ pub fn scale_expansion_zeroelim<'a>(earr: &[f64], b: f64, bump: &'a Bump) -> Vec
             .map(|&e| {
                 let (p1, p0) = two_product_pre_split(e, b, bhi, blo);
                 let (sum, mut h) = two_sum(q, p0);
-                let mut ret = Vec::with_capacity_in(2, bump);
+                let mut ret = Vec::with_capacity_in(2, allocator);
                 if h != 0.0 {
                     ret.push(h);
                 }
@@ -392,15 +397,19 @@ pub fn scale_expansion_zeroelim<'a>(earr: &[f64], b: f64, bump: &'a Bump) -> Vec
 }
 
 #[inline]
-fn mul_expansion_zeroelim_imp<'a>(earr: &[f64], farr: &[f64], bump: &'a Bump) -> Vec<'a, f64> {
-    let init = scale_expansion_zeroelim(&farr, earr[0], bump);
+fn mul_expansion_zeroelim_imp<A: Allocator + Copy>(
+    earr: &[f64],
+    farr: &[f64],
+    allocator: A,
+) -> Vec<f64, A> {
+    let init = scale_expansion_zeroelim(&farr, earr[0], allocator);
     earr[1..]
         .iter()
         .scan(init, |res, &s| {
             Some(fast_expansion_sum_zeroelim(
-                &scale_expansion_zeroelim(&farr, s, bump),
+                &scale_expansion_zeroelim(&farr, s, allocator),
                 &res,
-                bump,
+                allocator,
             ))
         })
         .last()
@@ -408,16 +417,20 @@ fn mul_expansion_zeroelim_imp<'a>(earr: &[f64], farr: &[f64], bump: &'a Bump) ->
 }
 
 #[inline]
-pub fn mul_expansion_zeroelim<'a>(earr: &[f64], farr: &[f64], bump: &'a Bump) -> Vec<'a, f64> {
+pub fn mul_expansion_zeroelim<A: Allocator + Copy>(
+    earr: &[f64],
+    farr: &[f64],
+    allocator: A,
+) -> Vec<f64, A> {
     if earr.len() == 1 {
-        scale_expansion_zeroelim(farr, earr[0], bump)
+        scale_expansion_zeroelim(farr, earr[0], allocator)
     } else if farr.len() == 1 {
-        scale_expansion_zeroelim(earr, farr[0], bump)
+        scale_expansion_zeroelim(earr, farr[0], allocator)
     } else {
         if earr.len() < farr.len() {
-            mul_expansion_zeroelim_imp(earr, farr, bump)
+            mul_expansion_zeroelim_imp(earr, farr, allocator)
         } else {
-            mul_expansion_zeroelim_imp(farr, earr, bump)
+            mul_expansion_zeroelim_imp(farr, earr, allocator)
         }
     }
 }
@@ -434,7 +447,13 @@ pub fn estimate(arr: &[f64]) -> f64 {
     arr.iter().sum()
 }
 
-fn orient2d_adapt(pa: &[f64], pb: &[f64], pc: &[f64], detsum: f64, bump: &Bump) -> f64 {
+fn orient2d_adapt<A: Allocator + Copy>(
+    pa: &[f64],
+    pb: &[f64],
+    pc: &[f64],
+    detsum: f64,
+    allocator: A,
+) -> f64 {
     let acx = pa[0] - pc[0];
     let bcx = pb[0] - pc[0];
     let acy = pa[1] - pc[1];
@@ -442,7 +461,7 @@ fn orient2d_adapt(pa: &[f64], pb: &[f64], pc: &[f64], detsum: f64, bump: &Bump) 
 
     let (detleft, detlefttail) = two_product(acx, bcy);
     let (detright, detrighttail) = two_product(acy, bcx);
-    let mut b = bumpalo::vec![in bump; 0.0; 4];
+    let mut b = std::vec::from_elem_in(0.0, 4, allocator);
     (b[3], b[2], b[1], b[0]) = two_two_diff(detleft, detlefttail, detright, detrighttail);
 
     let mut det = estimate(&b);
@@ -468,24 +487,24 @@ fn orient2d_adapt(pa: &[f64], pb: &[f64], pc: &[f64], detsum: f64, bump: &Bump) 
 
     let (s1, s0) = two_product(acxtail, bcy);
     let (t1, t0) = two_product(acytail, bcx);
-    let mut u = bumpalo::vec![in bump; 0.0; 4];
+    let mut u = std::vec::from_elem_in(0.0, 4, allocator);
     (u[3], u[2], u[1], u[0]) = two_two_diff(s1, s0, t1, t0);
-    let c1 = fast_expansion_sum_zeroelim(&b, &u, bump);
+    let c1 = fast_expansion_sum_zeroelim(&b, &u, allocator);
 
     let (s1, s0) = two_product(acx, bcytail);
     let (t1, t0) = two_product(acy, bcxtail);
     (u[3], u[2], u[1], u[0]) = two_two_diff(s1, s0, t1, t0);
-    let c2 = fast_expansion_sum_zeroelim(&c1, &u, bump);
+    let c2 = fast_expansion_sum_zeroelim(&c1, &u, allocator);
 
     let (s1, s0) = two_product(acxtail, bcytail);
     let (t1, t0) = two_product(acytail, bcxtail);
     (u[3], u[2], u[1], u[0]) = two_two_diff(s1, s0, t1, t0);
-    let d = fast_expansion_sum_zeroelim(&c2, &u, bump);
+    let d = fast_expansion_sum_zeroelim(&c2, &u, allocator);
 
     *d.last().unwrap()
 }
 
-pub fn orient2d(pa: &[f64], pb: &[f64], pc: &[f64], bump: &Bump) -> f64 {
+pub fn orient2d<A: Allocator + Copy>(pa: &[f64], pb: &[f64], pc: &[f64], allocator: A) -> f64 {
     let detleft = (pa[0] - pc[0]) * (pb[1] - pc[1]);
     let detright = (pa[1] - pc[1]) * (pb[0] - pc[0]);
     let det = detleft - detright;
@@ -512,16 +531,16 @@ pub fn orient2d(pa: &[f64], pb: &[f64], pc: &[f64], bump: &Bump) -> f64 {
         return det;
     }
 
-    orient2d_adapt(pa, pb, pc, detsum, bump)
+    orient2d_adapt(pa, pb, pc, detsum, allocator)
 }
 
-fn orient3d_adapt(
+fn orient3d_adapt<A: Allocator + Copy>(
     pa: &[f64],
     pb: &[f64],
     pc: &[f64],
     pd: &[f64],
     permanent: f64,
-    bump: &Bump,
+    allocator: A,
 ) -> f64 {
     let adx = pa[0] - pd[0];
     let bdx = pb[0] - pd[0];
@@ -535,24 +554,24 @@ fn orient3d_adapt(
 
     let (bdxcdy1, bdxcdy0) = two_product(bdx, cdy);
     let (cdxbdy1, cdxbdy0) = two_product(cdx, bdy);
-    let mut bc = bumpalo::vec![in bump; 0.0; 4];
+    let mut bc = std::vec::from_elem_in(0.0, 4, allocator);
     (bc[3], bc[2], bc[1], bc[0]) = two_two_diff(bdxcdy1, bdxcdy0, cdxbdy1, cdxbdy0);
-    let adet = scale_expansion_zeroelim(&bc, adz, bump);
+    let adet = scale_expansion_zeroelim(&bc, adz, allocator);
 
     let (cdxady1, cdxady0) = two_product(cdx, ady);
     let (adxcdy1, adxcdy0) = two_product(adx, cdy);
-    let mut ca = bumpalo::vec![in bump; 0.0; 4];
+    let mut ca = std::vec::from_elem_in(0.0, 4, allocator);
     (ca[3], ca[2], ca[1], ca[0]) = two_two_diff(cdxady1, cdxady0, adxcdy1, adxcdy0);
-    let bdet = scale_expansion_zeroelim(&ca, bdz, bump);
+    let bdet = scale_expansion_zeroelim(&ca, bdz, allocator);
 
     let (adxbdy1, adxbdy0) = two_product(adx, bdy);
     let (bdxady1, bdxady0) = two_product(bdx, ady);
-    let mut ab = bumpalo::vec![in bump; 0.0; 4];
+    let mut ab = std::vec::from_elem_in(0.0, 4, allocator);
     (ab[3], ab[2], ab[1], ab[0]) = two_two_diff(adxbdy1, adxbdy0, bdxady1, bdxady0);
-    let cdet = scale_expansion_zeroelim(&ab, cdz, bump);
+    let cdet = scale_expansion_zeroelim(&ab, cdz, allocator);
 
-    let abdet = fast_expansion_sum_zeroelim(&adet, &bdet, bump);
-    let mut fin = fast_expansion_sum_zeroelim(&abdet, &cdet, bump);
+    let abdet = fast_expansion_sum_zeroelim(&adet, &bdet, allocator);
+    let mut fin = fast_expansion_sum_zeroelim(&abdet, &cdet, allocator);
 
     let mut det = estimate(&fin);
     let errbound = B.o3d_err_boundb * permanent;
@@ -594,22 +613,25 @@ fn orient3d_adapt(
         return det;
     }
 
-    fn helper1(
+    fn helper1<A: Allocator + Copy>(
         adxtail: f64,
         adytail: f64,
         bdx: f64,
         bdy: f64,
         cdx: f64,
         cdy: f64,
-        bump: &Bump,
-    ) -> (Vec<f64>, Vec<f64>) {
+        allocator: A,
+    ) -> (Vec<f64, A>, Vec<f64, A>) {
         if adxtail == 0.0 {
             if adytail == 0.0 {
-                (bumpalo::vec![in bump; 0.0], bumpalo::vec![in bump; 0.0])
+                (
+                    std::vec::from_elem_in(0.0, 4, allocator),
+                    std::vec::from_elem_in(0.0, 4, allocator),
+                )
             } else {
                 let (mut at_b, mut at_c) = (
-                    bumpalo::vec![in bump; 0.0, 0.0],
-                    bumpalo::vec![in bump; 0.0, 0.0],
+                    std::vec::from_elem_in(0.0, 4, allocator),
+                    std::vec::from_elem_in(0.0, 4, allocator),
                 );
                 (at_b[1], at_b[0]) = two_product(-adytail, bdx);
                 (at_c[1], at_c[0]) = two_product(adytail, cdx);
@@ -618,8 +640,8 @@ fn orient3d_adapt(
         } else {
             if adytail == 0.0 {
                 let (mut at_b, mut at_c) = (
-                    bumpalo::vec![in bump; 0.0, 0.0],
-                    bumpalo::vec![in bump; 0.0, 0.0],
+                    std::vec::from_elem_in(0.0, 4, allocator),
+                    std::vec::from_elem_in(0.0, 4, allocator),
                 );
                 (at_b[1], at_b[0]) = two_product(adxtail, bdy);
                 (at_c[1], at_c[0]) = two_product(-adxtail, cdy);
@@ -628,8 +650,8 @@ fn orient3d_adapt(
                 let (adxt_bdy1, adxt_bdy0) = two_product(adxtail, bdy);
                 let (adyt_bdx1, adyt_bdx0) = two_product(adytail, bdx);
                 let (mut at_b, mut at_c) = (
-                    bumpalo::vec![in bump; 0.0; 4],
-                    bumpalo::vec![in bump; 0.0; 4],
+                    std::vec::from_elem_in(0.0, 4, allocator),
+                    std::vec::from_elem_in(0.0, 4, allocator),
                 );
                 (at_b[3], at_b[2], at_b[1], at_b[0]) =
                     two_two_diff(adxt_bdy1, adxt_bdy0, adyt_bdx1, adyt_bdx0);
@@ -642,38 +664,38 @@ fn orient3d_adapt(
         }
     }
 
-    let (at_b, at_c) = helper1(adxtail, adytail, bdx, bdy, cdx, cdy, bump);
-    let (bt_c, bt_a) = helper1(bdxtail, bdytail, cdx, cdy, adx, ady, bump);
-    let (ct_a, ct_b) = helper1(cdxtail, cdytail, adx, ady, bdx, bdy, bump);
+    let (at_b, at_c) = helper1(adxtail, adytail, bdx, bdy, cdx, cdy, allocator);
+    let (bt_c, bt_a) = helper1(bdxtail, bdytail, cdx, cdy, adx, ady, allocator);
+    let (ct_a, ct_b) = helper1(cdxtail, cdytail, adx, ady, bdx, bdy, allocator);
 
-    let xyt = Vec::from_iter_in(
+    let mut xyt = Vec::new_in(allocator);
+    xyt.extend(
         [(bt_c, ct_b, adz), (ct_a, at_c, bdz), (at_b, bt_a, cdz)]
             .into_iter()
             .map(|tuple| {
-                let sum = fast_expansion_sum_zeroelim(&tuple.0, &tuple.1, bump);
-                let w = scale_expansion_zeroelim(&sum, tuple.2, bump);
-                fin = fast_expansion_sum_zeroelim(&fin, &w, bump);
+                let sum = fast_expansion_sum_zeroelim(&tuple.0, &tuple.1, allocator);
+                let w = scale_expansion_zeroelim(&sum, tuple.2, allocator);
+                fin = fast_expansion_sum_zeroelim(&fin, &w, allocator);
                 sum
             }),
-        bump,
     );
 
     if adztail != 0.0 {
-        let v = scale_expansion_zeroelim(&bc, adztail, bump);
-        fin = fast_expansion_sum_zeroelim(&fin, &v, bump);
+        let v = scale_expansion_zeroelim(&bc, adztail, allocator);
+        fin = fast_expansion_sum_zeroelim(&fin, &v, allocator);
     }
 
     if bdztail != 0.0 {
-        let v = scale_expansion_zeroelim(&ca, bdztail, bump);
-        fin = fast_expansion_sum_zeroelim(&fin, &v, bump);
+        let v = scale_expansion_zeroelim(&ca, bdztail, allocator);
+        fin = fast_expansion_sum_zeroelim(&fin, &v, allocator);
     }
 
     if cdztail != 0.0 {
-        let v = scale_expansion_zeroelim(&ab, cdztail, bump);
-        fin = fast_expansion_sum_zeroelim(&fin, &v, bump);
+        let v = scale_expansion_zeroelim(&ab, cdztail, allocator);
+        fin = fast_expansion_sum_zeroelim(&fin, &v, allocator);
     }
 
-    fn helper2<'a>(
+    fn helper2<A: Allocator + Copy>(
         adxtail: f64,
         bdytail: f64,
         bdztail: f64,
@@ -681,61 +703,67 @@ fn orient3d_adapt(
         cdz: f64,
         cdytail: f64,
         cdztail: f64,
-        fin: &mut Vec<'a, f64>,
-        bump: &'a Bump,
+        fin: &mut Vec<f64, A>,
+        allocator: A,
     ) {
         if adxtail != 0.0 {
             if bdytail != 0.0 {
                 let (adxt_bdyt1, adxt_bdyt0) = two_product(adxtail, bdytail);
-                let mut u = bumpalo::vec![in bump; 0.0; 4];
+                let mut u = std::vec::from_elem_in(0.0, 4, allocator);
                 (u[3], u[2], u[1], u[0]) = two_one_product(adxt_bdyt1, adxt_bdyt0, cdz);
-                *fin = fast_expansion_sum_zeroelim(fin, &u, bump);
+                *fin = fast_expansion_sum_zeroelim(fin, &u, allocator);
                 if cdztail != 0.0 {
                     (u[3], u[2], u[1], u[0]) = two_one_product(adxt_bdyt1, adxt_bdyt0, cdztail);
-                    *fin = fast_expansion_sum_zeroelim(fin, &u, bump);
+                    *fin = fast_expansion_sum_zeroelim(fin, &u, allocator);
                 }
             }
             if cdytail != 0.0 {
                 let (adxt_cdyt1, adxt_cdyt0) = two_product(-adxtail, cdytail);
-                let mut u = bumpalo::vec![in bump; 0.0; 4];
+                let mut u = std::vec::from_elem_in(0.0, 4, allocator);
                 (u[3], u[2], u[1], u[0]) = two_one_product(adxt_cdyt1, adxt_cdyt0, bdz);
-                *fin = fast_expansion_sum_zeroelim(fin, &u, bump);
+                *fin = fast_expansion_sum_zeroelim(fin, &u, allocator);
                 if bdztail != 0.0 {
                     (u[3], u[2], u[1], u[0]) = two_one_product(adxt_cdyt1, adxt_cdyt0, bdztail);
-                    *fin = fast_expansion_sum_zeroelim(fin, &u, bump);
+                    *fin = fast_expansion_sum_zeroelim(fin, &u, allocator);
                 }
             }
         }
     }
 
     helper2(
-        adxtail, bdytail, bdztail, bdz, cdz, cdytail, cdztail, &mut fin, bump,
+        adxtail, bdytail, bdztail, bdz, cdz, cdytail, cdztail, &mut fin, allocator,
     );
     helper2(
-        bdxtail, cdytail, cdztail, cdz, adz, adytail, adztail, &mut fin, bump,
+        bdxtail, cdytail, cdztail, cdz, adz, adytail, adztail, &mut fin, allocator,
     );
     helper2(
-        cdztail, adytail, adztail, adz, bdz, bdytail, bdztail, &mut fin, bump,
+        cdztail, adytail, adztail, adz, bdz, bdytail, bdztail, &mut fin, allocator,
     );
 
     if adztail != 0.0 {
-        let v = scale_expansion_zeroelim(&xyt[0], adztail, bump);
-        fin = fast_expansion_sum_zeroelim(&fin, &v, bump);
+        let v = scale_expansion_zeroelim(&xyt[0], adztail, allocator);
+        fin = fast_expansion_sum_zeroelim(&fin, &v, allocator);
     }
 
     if bdztail != 0.0 {
-        let v = scale_expansion_zeroelim(&xyt[1], bdztail, bump);
-        fin = fast_expansion_sum_zeroelim(&fin, &v, bump);
+        let v = scale_expansion_zeroelim(&xyt[1], bdztail, allocator);
+        fin = fast_expansion_sum_zeroelim(&fin, &v, allocator);
     }
 
     if cdztail != 0.0 {
-        let v = scale_expansion_zeroelim(&xyt[2], cdztail, bump);
-        fin = fast_expansion_sum_zeroelim(&fin, &v, bump);
+        let v = scale_expansion_zeroelim(&xyt[2], cdztail, allocator);
+        fin = fast_expansion_sum_zeroelim(&fin, &v, allocator);
     }
     *fin.last().unwrap()
 }
 
-pub fn orient3d(pa: &[f64], pb: &[f64], pc: &[f64], pd: &[f64], bump: &Bump) -> f64 {
+pub fn orient3d<A: Allocator + Copy>(
+    pa: &[f64],
+    pb: &[f64],
+    pc: &[f64],
+    pd: &[f64],
+    allocator: A,
+) -> f64 {
     let adx = pa[0] - pd[0];
     let ady = pa[1] - pd[1];
     let adz = pa[2] - pd[2];
@@ -765,7 +793,7 @@ pub fn orient3d(pa: &[f64], pb: &[f64], pc: &[f64], pd: &[f64], bump: &Bump) -> 
         return det;
     }
 
-    orient3d_adapt(pa, pb, pc, pd, permanent, bump)
+    orient3d_adapt(pa, pb, pc, pd, permanent, allocator)
 }
 
 pub fn orient3d_fast(pa: &[f64], pb: &[f64], pc: &[f64], pd: &[f64]) -> f64 {
@@ -791,13 +819,13 @@ pub fn orient3d_fast(pa: &[f64], pb: &[f64], pc: &[f64], pd: &[f64]) -> f64 {
     adz * (bdxcdy - cdxbdy) + bdz * (cdxady - adxcdy) + cdz * (adxbdy - bdxady)
 }
 
-fn incircle_adapt(
+fn incircle_adapt<A: Allocator + Copy>(
     pa: &[f64],
     pb: &[f64],
     pc: &[f64],
     pd: &[f64],
     permanent: f64,
-    bump: &Bump,
+    allocator: A,
 ) -> f64 {
     let adx = pa[0] - pd[0];
     let bdx = pb[0] - pd[0];
@@ -808,36 +836,36 @@ fn incircle_adapt(
 
     let (bdxcdy1, bdxcdy0) = two_product(bdx, cdy);
     let (cdxbdy1, cdxbdy0) = two_product(cdx, bdy);
-    let mut bc = bumpalo::vec![in bump; 0.0; 4];
+    let mut bc = std::vec::from_elem_in(0.0, 4, allocator);
     (bc[3], bc[2], bc[1], bc[0]) = two_two_diff(bdxcdy1, bdxcdy0, cdxbdy1, cdxbdy0);
-    let axbc = scale_expansion_zeroelim(&bc, adx, bump);
-    let axxbc = scale_expansion_zeroelim(&axbc, adx, bump);
-    let aybc = scale_expansion_zeroelim(&bc, ady, bump);
-    let ayybc = scale_expansion_zeroelim(&aybc, ady, bump);
-    let adet = fast_expansion_sum_zeroelim(&axxbc, &ayybc, bump);
+    let axbc = scale_expansion_zeroelim(&bc, adx, allocator);
+    let axxbc = scale_expansion_zeroelim(&axbc, adx, allocator);
+    let aybc = scale_expansion_zeroelim(&bc, ady, allocator);
+    let ayybc = scale_expansion_zeroelim(&aybc, ady, allocator);
+    let adet = fast_expansion_sum_zeroelim(&axxbc, &ayybc, allocator);
 
     let (cdxady1, cdxady0) = two_product(cdx, ady);
     let (adxcdy1, adxcdy0) = two_product(adx, cdy);
-    let mut ca = bumpalo::vec![in bump; 0.0; 4];
+    let mut ca = std::vec::from_elem_in(0.0, 4, allocator);
     (ca[3], ca[2], ca[1], ca[0]) = two_two_diff(cdxady1, cdxady0, adxcdy1, adxcdy0);
-    let bxca = scale_expansion_zeroelim(&ca, bdx, bump);
-    let bxxca = scale_expansion_zeroelim(&bxca, bdx, bump);
-    let byca = scale_expansion_zeroelim(&ca, bdy, bump);
-    let byyca = scale_expansion_zeroelim(&byca, bdy, bump);
-    let bdet = fast_expansion_sum_zeroelim(&bxxca, &byyca, bump);
+    let bxca = scale_expansion_zeroelim(&ca, bdx, allocator);
+    let bxxca = scale_expansion_zeroelim(&bxca, bdx, allocator);
+    let byca = scale_expansion_zeroelim(&ca, bdy, allocator);
+    let byyca = scale_expansion_zeroelim(&byca, bdy, allocator);
+    let bdet = fast_expansion_sum_zeroelim(&bxxca, &byyca, allocator);
 
     let (adxbdy1, adxbdy0) = two_product(adx, bdy);
     let (bdxady1, bdxady0) = two_product(bdx, ady);
-    let mut ab = bumpalo::vec![in bump; 0.0; 4];
+    let mut ab = std::vec::from_elem_in(0.0, 4, allocator);
     (ab[3], ab[2], ab[1], ab[0]) = two_two_diff(adxbdy1, adxbdy0, bdxady1, bdxady0);
-    let cxab = scale_expansion_zeroelim(&ab, cdx, bump);
-    let cxxab = scale_expansion_zeroelim(&cxab, cdx, bump);
-    let cyab = scale_expansion_zeroelim(&ab, cdy, bump);
-    let cyyab = scale_expansion_zeroelim(&cyab, cdy, bump);
-    let cdet = fast_expansion_sum_zeroelim(&cxxab, &cyyab, bump);
+    let cxab = scale_expansion_zeroelim(&ab, cdx, allocator);
+    let cxxab = scale_expansion_zeroelim(&cxab, cdx, allocator);
+    let cyab = scale_expansion_zeroelim(&ab, cdy, allocator);
+    let cyyab = scale_expansion_zeroelim(&cyab, cdy, allocator);
+    let cdet = fast_expansion_sum_zeroelim(&cxxab, &cyyab, allocator);
 
-    let abdet = fast_expansion_sum_zeroelim(&adet, &bdet, bump);
-    let mut fin = fast_expansion_sum_zeroelim(&abdet, &cdet, bump);
+    let abdet = fast_expansion_sum_zeroelim(&adet, &bdet, allocator);
+    let mut fin = fast_expansion_sum_zeroelim(&abdet, &cdet, allocator);
 
     let mut det = estimate(&fin);
     let errbound = B.icc_err_boundb * permanent;
@@ -875,9 +903,9 @@ fn incircle_adapt(
         return det;
     }
 
-    let mut aa = Vec::new_in(bump);
-    let mut bb = Vec::new_in(bump);
-    let mut cc = Vec::new_in(bump);
+    let mut aa = Vec::new_in(allocator);
+    let mut bb = Vec::new_in(allocator);
+    let mut cc = Vec::new_in(allocator);
     if (bdxtail != 0.0) || (bdytail != 0.0) || (cdxtail != 0.0) || (cdytail != 0.0) {
         let (adxadx1, adxadx0) = square(adx);
         let (adyady1, adyady0) = square(ady);
@@ -897,7 +925,7 @@ fn incircle_adapt(
         (cc[3], cc[2], cc[1], cc[0]) = two_two_sum(cdxcdx1, cdxcdx0, cdycdy1, cdycdy0);
     }
 
-    fn helper1<'a>(
+    fn helper1<A: Allocator + Copy>(
         adxtail: f64,
         bc: &[f64],
         adx: f64,
@@ -905,55 +933,55 @@ fn incircle_adapt(
         bdy: f64,
         bb: &[f64],
         cdy: f64,
-        fin: &mut Vec<'a, f64>,
-        bump: &'a Bump,
-    ) -> Vec<'a, f64> {
-        let axtbc = scale_expansion_zeroelim(&bc, adxtail, bump);
-        let temp16a = scale_expansion_zeroelim(&axtbc, 2.0 * adx, bump);
+        fin: &mut Vec<f64, A>,
+        allocator: A,
+    ) -> Vec<f64, A> {
+        let axtbc = scale_expansion_zeroelim(&bc, adxtail, allocator);
+        let temp16a = scale_expansion_zeroelim(&axtbc, 2.0 * adx, allocator);
 
-        let axtcc = scale_expansion_zeroelim(&cc, adxtail, bump);
-        let temp16b = scale_expansion_zeroelim(&axtcc, bdy, bump);
+        let axtcc = scale_expansion_zeroelim(&cc, adxtail, allocator);
+        let temp16b = scale_expansion_zeroelim(&axtcc, bdy, allocator);
 
-        let axtbb = scale_expansion_zeroelim(&bb, adxtail, bump);
-        let temp16c = scale_expansion_zeroelim(&axtbb, -cdy, bump);
+        let axtbb = scale_expansion_zeroelim(&bb, adxtail, allocator);
+        let temp16c = scale_expansion_zeroelim(&axtbb, -cdy, allocator);
 
-        let temp32a = fast_expansion_sum_zeroelim(&temp16a, &temp16b, bump);
-        let temp48 = fast_expansion_sum_zeroelim(&temp16c, &temp32a, bump);
-        *fin = fast_expansion_sum_zeroelim(&fin, &temp48, bump);
+        let temp32a = fast_expansion_sum_zeroelim(&temp16a, &temp16b, allocator);
+        let temp48 = fast_expansion_sum_zeroelim(&temp16c, &temp32a, allocator);
+        *fin = fast_expansion_sum_zeroelim(&fin, &temp48, allocator);
 
         axtbc
     }
-    let mut axtbc = Vec::new_in(bump);
+    let mut axtbc = Vec::new_in(allocator);
     if adxtail != 0.0 {
-        axtbc = helper1(adxtail, &bc, adx, &cc, bdy, &bb, cdy, &mut fin, bump);
+        axtbc = helper1(adxtail, &bc, adx, &cc, bdy, &bb, cdy, &mut fin, allocator);
     }
 
-    let mut aytbc = Vec::new_in(bump);
+    let mut aytbc = Vec::new_in(allocator);
     if adytail != 0.0 {
-        aytbc = helper1(adytail, &bc, ady, &bb, cdx, &cc, bdx, &mut fin, bump);
+        aytbc = helper1(adytail, &bc, ady, &bb, cdx, &cc, bdx, &mut fin, allocator);
     }
 
-    let mut bxtca = Vec::new_in(bump);
+    let mut bxtca = Vec::new_in(allocator);
     if bdxtail != 0.0 {
-        bxtca = helper1(bdxtail, &ca, bdx, &aa, cdy, &cc, ady, &mut fin, bump);
+        bxtca = helper1(bdxtail, &ca, bdx, &aa, cdy, &cc, ady, &mut fin, allocator);
     }
 
-    let mut bytca = Vec::new_in(bump);
+    let mut bytca = Vec::new_in(allocator);
     if bdytail != 0.0 {
-        bytca = helper1(bdytail, &ca, bdy, &cc, adx, &aa, cdx, &mut fin, bump);
+        bytca = helper1(bdytail, &ca, bdy, &cc, adx, &aa, cdx, &mut fin, allocator);
     }
 
-    let mut cxtab = Vec::new_in(bump);
+    let mut cxtab = Vec::new_in(allocator);
     if cdxtail != 0.0 {
-        cxtab = helper1(cdxtail, &ab, cdx, &bb, ady, &aa, bdy, &mut fin, bump);
+        cxtab = helper1(cdxtail, &ab, cdx, &bb, ady, &aa, bdy, &mut fin, allocator);
     }
 
-    let mut cytab = Vec::new_in(bump);
+    let mut cytab = Vec::new_in(allocator);
     if cdytail != 0.0 {
-        cytab = helper1(cdytail, &ab, cdy, &aa, bdx, &bb, adx, &mut fin, bump);
+        cytab = helper1(cdytail, &ab, cdy, &aa, bdx, &bb, adx, &mut fin, allocator);
     }
 
-    fn helper2<'a>(
+    fn helper2<A: Allocator + Copy>(
         adxtail: f64,
         adytail: f64,
         bdxtail: f64,
@@ -970,89 +998,95 @@ fn incircle_adapt(
         aytbc: &[f64],
         bb: &[f64],
         cc: &[f64],
-        fin: &mut Vec<'a, f64>,
-        bump: &'a Bump,
+        fin: &mut Vec<f64, A>,
+        allocator: A,
     ) {
         if (adxtail != 0.0) || (adytail != 0.0) {
             let (bct, bctt) =
                 if (bdxtail != 0.0) || (bdytail != 0.0) || (cdxtail != 0.0) || (cdytail != 0.0) {
                     let (ti1, ti0) = two_product(bdxtail, cdy);
                     let (tj1, tj0) = two_product(bdx, cdytail);
-                    let mut u = bumpalo::vec![in bump; 0.0; 4];
+                    let mut u = std::vec::from_elem_in(0.0, 4, allocator);
                     (u[3], u[2], u[1], u[0]) = two_two_sum(ti1, ti0, tj1, tj0);
                     let (ti1, ti0) = two_product(cdxtail, -bdy);
                     let (tj1, tj0) = two_product(cdx, -bdytail);
-                    let mut v = bumpalo::vec![in bump; 0.0; 4];
+                    let mut v = std::vec::from_elem_in(0.0, 4, allocator);
                     (v[3], v[2], v[1], v[0]) = two_two_sum(ti1, ti0, tj1, tj0);
-                    let bct = fast_expansion_sum_zeroelim(&u, &v, bump);
+                    let bct = fast_expansion_sum_zeroelim(&u, &v, allocator);
 
                     let (ti1, ti0) = two_product(bdxtail, cdytail);
                     let (tj1, tj0) = two_product(cdxtail, bdytail);
-                    let mut bctt = bumpalo::vec![in bump; 0.0; 4];
+                    let mut bctt = std::vec::from_elem_in(0.0, 4, allocator);
                     (bctt[3], bctt[2], bctt[1], bctt[0]) = two_two_diff(ti1, ti0, tj1, tj0);
                     (bct, bctt)
                 } else {
-                    (bumpalo::vec![in bump;0.0], bumpalo::vec![in bump; 0.0])
+                    ([0.0].to_vec_in(allocator), [0.0].to_vec_in(allocator))
                 };
 
             if adxtail != 0.0 {
-                let temp16a = scale_expansion_zeroelim(axtbc, adxtail, bump);
-                let axtbct = scale_expansion_zeroelim(&bct, adxtail, bump);
-                let temp32a = scale_expansion_zeroelim(&axtbct, 2.0 * adx, bump);
-                let temp48 = fast_expansion_sum_zeroelim(&temp16a, &temp32a, bump);
-                *fin = fast_expansion_sum_zeroelim(&fin, &temp48, bump);
+                let temp16a = scale_expansion_zeroelim(axtbc, adxtail, allocator);
+                let axtbct = scale_expansion_zeroelim(&bct, adxtail, allocator);
+                let temp32a = scale_expansion_zeroelim(&axtbct, 2.0 * adx, allocator);
+                let temp48 = fast_expansion_sum_zeroelim(&temp16a, &temp32a, allocator);
+                *fin = fast_expansion_sum_zeroelim(&fin, &temp48, allocator);
                 if bdytail != 0.0 {
-                    let temp8 = scale_expansion_zeroelim(cc, adxtail, bump);
-                    let temp16a = scale_expansion_zeroelim(&temp8, bdytail, bump);
-                    *fin = fast_expansion_sum_zeroelim(&fin, &temp16a, bump);
+                    let temp8 = scale_expansion_zeroelim(cc, adxtail, allocator);
+                    let temp16a = scale_expansion_zeroelim(&temp8, bdytail, allocator);
+                    *fin = fast_expansion_sum_zeroelim(&fin, &temp16a, allocator);
                 }
                 if cdytail != 0.0 {
-                    let temp8 = scale_expansion_zeroelim(bb, -adxtail, bump);
-                    let temp16a = scale_expansion_zeroelim(&temp8, cdytail, bump);
-                    *fin = fast_expansion_sum_zeroelim(&fin, &temp16a, bump);
+                    let temp8 = scale_expansion_zeroelim(bb, -adxtail, allocator);
+                    let temp16a = scale_expansion_zeroelim(&temp8, cdytail, allocator);
+                    *fin = fast_expansion_sum_zeroelim(&fin, &temp16a, allocator);
                 }
 
-                let temp32a = scale_expansion_zeroelim(&axtbct, adxtail, bump);
-                let axtbctt = scale_expansion_zeroelim(&bctt, adxtail, bump);
-                let temp16a = scale_expansion_zeroelim(&axtbctt, 2.0 * adx, bump);
-                let temp16b = scale_expansion_zeroelim(&axtbctt, adxtail, bump);
-                let temp32b = fast_expansion_sum_zeroelim(&temp16a, &temp16b, bump);
-                let temp64 = fast_expansion_sum_zeroelim(&temp32a, &temp32b, bump);
-                *fin = fast_expansion_sum_zeroelim(&fin, &temp64, bump);
+                let temp32a = scale_expansion_zeroelim(&axtbct, adxtail, allocator);
+                let axtbctt = scale_expansion_zeroelim(&bctt, adxtail, allocator);
+                let temp16a = scale_expansion_zeroelim(&axtbctt, 2.0 * adx, allocator);
+                let temp16b = scale_expansion_zeroelim(&axtbctt, adxtail, allocator);
+                let temp32b = fast_expansion_sum_zeroelim(&temp16a, &temp16b, allocator);
+                let temp64 = fast_expansion_sum_zeroelim(&temp32a, &temp32b, allocator);
+                *fin = fast_expansion_sum_zeroelim(&fin, &temp64, allocator);
             }
             if adytail != 0.0 {
-                let temp16a = scale_expansion_zeroelim(aytbc, adytail, bump);
-                let aytbct = scale_expansion_zeroelim(&bct, adytail, bump);
-                let temp32a = scale_expansion_zeroelim(&aytbct, 2.0 * ady, bump);
-                let temp48 = fast_expansion_sum_zeroelim(&temp16a, &temp32a, bump);
-                *fin = fast_expansion_sum_zeroelim(&fin, &temp48, bump);
+                let temp16a = scale_expansion_zeroelim(aytbc, adytail, allocator);
+                let aytbct = scale_expansion_zeroelim(&bct, adytail, allocator);
+                let temp32a = scale_expansion_zeroelim(&aytbct, 2.0 * ady, allocator);
+                let temp48 = fast_expansion_sum_zeroelim(&temp16a, &temp32a, allocator);
+                *fin = fast_expansion_sum_zeroelim(&fin, &temp48, allocator);
 
-                let temp32a = scale_expansion_zeroelim(&aytbct, adytail, bump);
-                let aytbctt = scale_expansion_zeroelim(&bctt, adytail, bump);
-                let temp16a = scale_expansion_zeroelim(&aytbctt, 2.0 * ady, bump);
-                let temp16b = scale_expansion_zeroelim(&aytbctt, adytail, bump);
-                let temp32b = fast_expansion_sum_zeroelim(&temp16a, &temp16b, bump);
-                let temp64 = fast_expansion_sum_zeroelim(&temp32a, &temp32b, bump);
-                *fin = fast_expansion_sum_zeroelim(&fin, &temp64, bump);
+                let temp32a = scale_expansion_zeroelim(&aytbct, adytail, allocator);
+                let aytbctt = scale_expansion_zeroelim(&bctt, adytail, allocator);
+                let temp16a = scale_expansion_zeroelim(&aytbctt, 2.0 * ady, allocator);
+                let temp16b = scale_expansion_zeroelim(&aytbctt, adytail, allocator);
+                let temp32b = fast_expansion_sum_zeroelim(&temp16a, &temp16b, allocator);
+                let temp64 = fast_expansion_sum_zeroelim(&temp32a, &temp32b, allocator);
+                *fin = fast_expansion_sum_zeroelim(&fin, &temp64, allocator);
             }
         }
     }
     helper2(
         adxtail, adytail, bdxtail, bdytail, cdxtail, cdytail, adx, ady, bdx, bdy, cdx, cdy, &axtbc,
-        &aytbc, &bb, &cc, &mut fin, bump,
+        &aytbc, &bb, &cc, &mut fin, allocator,
     );
     helper2(
         bdxtail, bdytail, cdxtail, cdytail, adxtail, adytail, bdx, bdy, cdx, cdy, adx, ady, &bxtca,
-        &bytca, &cc, &aa, &mut fin, bump,
+        &bytca, &cc, &aa, &mut fin, allocator,
     );
     helper2(
         cdxtail, cdytail, adxtail, adytail, bdxtail, bdytail, cdx, cdy, adx, ady, bdx, bdy, &cxtab,
-        &cytab, &aa, &bb, &mut fin, bump,
+        &cytab, &aa, &bb, &mut fin, allocator,
     );
     *fin.last().unwrap()
 }
 
-pub fn incircle(pa: &[f64], pb: &[f64], pc: &[f64], pd: &[f64], bump: &Bump) -> f64 {
+pub fn incircle<A: Allocator + Copy>(
+    pa: &[f64],
+    pb: &[f64],
+    pc: &[f64],
+    pd: &[f64],
+    allocator: A,
+) -> f64 {
     let adx = pa[0] - pd[0];
     let bdx = pb[0] - pd[0];
     let cdx = pc[0] - pd[0];
@@ -1082,206 +1116,213 @@ pub fn incircle(pa: &[f64], pb: &[f64], pc: &[f64], pd: &[f64], bump: &Bump) -> 
         return det;
     }
 
-    incircle_adapt(pa, pb, pc, pd, permanent, bump)
+    incircle_adapt(pa, pb, pc, pd, permanent, allocator)
 }
 
-fn insphere_exact(pa: &[f64], pb: &[f64], pc: &[f64], pd: &[f64], pe: &[f64], bump: &Bump) -> f64 {
+fn insphere_exact<A: Allocator + Copy>(
+    pa: &[f64],
+    pb: &[f64],
+    pc: &[f64],
+    pd: &[f64],
+    pe: &[f64],
+    allocator: A,
+) -> f64 {
     let (axby1, axby0) = two_product(pa[0], pb[1]);
     let (bxay1, bxay0) = two_product(pb[0], pa[1]);
-    let mut ab = bumpalo::vec![in bump; 0.0; 4];
+    let mut ab = std::vec::from_elem_in(0.0, 4, allocator);
     (ab[3], ab[2], ab[1], ab[0]) = two_two_diff(axby1, axby0, bxay1, bxay0);
 
     let (bxcy1, bxcy0) = two_product(pb[0], pc[1]);
     let (cxby1, cxby0) = two_product(pc[0], pb[1]);
-    let mut bc = bumpalo::vec![in bump; 0.0; 4];
+    let mut bc = std::vec::from_elem_in(0.0, 4, allocator);
     (bc[3], bc[2], bc[1], bc[0]) = two_two_diff(bxcy1, bxcy0, cxby1, cxby0);
 
     let (cxdy1, cxdy0) = two_product(pc[0], pd[1]);
     let (dxcy1, dxcy0) = two_product(pd[0], pc[1]);
-    let mut cd = bumpalo::vec![in bump; 0.0; 4];
+    let mut cd = std::vec::from_elem_in(0.0, 4, allocator);
     (cd[3], cd[2], cd[1], cd[0]) = two_two_diff(cxdy1, cxdy0, dxcy1, dxcy0);
 
     let (dxey1, dxey0) = two_product(pd[0], pe[1]);
     let (exdy1, exdy0) = two_product(pe[0], pd[1]);
-    let mut de = bumpalo::vec![in bump; 0.0; 4];
+    let mut de = std::vec::from_elem_in(0.0, 4, allocator);
     (de[3], de[2], de[1], de[0]) = two_two_diff(dxey1, dxey0, exdy1, exdy0);
 
     let (exay1, exay0) = two_product(pe[0], pa[1]);
     let (axey1, axey0) = two_product(pa[0], pe[1]);
-    let mut ea = bumpalo::vec![in bump; 0.0; 4];
+    let mut ea = std::vec::from_elem_in(0.0, 4, allocator);
     (ea[3], ea[2], ea[1], ea[0]) = two_two_diff(exay1, exay0, axey1, axey0);
 
     let (axcy1, axcy0) = two_product(pa[0], pc[1]);
     let (cxay1, cxay0) = two_product(pc[0], pa[1]);
-    let mut ac = bumpalo::vec![in bump; 0.0; 4];
+    let mut ac = std::vec::from_elem_in(0.0, 4, allocator);
     (ac[3], ac[2], ac[1], ac[0]) = two_two_diff(axcy1, axcy0, cxay1, cxay0);
 
     let (bxdy1, bxdy0) = two_product(pb[0], pd[1]);
     let (dxby1, dxby0) = two_product(pd[0], pb[1]);
-    let mut bd = bumpalo::vec![in bump; 0.0; 4];
+    let mut bd = std::vec::from_elem_in(0.0, 4, allocator);
     (bd[3], bd[2], bd[1], bd[0]) = two_two_diff(bxdy1, bxdy0, dxby1, dxby0);
 
     let (cxey1, cxey0) = two_product(pc[0], pe[1]);
     let (excy1, excy0) = two_product(pe[0], pc[1]);
-    let mut ce = bumpalo::vec![in bump; 0.0; 4];
+    let mut ce = std::vec::from_elem_in(0.0, 4, allocator);
     (ce[3], ce[2], ce[1], ce[0]) = two_two_diff(cxey1, cxey0, excy1, excy0);
 
     let (dxay1, dxay0) = two_product(pd[0], pa[1]);
     let (axdy1, axdy0) = two_product(pa[0], pd[1]);
-    let mut da = bumpalo::vec![in bump; 0.0; 4];
+    let mut da = std::vec::from_elem_in(0.0, 4, allocator);
     (da[3], da[2], da[1], da[0]) = two_two_diff(dxay1, dxay0, axdy1, axdy0);
 
     let (exby1, exby0) = two_product(pe[0], pb[1]);
     let (bxey1, bxey0) = two_product(pb[0], pe[1]);
-    let mut eb = bumpalo::vec![in bump; 0.0; 4];
+    let mut eb = std::vec::from_elem_in(0.0, 4, allocator);
     (eb[3], eb[2], eb[1], eb[0]) = two_two_diff(exby1, exby0, bxey1, bxey0);
 
-    let temp8a = scale_expansion_zeroelim(&bc, pa[2], bump);
-    let temp8b = scale_expansion_zeroelim(&ac, -pb[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&ab, pc[2], bump);
-    let abc = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&bc, pa[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&ac, -pb[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&ab, pc[2], allocator);
+    let abc = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&cd, pb[2], bump);
-    let temp8b = scale_expansion_zeroelim(&bd, -pc[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&bc, pd[2], bump);
-    let bcd = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&cd, pb[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&bd, -pc[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&bc, pd[2], allocator);
+    let bcd = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&de, pc[2], bump);
-    let temp8b = scale_expansion_zeroelim(&ce, -pd[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&cd, pe[2], bump);
-    let cde = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&de, pc[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&ce, -pd[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&cd, pe[2], allocator);
+    let cde = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&ea, pd[2], bump);
-    let temp8b = scale_expansion_zeroelim(&da, -pe[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&de, pa[2], bump);
-    let dea = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&ea, pd[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&da, -pe[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&de, pa[2], allocator);
+    let dea = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&ab, pe[2], bump);
-    let temp8b = scale_expansion_zeroelim(&eb, -pa[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&ea, pb[2], bump);
-    let eab = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&ab, pe[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&eb, -pa[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&ea, pb[2], allocator);
+    let eab = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&bd, pa[2], bump);
-    let temp8b = scale_expansion_zeroelim(&da, pb[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&ab, pd[2], bump);
-    let abd = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&bd, pa[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&da, pb[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&ab, pd[2], allocator);
+    let abd = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&ce, pb[2], bump);
-    let temp8b = scale_expansion_zeroelim(&eb, pc[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&bc, pe[2], bump);
-    let bce = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&ce, pb[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&eb, pc[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&bc, pe[2], allocator);
+    let bce = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&da, pc[2], bump);
-    let temp8b = scale_expansion_zeroelim(&ac, pd[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&cd, pa[2], bump);
-    let cda = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&da, pc[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&ac, pd[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&cd, pa[2], allocator);
+    let cda = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&eb, pd[2], bump);
-    let temp8b = scale_expansion_zeroelim(&bd, pe[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&de, pb[2], bump);
-    let deb = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&eb, pd[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&bd, pe[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&de, pb[2], allocator);
+    let deb = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&ac, pe[2], bump);
-    let temp8b = scale_expansion_zeroelim(&ce, pa[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&ea, pc[2], bump);
-    let eac = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&ac, pe[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&ce, pa[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&ea, pc[2], allocator);
+    let eac = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp48a = fast_expansion_sum_zeroelim(&cde, &bce, bump);
-    let mut temp48b = fast_expansion_sum_zeroelim(&deb, &bcd, bump);
+    let temp48a = fast_expansion_sum_zeroelim(&cde, &bce, allocator);
+    let mut temp48b = fast_expansion_sum_zeroelim(&deb, &bcd, allocator);
     expansion_invert(&mut temp48b);
 
-    let bcde = fast_expansion_sum_zeroelim(&temp48a, &temp48b, bump);
-    let temp192 = scale_expansion_zeroelim(&bcde, pa[0], bump);
-    let det384x = scale_expansion_zeroelim(&temp192, pa[0], bump);
-    let temp192 = scale_expansion_zeroelim(&bcde, pa[1], bump);
-    let det384y = scale_expansion_zeroelim(&temp192, pa[1], bump);
-    let temp192 = scale_expansion_zeroelim(&bcde, pa[2], bump);
-    let det384z = scale_expansion_zeroelim(&temp192, pa[2], bump);
-    let detxy = fast_expansion_sum_zeroelim(&det384x, &det384y, bump);
-    let adet = fast_expansion_sum_zeroelim(&detxy, &det384z, bump);
+    let bcde = fast_expansion_sum_zeroelim(&temp48a, &temp48b, allocator);
+    let temp192 = scale_expansion_zeroelim(&bcde, pa[0], allocator);
+    let det384x = scale_expansion_zeroelim(&temp192, pa[0], allocator);
+    let temp192 = scale_expansion_zeroelim(&bcde, pa[1], allocator);
+    let det384y = scale_expansion_zeroelim(&temp192, pa[1], allocator);
+    let temp192 = scale_expansion_zeroelim(&bcde, pa[2], allocator);
+    let det384z = scale_expansion_zeroelim(&temp192, pa[2], allocator);
+    let detxy = fast_expansion_sum_zeroelim(&det384x, &det384y, allocator);
+    let adet = fast_expansion_sum_zeroelim(&detxy, &det384z, allocator);
 
-    let temp48a = fast_expansion_sum_zeroelim(&dea, &cda, bump);
-    temp48b = fast_expansion_sum_zeroelim(&eac, &cde, bump);
+    let temp48a = fast_expansion_sum_zeroelim(&dea, &cda, allocator);
+    temp48b = fast_expansion_sum_zeroelim(&eac, &cde, allocator);
     expansion_invert(&mut temp48b);
 
-    let cdea = fast_expansion_sum_zeroelim(&temp48a, &temp48b, bump);
-    let temp192 = scale_expansion_zeroelim(&cdea, pb[0], bump);
-    let det384x = scale_expansion_zeroelim(&temp192, pb[0], bump);
-    let temp192 = scale_expansion_zeroelim(&cdea, pb[1], bump);
-    let det384y = scale_expansion_zeroelim(&temp192, pb[1], bump);
-    let temp192 = scale_expansion_zeroelim(&cdea, pb[2], bump);
-    let det384z = scale_expansion_zeroelim(&temp192, pb[2], bump);
-    let detxy = fast_expansion_sum_zeroelim(&det384x, &det384y, bump);
-    let bdet = fast_expansion_sum_zeroelim(&detxy, &det384z, bump);
+    let cdea = fast_expansion_sum_zeroelim(&temp48a, &temp48b, allocator);
+    let temp192 = scale_expansion_zeroelim(&cdea, pb[0], allocator);
+    let det384x = scale_expansion_zeroelim(&temp192, pb[0], allocator);
+    let temp192 = scale_expansion_zeroelim(&cdea, pb[1], allocator);
+    let det384y = scale_expansion_zeroelim(&temp192, pb[1], allocator);
+    let temp192 = scale_expansion_zeroelim(&cdea, pb[2], allocator);
+    let det384z = scale_expansion_zeroelim(&temp192, pb[2], allocator);
+    let detxy = fast_expansion_sum_zeroelim(&det384x, &det384y, allocator);
+    let bdet = fast_expansion_sum_zeroelim(&detxy, &det384z, allocator);
 
-    let temp48a = fast_expansion_sum_zeroelim(&eab, &deb, bump);
-    temp48b = fast_expansion_sum_zeroelim(&abd, &dea, bump);
+    let temp48a = fast_expansion_sum_zeroelim(&eab, &deb, allocator);
+    temp48b = fast_expansion_sum_zeroelim(&abd, &dea, allocator);
     expansion_invert(&mut temp48b);
 
-    let deab = fast_expansion_sum_zeroelim(&temp48a, &temp48b, bump);
-    let temp192 = scale_expansion_zeroelim(&deab, pc[0], bump);
-    let det384x = scale_expansion_zeroelim(&temp192, pc[0], bump);
-    let temp192 = scale_expansion_zeroelim(&deab, pc[1], bump);
-    let det384y = scale_expansion_zeroelim(&temp192, pc[1], bump);
-    let temp192 = scale_expansion_zeroelim(&deab, pc[2], bump);
-    let det384z = scale_expansion_zeroelim(&temp192, pc[2], bump);
-    let detxy = fast_expansion_sum_zeroelim(&det384x, &det384y, bump);
-    let cdet = fast_expansion_sum_zeroelim(&detxy, &det384z, bump);
+    let deab = fast_expansion_sum_zeroelim(&temp48a, &temp48b, allocator);
+    let temp192 = scale_expansion_zeroelim(&deab, pc[0], allocator);
+    let det384x = scale_expansion_zeroelim(&temp192, pc[0], allocator);
+    let temp192 = scale_expansion_zeroelim(&deab, pc[1], allocator);
+    let det384y = scale_expansion_zeroelim(&temp192, pc[1], allocator);
+    let temp192 = scale_expansion_zeroelim(&deab, pc[2], allocator);
+    let det384z = scale_expansion_zeroelim(&temp192, pc[2], allocator);
+    let detxy = fast_expansion_sum_zeroelim(&det384x, &det384y, allocator);
+    let cdet = fast_expansion_sum_zeroelim(&detxy, &det384z, allocator);
 
-    let temp48a = fast_expansion_sum_zeroelim(&abc, &eac, bump);
-    temp48b = fast_expansion_sum_zeroelim(&bce, &eab, bump);
+    let temp48a = fast_expansion_sum_zeroelim(&abc, &eac, allocator);
+    temp48b = fast_expansion_sum_zeroelim(&bce, &eab, allocator);
     expansion_invert(&mut temp48b);
 
-    let eabc = fast_expansion_sum_zeroelim(&temp48a, &temp48b, bump);
-    let temp192 = scale_expansion_zeroelim(&eabc, pd[0], bump);
-    let det384x = scale_expansion_zeroelim(&temp192, pd[0], bump);
-    let temp192 = scale_expansion_zeroelim(&eabc, pd[1], bump);
-    let det384y = scale_expansion_zeroelim(&temp192, pd[1], bump);
-    let temp192 = scale_expansion_zeroelim(&eabc, pd[2], bump);
-    let det384z = scale_expansion_zeroelim(&temp192, pd[2], bump);
-    let detxy = fast_expansion_sum_zeroelim(&det384x, &det384y, bump);
-    let ddet = fast_expansion_sum_zeroelim(&detxy, &det384z, bump);
+    let eabc = fast_expansion_sum_zeroelim(&temp48a, &temp48b, allocator);
+    let temp192 = scale_expansion_zeroelim(&eabc, pd[0], allocator);
+    let det384x = scale_expansion_zeroelim(&temp192, pd[0], allocator);
+    let temp192 = scale_expansion_zeroelim(&eabc, pd[1], allocator);
+    let det384y = scale_expansion_zeroelim(&temp192, pd[1], allocator);
+    let temp192 = scale_expansion_zeroelim(&eabc, pd[2], allocator);
+    let det384z = scale_expansion_zeroelim(&temp192, pd[2], allocator);
+    let detxy = fast_expansion_sum_zeroelim(&det384x, &det384y, allocator);
+    let ddet = fast_expansion_sum_zeroelim(&detxy, &det384z, allocator);
 
-    let temp48a = fast_expansion_sum_zeroelim(&bcd, &abd, bump);
-    temp48b = fast_expansion_sum_zeroelim(&cda, &abc, bump);
+    let temp48a = fast_expansion_sum_zeroelim(&bcd, &abd, allocator);
+    temp48b = fast_expansion_sum_zeroelim(&cda, &abc, allocator);
     expansion_invert(&mut temp48b);
 
-    let abcd = fast_expansion_sum_zeroelim(&temp48a, &temp48b, bump);
-    let temp192 = scale_expansion_zeroelim(&abcd, pe[0], bump);
-    let det384x = scale_expansion_zeroelim(&temp192, pe[0], bump);
-    let temp192 = scale_expansion_zeroelim(&abcd, pe[1], bump);
-    let det384y = scale_expansion_zeroelim(&temp192, pe[1], bump);
-    let temp192 = scale_expansion_zeroelim(&abcd, pe[2], bump);
-    let det384z = scale_expansion_zeroelim(&temp192, pe[2], bump);
-    let detxy = fast_expansion_sum_zeroelim(&det384x, &det384y, bump);
-    let edet = fast_expansion_sum_zeroelim(&detxy, &det384z, bump);
+    let abcd = fast_expansion_sum_zeroelim(&temp48a, &temp48b, allocator);
+    let temp192 = scale_expansion_zeroelim(&abcd, pe[0], allocator);
+    let det384x = scale_expansion_zeroelim(&temp192, pe[0], allocator);
+    let temp192 = scale_expansion_zeroelim(&abcd, pe[1], allocator);
+    let det384y = scale_expansion_zeroelim(&temp192, pe[1], allocator);
+    let temp192 = scale_expansion_zeroelim(&abcd, pe[2], allocator);
+    let det384z = scale_expansion_zeroelim(&temp192, pe[2], allocator);
+    let detxy = fast_expansion_sum_zeroelim(&det384x, &det384y, allocator);
+    let edet = fast_expansion_sum_zeroelim(&detxy, &det384z, allocator);
 
-    let abdet = fast_expansion_sum_zeroelim(&adet, &bdet, bump);
-    let cddet = fast_expansion_sum_zeroelim(&cdet, &ddet, bump);
-    let cdedet = fast_expansion_sum_zeroelim(&cddet, &edet, bump);
-    let deter = fast_expansion_sum_zeroelim(&abdet, &cdedet, bump);
+    let abdet = fast_expansion_sum_zeroelim(&adet, &bdet, allocator);
+    let cddet = fast_expansion_sum_zeroelim(&cdet, &ddet, allocator);
+    let cdedet = fast_expansion_sum_zeroelim(&cddet, &edet, allocator);
+    let deter = fast_expansion_sum_zeroelim(&abdet, &cdedet, allocator);
 
     *deter.last().unwrap()
 }
 
-fn insphere_adapt(
+fn insphere_adapt<A: Allocator + Copy>(
     pa: &[f64],
     pb: &[f64],
     pc: &[f64],
     pd: &[f64],
     pe: &[f64],
     permanent: f64,
-    bump: &Bump,
+    allocator: A,
 ) -> f64 {
     let aex = pa[0] - pe[0];
     let bex = pb[0] - pe[0];
@@ -1298,93 +1339,93 @@ fn insphere_adapt(
 
     let (aexbey1, aexbey0) = two_product(aex, bey);
     let (bexaey1, bexaey0) = two_product(bex, aey);
-    let mut ab = bumpalo::vec![in bump; 0.0; 4];
+    let mut ab = std::vec::from_elem_in(0.0, 4, allocator);
     (ab[3], ab[2], ab[1], ab[0]) = two_two_diff(aexbey1, aexbey0, bexaey1, bexaey0);
 
     let (bexcey1, bexcey0) = two_product(bex, cey);
     let (cexbey1, cexbey0) = two_product(cex, bey);
-    let mut bc = bumpalo::vec![in bump; 0.0; 4];
+    let mut bc = std::vec::from_elem_in(0.0, 4, allocator);
     (bc[3], bc[2], bc[1], bc[0]) = two_two_diff(bexcey1, bexcey0, cexbey1, cexbey0);
 
     let (cexdey1, cexdey0) = two_product(cex, dey);
     let (dexcey1, dexcey0) = two_product(dex, cey);
-    let mut cd = bumpalo::vec![in bump; 0.0; 4];
+    let mut cd = std::vec::from_elem_in(0.0, 4, allocator);
     (cd[3], cd[2], cd[1], cd[0]) = two_two_diff(cexdey1, cexdey0, dexcey1, dexcey0);
 
     let (dexaey1, dexaey0) = two_product(dex, aey);
     let (aexdey1, aexdey0) = two_product(aex, dey);
-    let mut da = bumpalo::vec![in bump; 0.0; 4];
+    let mut da = std::vec::from_elem_in(0.0, 4, allocator);
     (da[3], da[2], da[1], da[0]) = two_two_diff(dexaey1, dexaey0, aexdey1, aexdey0);
 
     let (aexcey1, aexcey0) = two_product(aex, cey);
     let (cexaey1, cexaey0) = two_product(cex, aey);
-    let mut ac = bumpalo::vec![in bump; 0.0; 4];
+    let mut ac = std::vec::from_elem_in(0.0, 4, allocator);
     (ac[3], ac[2], ac[1], ac[0]) = two_two_diff(aexcey1, aexcey0, cexaey1, cexaey0);
 
     let (bexdey1, bexdey0) = two_product(bex, dey);
     let (dexbey1, dexbey0) = two_product(dex, bey);
-    let mut bd = bumpalo::vec![in bump; 0.0; 4];
+    let mut bd = std::vec::from_elem_in(0.0, 4, allocator);
     (bd[3], bd[2], bd[1], bd[0]) = two_two_diff(bexdey1, bexdey0, dexbey1, dexbey0);
 
-    let temp8a = scale_expansion_zeroelim(&cd, bez, bump);
-    let temp8b = scale_expansion_zeroelim(&bd, -cez, bump);
-    let temp8c = scale_expansion_zeroelim(&bc, dez, bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, bump);
-    let temp48 = scale_expansion_zeroelim(&temp24, aex, bump);
-    let xdet = scale_expansion_zeroelim(&temp48, -aex, bump);
-    let temp48 = scale_expansion_zeroelim(&temp24, aey, bump);
-    let ydet = scale_expansion_zeroelim(&temp48, -aey, bump);
-    let temp48 = scale_expansion_zeroelim(&temp24, aez, bump);
-    let zdet = scale_expansion_zeroelim(&temp48, -aez, bump);
-    let xydet = fast_expansion_sum_zeroelim(&xdet, &ydet, bump);
-    let adet = fast_expansion_sum_zeroelim(&xydet, &zdet, bump);
+    let temp8a = scale_expansion_zeroelim(&cd, bez, allocator);
+    let temp8b = scale_expansion_zeroelim(&bd, -cez, allocator);
+    let temp8c = scale_expansion_zeroelim(&bc, dez, allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, allocator);
+    let temp48 = scale_expansion_zeroelim(&temp24, aex, allocator);
+    let xdet = scale_expansion_zeroelim(&temp48, -aex, allocator);
+    let temp48 = scale_expansion_zeroelim(&temp24, aey, allocator);
+    let ydet = scale_expansion_zeroelim(&temp48, -aey, allocator);
+    let temp48 = scale_expansion_zeroelim(&temp24, aez, allocator);
+    let zdet = scale_expansion_zeroelim(&temp48, -aez, allocator);
+    let xydet = fast_expansion_sum_zeroelim(&xdet, &ydet, allocator);
+    let adet = fast_expansion_sum_zeroelim(&xydet, &zdet, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&da, cez, bump);
-    let temp8b = scale_expansion_zeroelim(&ac, dez, bump);
-    let temp8c = scale_expansion_zeroelim(&cd, aez, bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, bump);
-    let temp48 = scale_expansion_zeroelim(&temp24, bex, bump);
-    let xdet = scale_expansion_zeroelim(&temp48, bex, bump);
-    let temp48 = scale_expansion_zeroelim(&temp24, bey, bump);
-    let ydet = scale_expansion_zeroelim(&temp48, bey, bump);
-    let temp48 = scale_expansion_zeroelim(&temp24, bez, bump);
-    let zdet = scale_expansion_zeroelim(&temp48, bez, bump);
-    let xydet = fast_expansion_sum_zeroelim(&xdet, &ydet, bump);
-    let bdet = fast_expansion_sum_zeroelim(&xydet, &zdet, bump);
+    let temp8a = scale_expansion_zeroelim(&da, cez, allocator);
+    let temp8b = scale_expansion_zeroelim(&ac, dez, allocator);
+    let temp8c = scale_expansion_zeroelim(&cd, aez, allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, allocator);
+    let temp48 = scale_expansion_zeroelim(&temp24, bex, allocator);
+    let xdet = scale_expansion_zeroelim(&temp48, bex, allocator);
+    let temp48 = scale_expansion_zeroelim(&temp24, bey, allocator);
+    let ydet = scale_expansion_zeroelim(&temp48, bey, allocator);
+    let temp48 = scale_expansion_zeroelim(&temp24, bez, allocator);
+    let zdet = scale_expansion_zeroelim(&temp48, bez, allocator);
+    let xydet = fast_expansion_sum_zeroelim(&xdet, &ydet, allocator);
+    let bdet = fast_expansion_sum_zeroelim(&xydet, &zdet, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&ab, dez, bump);
-    let temp8b = scale_expansion_zeroelim(&bd, aez, bump);
-    let temp8c = scale_expansion_zeroelim(&da, bez, bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, bump);
-    let temp48 = scale_expansion_zeroelim(&temp24, cex, bump);
-    let xdet = scale_expansion_zeroelim(&temp48, -cex, bump);
-    let temp48 = scale_expansion_zeroelim(&temp24, cey, bump);
-    let ydet = scale_expansion_zeroelim(&temp48, -cey, bump);
-    let temp48 = scale_expansion_zeroelim(&temp24, cez, bump);
-    let zdet = scale_expansion_zeroelim(&temp48, -cez, bump);
-    let xydet = fast_expansion_sum_zeroelim(&xdet, &ydet, bump);
-    let cdet = fast_expansion_sum_zeroelim(&xydet, &zdet, bump);
+    let temp8a = scale_expansion_zeroelim(&ab, dez, allocator);
+    let temp8b = scale_expansion_zeroelim(&bd, aez, allocator);
+    let temp8c = scale_expansion_zeroelim(&da, bez, allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, allocator);
+    let temp48 = scale_expansion_zeroelim(&temp24, cex, allocator);
+    let xdet = scale_expansion_zeroelim(&temp48, -cex, allocator);
+    let temp48 = scale_expansion_zeroelim(&temp24, cey, allocator);
+    let ydet = scale_expansion_zeroelim(&temp48, -cey, allocator);
+    let temp48 = scale_expansion_zeroelim(&temp24, cez, allocator);
+    let zdet = scale_expansion_zeroelim(&temp48, -cez, allocator);
+    let xydet = fast_expansion_sum_zeroelim(&xdet, &ydet, allocator);
+    let cdet = fast_expansion_sum_zeroelim(&xydet, &zdet, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&bc, aez, bump);
-    let temp8b = scale_expansion_zeroelim(&ac, -bez, bump);
-    let temp8c = scale_expansion_zeroelim(&ab, cez, bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, bump);
-    let temp48 = scale_expansion_zeroelim(&temp24, dex, bump);
-    let xdet = scale_expansion_zeroelim(&temp48, dex, bump);
-    let temp48 = scale_expansion_zeroelim(&temp24, dey, bump);
-    let ydet = scale_expansion_zeroelim(&temp48, dey, bump);
-    let temp48 = scale_expansion_zeroelim(&temp24, dez, bump);
-    let zdet = scale_expansion_zeroelim(&temp48, dez, bump);
-    let xydet = fast_expansion_sum_zeroelim(&xdet, &ydet, bump);
-    let ddet = fast_expansion_sum_zeroelim(&xydet, &zdet, bump);
+    let temp8a = scale_expansion_zeroelim(&bc, aez, allocator);
+    let temp8b = scale_expansion_zeroelim(&ac, -bez, allocator);
+    let temp8c = scale_expansion_zeroelim(&ab, cez, allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, allocator);
+    let temp48 = scale_expansion_zeroelim(&temp24, dex, allocator);
+    let xdet = scale_expansion_zeroelim(&temp48, dex, allocator);
+    let temp48 = scale_expansion_zeroelim(&temp24, dey, allocator);
+    let ydet = scale_expansion_zeroelim(&temp48, dey, allocator);
+    let temp48 = scale_expansion_zeroelim(&temp24, dez, allocator);
+    let zdet = scale_expansion_zeroelim(&temp48, dez, allocator);
+    let xydet = fast_expansion_sum_zeroelim(&xdet, &ydet, allocator);
+    let ddet = fast_expansion_sum_zeroelim(&xydet, &zdet, allocator);
 
-    let abdet = fast_expansion_sum_zeroelim(&adet, &bdet, bump);
-    let cddet = fast_expansion_sum_zeroelim(&cdet, &ddet, bump);
-    let fin1 = fast_expansion_sum_zeroelim(&abdet, &cddet, bump);
+    let abdet = fast_expansion_sum_zeroelim(&adet, &bdet, allocator);
+    let cddet = fast_expansion_sum_zeroelim(&cdet, &ddet, allocator);
+    let fin1 = fast_expansion_sum_zeroelim(&abdet, &cddet, allocator);
 
     let mut det = estimate(&fin1);
     let errbound = B.isp_err_boundb * permanent;
@@ -1452,10 +1493,17 @@ fn insphere_adapt(
         return det;
     }
 
-    insphere_exact(pa, pb, pc, pd, pe, bump)
+    insphere_exact(pa, pb, pc, pd, pe, allocator)
 }
 
-pub fn insphere(pa: &[f64], pb: &[f64], pc: &[f64], pd: &[f64], pe: &[f64], bump: &Bump) -> f64 {
+pub fn insphere<A: Allocator + Copy>(
+    pa: &[f64],
+    pb: &[f64],
+    pc: &[f64],
+    pd: &[f64],
+    pe: &[f64],
+    allocator: A,
+) -> f64 {
     let aex = pa[0] - pe[0];
     let bex = pb[0] - pe[0];
     let cex = pc[0] - pe[0];
@@ -1556,10 +1604,10 @@ pub fn insphere(pa: &[f64], pb: &[f64], pc: &[f64], pd: &[f64], pe: &[f64], bump
             + (aexbeyplus + bexaeyplus) * cezplus)
             * dlift;
 
-    insphere_adapt(pa, pb, pc, pd, pe, permanent, bump)
+    insphere_adapt(pa, pb, pc, pd, pe, permanent, allocator)
 }
 
-fn orient4d_exact(
+fn orient4d_exact<A: Allocator + Copy>(
     pa: &[f64],
     pb: &[f64],
     pc: &[f64],
@@ -1570,161 +1618,161 @@ fn orient4d_exact(
     cheight: f64,
     dheight: f64,
     eheight: f64,
-    bump: &Bump,
+    allocator: A,
 ) -> f64 {
     let (axby1, axby0) = two_product(pa[0], pb[1]);
     let (bxay1, bxay0) = two_product(pb[0], pa[1]);
-    let mut ab = bumpalo::vec![in bump; 0.0; 4];
+    let mut ab = std::vec::from_elem_in(0.0, 4, allocator);
     (ab[3], ab[2], ab[1], ab[0]) = two_two_diff(axby1, axby0, bxay1, bxay0);
 
     let (bxcy1, bxcy0) = two_product(pb[0], pc[1]);
     let (cxby1, cxby0) = two_product(pc[0], pb[1]);
-    let mut bc = bumpalo::vec![in bump; 0.0; 4];
+    let mut bc = std::vec::from_elem_in(0.0, 4, allocator);
     (bc[3], bc[2], bc[1], bc[0]) = two_two_diff(bxcy1, bxcy0, cxby1, cxby0);
 
     let (cxdy1, cxdy0) = two_product(pc[0], pd[1]);
     let (dxcy1, dxcy0) = two_product(pd[0], pc[1]);
-    let mut cd = bumpalo::vec![in bump; 0.0; 4];
+    let mut cd = std::vec::from_elem_in(0.0, 4, allocator);
     (cd[3], cd[2], cd[1], cd[0]) = two_two_diff(cxdy1, cxdy0, dxcy1, dxcy0);
 
     let (dxey1, dxey0) = two_product(pd[0], pe[1]);
     let (exdy1, exdy0) = two_product(pe[0], pd[1]);
-    let mut de = bumpalo::vec![in bump; 0.0; 4];
+    let mut de = std::vec::from_elem_in(0.0, 4, allocator);
     (de[3], de[2], de[1], de[0]) = two_two_diff(dxey1, dxey0, exdy1, exdy0);
 
     let (exay1, exay0) = two_product(pe[0], pa[1]);
     let (axey1, axey0) = two_product(pa[0], pe[1]);
-    let mut ea = bumpalo::vec![in bump; 0.0; 4];
+    let mut ea = std::vec::from_elem_in(0.0, 4, allocator);
     (ea[3], ea[2], ea[1], ea[0]) = two_two_diff(exay1, exay0, axey1, axey0);
 
     let (axcy1, axcy0) = two_product(pa[0], pc[1]);
     let (cxay1, cxay0) = two_product(pc[0], pa[1]);
-    let mut ac = bumpalo::vec![in bump; 0.0; 4];
+    let mut ac = std::vec::from_elem_in(0.0, 4, allocator);
     (ac[3], ac[2], ac[1], ac[0]) = two_two_diff(axcy1, axcy0, cxay1, cxay0);
 
     let (bxdy1, bxdy0) = two_product(pb[0], pd[1]);
     let (dxby1, dxby0) = two_product(pd[0], pb[1]);
-    let mut bd = bumpalo::vec![in bump; 0.0; 4];
+    let mut bd = std::vec::from_elem_in(0.0, 4, allocator);
     (bd[3], bd[2], bd[1], bd[0]) = two_two_diff(bxdy1, bxdy0, dxby1, dxby0);
 
     let (cxey1, cxey0) = two_product(pc[0], pe[1]);
     let (excy1, excy0) = two_product(pe[0], pc[1]);
-    let mut ce = bumpalo::vec![in bump; 0.0; 4];
+    let mut ce = std::vec::from_elem_in(0.0, 4, allocator);
     (ce[3], ce[2], ce[1], ce[0]) = two_two_diff(cxey1, cxey0, excy1, excy0);
 
     let (dxay1, dxay0) = two_product(pd[0], pa[1]);
     let (axdy1, axdy0) = two_product(pa[0], pd[1]);
-    let mut da = bumpalo::vec![in bump; 0.0; 4];
+    let mut da = std::vec::from_elem_in(0.0, 4, allocator);
     (da[3], da[2], da[1], da[0]) = two_two_diff(dxay1, dxay0, axdy1, axdy0);
 
     let (exby1, exby0) = two_product(pe[0], pb[1]);
     let (bxey1, bxey0) = two_product(pb[0], pe[1]);
-    let mut eb = bumpalo::vec![in bump; 0.0; 4];
+    let mut eb = std::vec::from_elem_in(0.0, 4, allocator);
     (eb[3], eb[2], eb[1], eb[0]) = two_two_diff(exby1, exby0, bxey1, bxey0);
 
-    let temp8a = scale_expansion_zeroelim(&bc, pa[2], bump);
-    let temp8b = scale_expansion_zeroelim(&ac, -pb[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&ab, pc[2], bump);
-    let abc = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&bc, pa[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&ac, -pb[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&ab, pc[2], allocator);
+    let abc = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&cd, pb[2], bump);
-    let temp8b = scale_expansion_zeroelim(&bd, -pc[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&bc, pd[2], bump);
-    let bcd = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&cd, pb[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&bd, -pc[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&bc, pd[2], allocator);
+    let bcd = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&de, pc[2], bump);
-    let temp8b = scale_expansion_zeroelim(&ce, -pd[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&cd, pe[2], bump);
-    let cde = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&de, pc[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&ce, -pd[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&cd, pe[2], allocator);
+    let cde = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&ea, pd[2], bump);
-    let temp8b = scale_expansion_zeroelim(&da, -pe[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&de, pa[2], bump);
-    let dea = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&ea, pd[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&da, -pe[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&de, pa[2], allocator);
+    let dea = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&ab, pe[2], bump);
-    let temp8b = scale_expansion_zeroelim(&eb, -pa[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&ea, pb[2], bump);
-    let eab = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&ab, pe[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&eb, -pa[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&ea, pb[2], allocator);
+    let eab = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&bd, pa[2], bump);
-    let temp8b = scale_expansion_zeroelim(&da, pb[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&ab, pd[2], bump);
-    let abd = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&bd, pa[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&da, pb[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&ab, pd[2], allocator);
+    let abd = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&ce, pb[2], bump);
-    let temp8b = scale_expansion_zeroelim(&eb, pc[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&bc, pe[2], bump);
-    let bce = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&ce, pb[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&eb, pc[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&bc, pe[2], allocator);
+    let bce = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&da, pc[2], bump);
-    let temp8b = scale_expansion_zeroelim(&ac, pd[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&cd, pa[2], bump);
-    let cda = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&da, pc[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&ac, pd[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&cd, pa[2], allocator);
+    let cda = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&eb, pd[2], bump);
-    let temp8b = scale_expansion_zeroelim(&bd, pe[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&de, pb[2], bump);
-    let deb = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&eb, pd[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&bd, pe[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&de, pb[2], allocator);
+    let deb = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&ac, pe[2], bump);
-    let temp8b = scale_expansion_zeroelim(&ce, pa[2], bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp8a = scale_expansion_zeroelim(&ea, pc[2], bump);
-    let eac = fast_expansion_sum_zeroelim(&temp8a, &temp16, bump);
+    let temp8a = scale_expansion_zeroelim(&ac, pe[2], allocator);
+    let temp8b = scale_expansion_zeroelim(&ce, pa[2], allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp8a = scale_expansion_zeroelim(&ea, pc[2], allocator);
+    let eac = fast_expansion_sum_zeroelim(&temp8a, &temp16, allocator);
 
-    let temp48a = fast_expansion_sum_zeroelim(&cde, &bce, bump);
-    let mut temp48b = fast_expansion_sum_zeroelim(&deb, &bcd, bump);
+    let temp48a = fast_expansion_sum_zeroelim(&cde, &bce, allocator);
+    let mut temp48b = fast_expansion_sum_zeroelim(&deb, &bcd, allocator);
     expansion_invert(&mut temp48b);
 
-    let bcde = fast_expansion_sum_zeroelim(&temp48a, &temp48b, bump);
-    let adet = scale_expansion_zeroelim(&bcde, aheight, bump);
+    let bcde = fast_expansion_sum_zeroelim(&temp48a, &temp48b, allocator);
+    let adet = scale_expansion_zeroelim(&bcde, aheight, allocator);
 
-    let temp48a = fast_expansion_sum_zeroelim(&dea, &cda, bump);
-    temp48b = fast_expansion_sum_zeroelim(&eac, &cde, bump);
+    let temp48a = fast_expansion_sum_zeroelim(&dea, &cda, allocator);
+    temp48b = fast_expansion_sum_zeroelim(&eac, &cde, allocator);
     expansion_invert(&mut temp48b);
-    let cdea = fast_expansion_sum_zeroelim(&temp48a, &temp48b, bump);
-    let bdet = scale_expansion_zeroelim(&cdea, bheight, bump);
+    let cdea = fast_expansion_sum_zeroelim(&temp48a, &temp48b, allocator);
+    let bdet = scale_expansion_zeroelim(&cdea, bheight, allocator);
 
-    let temp48a = fast_expansion_sum_zeroelim(&eab, &deb, bump);
-    temp48b = fast_expansion_sum_zeroelim(&abd, &dea, bump);
-    expansion_invert(&mut temp48b);
-
-    let deab = fast_expansion_sum_zeroelim(&temp48a, &temp48b, bump);
-    let cdet = scale_expansion_zeroelim(&deab, cheight, bump);
-
-    let temp48a = fast_expansion_sum_zeroelim(&abc, &eac, bump);
-    temp48b = fast_expansion_sum_zeroelim(&bce, &eab, bump);
+    let temp48a = fast_expansion_sum_zeroelim(&eab, &deb, allocator);
+    temp48b = fast_expansion_sum_zeroelim(&abd, &dea, allocator);
     expansion_invert(&mut temp48b);
 
-    let eabc = fast_expansion_sum_zeroelim(&temp48a, &temp48b, bump);
-    let ddet = scale_expansion_zeroelim(&eabc, dheight, bump);
+    let deab = fast_expansion_sum_zeroelim(&temp48a, &temp48b, allocator);
+    let cdet = scale_expansion_zeroelim(&deab, cheight, allocator);
 
-    let temp48a = fast_expansion_sum_zeroelim(&bcd, &abd, bump);
-    temp48b = fast_expansion_sum_zeroelim(&cda, &abc, bump);
+    let temp48a = fast_expansion_sum_zeroelim(&abc, &eac, allocator);
+    temp48b = fast_expansion_sum_zeroelim(&bce, &eab, allocator);
     expansion_invert(&mut temp48b);
 
-    let abcd = fast_expansion_sum_zeroelim(&temp48a, &temp48b, bump);
-    let edet = scale_expansion_zeroelim(&abcd, eheight, bump);
+    let eabc = fast_expansion_sum_zeroelim(&temp48a, &temp48b, allocator);
+    let ddet = scale_expansion_zeroelim(&eabc, dheight, allocator);
 
-    let abdet = fast_expansion_sum_zeroelim(&adet, &bdet, bump);
-    let cddet = fast_expansion_sum_zeroelim(&cdet, &ddet, bump);
-    let cdedet = fast_expansion_sum_zeroelim(&cddet, &edet, bump);
-    let deter = fast_expansion_sum_zeroelim(&abdet, &cdedet, bump);
+    let temp48a = fast_expansion_sum_zeroelim(&bcd, &abd, allocator);
+    temp48b = fast_expansion_sum_zeroelim(&cda, &abc, allocator);
+    expansion_invert(&mut temp48b);
+
+    let abcd = fast_expansion_sum_zeroelim(&temp48a, &temp48b, allocator);
+    let edet = scale_expansion_zeroelim(&abcd, eheight, allocator);
+
+    let abdet = fast_expansion_sum_zeroelim(&adet, &bdet, allocator);
+    let cddet = fast_expansion_sum_zeroelim(&cdet, &ddet, allocator);
+    let cdedet = fast_expansion_sum_zeroelim(&cddet, &edet, allocator);
+    let deter = fast_expansion_sum_zeroelim(&abdet, &cdedet, allocator);
 
     *deter.last().unwrap()
 }
 
-fn orient4d_adapt(
+fn orient4d_adapt<A: Allocator + Copy>(
     pa: &[f64],
     pb: &[f64],
     pc: &[f64],
@@ -1736,7 +1784,7 @@ fn orient4d_adapt(
     dheight: f64,
     eheight: f64,
     permanent: f64,
-    bump: &Bump,
+    allocator: A,
 ) -> f64 {
     let aex = pa[0] - pe[0];
     let bex = pb[0] - pe[0];
@@ -1757,65 +1805,65 @@ fn orient4d_adapt(
 
     let (aexbey1, aexbey0) = two_product(aex, bey);
     let (bexaey1, bexaey0) = two_product(bex, aey);
-    let mut ab = bumpalo::vec![in bump; 0.0; 4];
+    let mut ab = std::vec::from_elem_in(0.0, 4, allocator);
     (ab[3], ab[2], ab[1], ab[0]) = two_two_diff(aexbey1, aexbey0, bexaey1, bexaey0);
 
     let (bexcey1, bexcey0) = two_product(bex, cey);
     let (cexbey1, cexbey0) = two_product(cex, bey);
-    let mut bc = bumpalo::vec![in bump; 0.0; 4];
+    let mut bc = std::vec::from_elem_in(0.0, 4, allocator);
     (bc[3], bc[2], bc[1], bc[0]) = two_two_diff(bexcey1, bexcey0, cexbey1, cexbey0);
 
     let (cexdey1, cexdey0) = two_product(cex, dey);
     let (dexcey1, dexcey0) = two_product(dex, cey);
-    let mut cd = bumpalo::vec![in bump; 0.0; 4];
+    let mut cd = std::vec::from_elem_in(0.0, 4, allocator);
     (cd[3], cd[2], cd[1], cd[0]) = two_two_diff(cexdey1, cexdey0, dexcey1, dexcey0);
 
     let (dexaey1, dexaey0) = two_product(dex, aey);
     let (aexdey1, aexdey0) = two_product(aex, dey);
-    let mut da = bumpalo::vec![in bump; 0.0; 4];
+    let mut da = std::vec::from_elem_in(0.0, 4, allocator);
     (da[3], da[2], da[1], da[0]) = two_two_diff(dexaey1, dexaey0, aexdey1, aexdey0);
 
     let (aexcey1, aexcey0) = two_product(aex, cey);
     let (cexaey1, cexaey0) = two_product(cex, aey);
-    let mut ac = bumpalo::vec![in bump; 0.0; 4];
+    let mut ac = std::vec::from_elem_in(0.0, 4, allocator);
     (ac[3], ac[2], ac[1], ac[0]) = two_two_diff(aexcey1, aexcey0, cexaey1, cexaey0);
 
     let (bexdey1, bexdey0) = two_product(bex, dey);
     let (dexbey1, dexbey0) = two_product(dex, bey);
-    let mut bd = bumpalo::vec![in bump; 0.0; 4];
+    let mut bd = std::vec::from_elem_in(0.0, 4, allocator);
     (bd[3], bd[2], bd[1], bd[0]) = two_two_diff(bexdey1, bexdey0, dexbey1, dexbey0);
 
-    let temp8a = scale_expansion_zeroelim(&cd, bez, bump);
-    let temp8b = scale_expansion_zeroelim(&bd, -cez, bump);
-    let temp8c = scale_expansion_zeroelim(&bc, dez, bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, bump);
-    let adet = scale_expansion_zeroelim(&temp24, -aeheight, bump);
+    let temp8a = scale_expansion_zeroelim(&cd, bez, allocator);
+    let temp8b = scale_expansion_zeroelim(&bd, -cez, allocator);
+    let temp8c = scale_expansion_zeroelim(&bc, dez, allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, allocator);
+    let adet = scale_expansion_zeroelim(&temp24, -aeheight, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&da, cez, bump);
-    let temp8b = scale_expansion_zeroelim(&ac, dez, bump);
-    let temp8c = scale_expansion_zeroelim(&cd, aez, bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, bump);
-    let bdet = scale_expansion_zeroelim(&temp24, beheight, bump);
+    let temp8a = scale_expansion_zeroelim(&da, cez, allocator);
+    let temp8b = scale_expansion_zeroelim(&ac, dez, allocator);
+    let temp8c = scale_expansion_zeroelim(&cd, aez, allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, allocator);
+    let bdet = scale_expansion_zeroelim(&temp24, beheight, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&ab, dez, bump);
-    let temp8b = scale_expansion_zeroelim(&bd, aez, bump);
-    let temp8c = scale_expansion_zeroelim(&da, bez, bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, bump);
-    let cdet = scale_expansion_zeroelim(&temp24, -ceheight, bump);
+    let temp8a = scale_expansion_zeroelim(&ab, dez, allocator);
+    let temp8b = scale_expansion_zeroelim(&bd, aez, allocator);
+    let temp8c = scale_expansion_zeroelim(&da, bez, allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, allocator);
+    let cdet = scale_expansion_zeroelim(&temp24, -ceheight, allocator);
 
-    let temp8a = scale_expansion_zeroelim(&bc, aez, bump);
-    let temp8b = scale_expansion_zeroelim(&ac, -bez, bump);
-    let temp8c = scale_expansion_zeroelim(&ab, cez, bump);
-    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, bump);
-    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, bump);
-    let ddet = scale_expansion_zeroelim(&temp24, deheight, bump);
+    let temp8a = scale_expansion_zeroelim(&bc, aez, allocator);
+    let temp8b = scale_expansion_zeroelim(&ac, -bez, allocator);
+    let temp8c = scale_expansion_zeroelim(&ab, cez, allocator);
+    let temp16 = fast_expansion_sum_zeroelim(&temp8a, &temp8b, allocator);
+    let temp24 = fast_expansion_sum_zeroelim(&temp8c, &temp16, allocator);
+    let ddet = scale_expansion_zeroelim(&temp24, deheight, allocator);
 
-    let abdet = fast_expansion_sum_zeroelim(&adet, &bdet, bump);
-    let cddet = fast_expansion_sum_zeroelim(&cdet, &ddet, bump);
-    let fin1 = fast_expansion_sum_zeroelim(&abdet, &cddet, bump);
+    let abdet = fast_expansion_sum_zeroelim(&adet, &bdet, allocator);
+    let cddet = fast_expansion_sum_zeroelim(&cdet, &ddet, allocator);
+    let fin1 = fast_expansion_sum_zeroelim(&abdet, &cddet, allocator);
 
     let mut det = estimate(&fin1);
     let errbound = B.isp_err_boundb * permanent;
@@ -1887,17 +1935,17 @@ fn orient4d_adapt(
     }
 
     orient4d_exact(
-        pa, pb, pc, pd, pe, aheight, bheight, cheight, dheight, eheight, bump,
+        pa, pb, pc, pd, pe, aheight, bheight, cheight, dheight, eheight, allocator,
     )
 }
 
-pub fn orient4d(
+pub fn orient4d<A: Allocator + Copy>(
     pa: &[f64],
     pb: &[f64],
     pc: &[f64],
     pd: &[f64],
     pe: &[f64],
-    bump: &Bump,
+    allocator: A,
     aheight: f64,
     bheight: f64,
     cheight: f64,
@@ -1986,7 +2034,7 @@ pub fn orient4d(
     }
 
     return orient4d_adapt(
-        pa, pb, pc, pd, pe, aheight, bheight, cheight, dheight, eheight, permanent, bump,
+        pa, pb, pc, pd, pe, aheight, bheight, cheight, dheight, eheight, permanent, allocator,
     );
 }
 
@@ -1994,8 +2042,7 @@ pub fn orient4d(
 fn test_two_arr_mul() {
     let a = [100.0, 0.0000000001];
     let b = a.clone();
-    let bump = Bump::new();
-    let pro = mul_expansion_zeroelim(&a, &b, &bump);
+    let pro = mul_expansion_zeroelim(&a, &b, std::alloc::Global);
     assert_eq!(
         estimate(&pro),
         10000.000000020002 - 8.0374068511808128e-13 + 3.1019272970715786e-25
