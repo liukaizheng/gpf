@@ -5,6 +5,7 @@ use std::{
 };
 
 use bumpalo::Bump;
+use hashbrown::HashMap;
 use itertools::Itertools;
 
 use crate::{
@@ -79,7 +80,7 @@ pub(crate) struct BSPComplex {
     constraints: Vec<VertexId>,
     n_ori_triangles: usize,
 
-    vert_orientations: Vec<Orientation>,
+    vert_orientations: Vec<HashMap<VertexId, Orientation>>,
     vert_visits: Vec<bool>,
 
     edge_visits: Vec<bool>,
@@ -106,7 +107,7 @@ impl BSPComplex {
                 .map(|data| Point3D::Explicit(ExplicitPoint3D::from(data))),
         );
 
-        let (_, new_tet_orders) = remove_ghost_tets(&tet_mesh);
+        let new_tet_orders = remove_ghost_tets(&tet_mesh);
         let mut face_positions = vec![INVALID_IND; tet_mesh.tets.len() << 2];
         let mut faces: Vec<Vec<usize>> = Vec::new();
         let mut face_data: Vec<BSPFaceData> = Vec::new();
@@ -153,7 +154,7 @@ impl BSPComplex {
 
         let mesh = SurfaceMesh::from(faces);
 
-        let vert_orientations = vec![Orientation::Undefined; points.len()];
+        let vert_orientations = vec![HashMap::new(); constraints_data.triangles.len() / 3];
         let vert_visits = vec![false; points.len()];
 
         let edge_visits = vec![false; mesh.n_edges()];
@@ -207,10 +208,7 @@ impl BSPComplex {
         let tri = self.triangle(tid).to_vec_in(bump);
         let start = Instant::now();
         self.cell_data[cid].inner_triangles.pop();
-        let mut coplanar_triangles = self.separate_out_coplanar_triangles(
-            tid, // &mut self.cell_data[cid].inner_triangles,
-            cid, bump,
-        );
+        let mut coplanar_triangles = self.separate_out_coplanar_triangles(tid, cid, bump);
         if !self.is_virtual(tid) {
             coplanar_triangles.push(tid);
         }
@@ -221,15 +219,15 @@ impl BSPComplex {
             &self.points[tri[2]],
             &cell_verts,
             &self.points,
-            &mut self.vert_orientations,
+            &mut self.vert_orientations[tid],
             bump,
         );
         self.ori_duration += start.elapsed();
         let start = Instant::now();
 
         let (mut n_over, mut n_under) = (0, 0);
-        for &vid in &cell_verts {
-            match self.vert_orientations[vid] {
+        for vid in &cell_verts {
+            match self.vert_orientations[tid].get(vid).unwrap() {
                 Orientation::Positive => {
                     n_over += 1;
                 }
@@ -247,10 +245,11 @@ impl BSPComplex {
             let eid = eid.into();
             let e_verts = self.mesh.borrow().e_vertices(eid);
             if sign_reversed(
-                self.vert_orientations[e_verts[0]],
-                self.vert_orientations[e_verts[1]],
+                *self.vert_orientations[tid].get(&e_verts[0]).unwrap(),
+                *self.vert_orientations[tid].get(&e_verts[1]).unwrap(),
             ) {
-                self.split_edge(eid, &tri, &bump);
+                let new_vid = self.split_edge(eid, &tri, &bump);
+                self.vert_orientations[tid].insert(new_vid, Orientation::Zero);
             }
         }
 
@@ -263,8 +262,6 @@ impl BSPComplex {
             }
         }*/
         self.split_duration += start.elapsed();
-
-        self.vert_orientations.fill(Orientation::Undefined);
     }
 
     #[inline(always)]
@@ -300,12 +297,13 @@ impl BSPComplex {
                 plane_pts[2],
                 tri,
                 &self.points,
-                &mut self.vert_orientations,
+                &mut self.vert_orientations[pivot_tid],
                 bump,
             );
-            let coplanar = self.vert_orientations[tri[0]] == Orientation::Zero
-                && self.vert_orientations[tri[1]] == Orientation::Zero
-                && self.vert_orientations[tri[2]] == Orientation::Zero;
+            let ori = &self.vert_orientations[pivot_tid];
+            let coplanar = *ori.get(&tri[0]).unwrap() == Orientation::Zero
+                && *ori.get(&tri[1]).unwrap() == Orientation::Zero
+                && *ori.get(&tri[2]).unwrap() == Orientation::Zero;
             if coplanar && tid < self.n_ori_triangles {
                 coplanar_triangles.push(tid);
             }
@@ -347,8 +345,8 @@ impl BSPComplex {
     }
 
     #[inline]
-    fn split_edge(&mut self, eid: EdgeId, tri: &[VertexId], bump: &Bump) {
-        self.mesh.borrow_mut().split_edge(eid, bump);
+    fn split_edge(&mut self, eid: EdgeId, tri: &[VertexId], bump: &Bump) -> VertexId {
+        let vid = self.mesh.borrow_mut().split_edge(eid, bump);
         self.edge_visits.push(false);
         let p0 = self.points[tri[0]].explicit().unwrap().clone();
         let p1 = self.points[tri[1]].explicit().unwrap().clone();
@@ -369,14 +367,14 @@ impl BSPComplex {
                 p2,
             )));
         }
-        self.vert_orientations.push(Orientation::Zero);
         self.vert_visits.push(false);
 
         self.edge_data.borrow_mut().data.last_mut().unwrap().parents = ori_edge_parents;
+        vid
     }
 }
 
-fn remove_ghost_tets<'b>(mesh: &TetMesh) -> (usize, Vec<usize>) {
+fn remove_ghost_tets<'b>(mesh: &TetMesh) -> Vec<usize> {
     let tets = &mesh.tets;
     let mut idx = 0;
     let mut new_orders = vec![INVALID_IND; tets.len()];
@@ -386,7 +384,7 @@ fn remove_ghost_tets<'b>(mesh: &TetMesh) -> (usize, Vec<usize>) {
             idx += 1;
         }
     }
-    (idx, new_orders)
+    new_orders
 }
 
 fn insert_coplanar_triangles(src: &[usize], dest: &mut Vec<usize>, n_constraints: usize) {
@@ -406,21 +404,20 @@ fn verts_orient_wrt_plane(
     pc: &Point3D,
     verts: &[VertexId],
     points: &[Point3D],
-    vert_orientations: &mut [Orientation],
+    vert_orientations: &mut HashMap<VertexId, Orientation>,
     bump: &Bump,
 ) {
     let p0 = pa.explicit().unwrap();
     let p1 = pb.explicit().unwrap();
     let p2 = pc.explicit().unwrap();
     for &vid in verts {
-        if vert_orientations[vid] != Orientation::Undefined {
-            continue;
+        if let hashbrown::hash_map::Entry::Vacant(ori) = vert_orientations.entry(vid) {
+            if is_point_built_from_plane(&points[vid], p0, p1, p2) {
+                ori.insert(Orientation::Zero);
+            } else {
+                ori.insert(orient3d(&points[vid], pa, pb, pc, bump));
+            }
         }
-        if is_point_built_from_plane(&points[vid], p0, p1, p2) {
-            vert_orientations[vid] = Orientation::Zero;
-            continue;
-        }
-        vert_orientations[vid] = orient3d(&points[vid], pa, pb, pc, bump);
     }
 }
 
