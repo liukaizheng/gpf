@@ -65,6 +65,11 @@ impl SurfaceMesh {
         (vertex_halfedges, vertex_separators)
     }
 
+    #[inline(always)]
+    pub fn he_face(&self, hid: HalfedgeId) -> FaceId {
+        self.he_face_arr[hid]
+    }
+
     #[inline]
     fn new_vertices(&mut self, n: usize) -> VertexId {
         let vid = VertexId::from(self.v_halfedge_arr.len());
@@ -155,7 +160,8 @@ impl SurfaceMesh {
         }
 
         // h-h
-        let mut he_pos_map = HashMap::<HalfedgeId, usize, _, _>::with_capacity_in(e_halfedges.len(), bump);
+        let mut he_pos_map =
+            HashMap::<HalfedgeId, usize, _, _>::with_capacity_in(e_halfedges.len(), bump);
         he_pos_map.extend(e_halfedges.iter().enumerate().map(|(i, &hid)| (hid, i)));
         let to_new_halfedge = |hid: HalfedgeId, positions: &mut Vec<usize, _>| -> HalfedgeId {
             if let Some(&pos) = he_pos_map.get(&hid) {
@@ -331,6 +337,7 @@ impl SurfaceMesh {
         self.e_halfedge_arr[new_e] = first_he;
 
         // f-h
+        self.f_halfedge_arr[fid] = first_he;
         self.f_halfedge_arr[new_f] = second_he;
         second_he
     }

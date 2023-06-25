@@ -5,6 +5,7 @@
 #![feature(iter_partition_in_place)]
 #![feature(allocator_api)]
 #![feature(portable_simd)]
+#![feature(let_chains)]
 
 pub mod math;
 pub mod mesh;

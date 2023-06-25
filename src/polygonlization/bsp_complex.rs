@@ -1,15 +1,11 @@
-use std::{
-    cell::RefCell,
-    rc::Rc,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use bumpalo::Bump;
 use hashbrown::HashMap;
 use itertools::Itertools;
 
 use crate::{
-    mesh::{EdgeData, EdgeId, Face, FaceData, FaceId, Mesh, SurfaceMesh, VertexId},
+    mesh::{validate_mesh_connectivity, EdgeId, Face, FaceId, Mesh, SurfaceMesh, VertexId},
     predicates::{
         orient3d::orient3d, sign_reversed, ExplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
         Orientation, Point3D,
@@ -43,14 +39,16 @@ struct BSPFaceData {
     cells: [usize; 2],
     // coplanar triangles
     triangles: Vec<usize>,
+    plane: [VertexId; 3],
     color: FaceColor,
 }
 
 impl BSPFaceData {
-    fn new(c1: usize, c2: usize, triangles: Vec<usize>) -> Self {
+    fn new(c1: usize, c2: usize, triangles: Vec<usize>, plane: [VertexId; 3]) -> Self {
         Self {
             cells: [c1, c2],
             triangles,
+            plane,
             color: FaceColor::Gray,
         }
     }
@@ -58,12 +56,12 @@ impl BSPFaceData {
 
 #[derive(Clone)]
 struct BSPCellData {
-    faces: Vec<usize>,
+    faces: Vec<FaceId>,
     inner_triangles: Vec<usize>,
 }
 
 impl BSPCellData {
-    fn new(faces: Vec<usize>, inner_triangles: Vec<usize>) -> Self {
+    fn new(faces: Vec<FaceId>, inner_triangles: Vec<usize>) -> Self {
         Self {
             faces,
             inner_triangles,
@@ -73,9 +71,9 @@ impl BSPCellData {
 
 pub(crate) struct BSPComplex {
     points: Vec<Point3D>,
-    mesh: Rc<RefCell<SurfaceMesh>>,
-    edge_data: Rc<RefCell<EdgeData<BSPEdgeData, SurfaceMesh>>>,
-    face_data: Rc<RefCell<FaceData<BSPFaceData, SurfaceMesh>>>,
+    pub mesh: SurfaceMesh,
+    edge_data: Vec<BSPEdgeData>,
+    face_data: Vec<BSPFaceData>,
     cell_data: Vec<BSPCellData>,
     constraints: Vec<VertexId>,
     n_ori_triangles: usize,
@@ -122,12 +120,14 @@ impl BSPComplex {
             for (i, nei) in tet.nei.iter().enumerate() {
                 let adj_cell_idx = new_tet_orders[nei.tet];
                 if tet_face_is_new(tid, nei.tet, adj_cell_idx) {
-                    faces.push(vec![
-                        tet_mesh.org(nei),
-                        tet_mesh.dest(nei),
-                        tet_mesh.apex(nei),
-                    ]);
-                    let mut face = BSPFaceData::new(cell_idx, adj_cell_idx, Vec::new());
+                    let tri = vec![tet_mesh.org(nei), tet_mesh.dest(nei), tet_mesh.apex(nei)];
+                    let mut face = BSPFaceData::new(
+                        cell_idx,
+                        adj_cell_idx,
+                        Vec::new(),
+                        [tri[0].into(), tri[1].into(), tri[2].into()],
+                    );
+                    faces.push(tri);
                     insert_coplanar_triangles(
                         &tet_mark[i][tid],
                         &mut face.triangles,
@@ -135,7 +135,7 @@ impl BSPComplex {
                     );
                     let fid = face_data.len();
                     face_positions[(tid << 2) + i] = fid;
-                    cell_faces.push(fid);
+                    cell_faces.push(fid.into());
                     face_data.push(face);
                 } else {
                     let j = nei.ver & 3;
@@ -146,7 +146,7 @@ impl BSPComplex {
                         &mut face.triangles,
                         constraints_data.n_ori_triangles,
                     );
-                    cell_faces.push(fid);
+                    cell_faces.push(fid.into());
                 }
             }
             cell_data.push(BSPCellData::new(cell_faces, tet_mark[4][tid].clone()));
@@ -163,19 +163,8 @@ impl BSPComplex {
                 .map(|eid| BSPEdgeData::new(Vec::from_iter(mesh.e_vertices(eid)))),
         );
 
-        let mesh = Rc::new(RefCell::new(mesh));
-
-        let edge_data = EdgeData::from_data(
-            Rc::downgrade(&mesh),
-            edge_data,
-            BSPEdgeData::new(Vec::new()),
-        );
-        let face_data = FaceData::from_data(
-            Rc::downgrade(&mesh),
-            face_data,
-            BSPFaceData::new(INVALID_IND, INVALID_IND, Vec::new()),
-        );
         let constraints = Vec::from_iter(constraints_data.triangles.iter().map(|&idx| idx.into()));
+
         Self {
             points,
             mesh,
@@ -243,7 +232,7 @@ impl BSPComplex {
 
         for &eid in &cell_edges {
             let eid = eid.into();
-            let e_verts = self.mesh.borrow().e_vertices(eid);
+            let e_verts = self.mesh.e_vertices(eid);
             if sign_reversed(
                 *self.vert_orientations[tid].get(&e_verts[0]).unwrap(),
                 *self.vert_orientations[tid].get(&e_verts[1]).unwrap(),
@@ -253,14 +242,19 @@ impl BSPComplex {
             }
         }
 
-        /*for &fid in &self.cell_data[cid].faces {
-            let fid = fid.into();
-            if let Some([va, vb]) =
-                split_face_verts(&self.mesh.borrow(), fid, &self.vert_orientations)
-            {
-                self.mesh.borrow_mut().split_face(fid, va, vb, bump);
+        let n_cell_faces = self.cell_data[cid].faces.len();
+        for i in 0..n_cell_faces {
+            let fid = self.cell_data[cid].faces[i];
+            let coplanar_verts = split_face_verts(&self.mesh, fid, &self.vert_orientations[tid]);
+            if let Some([va, vb]) = coplanar_verts {
+                let _ = self.split_face(fid, va, vb, tid, bump);
             }
-        }*/
+        }
+
+        // if let Err(err) = validate_mesh_connectivity(&self.mesh) {
+        //     panic!("the err is {}", err);
+        // }
+
         self.split_duration += start.elapsed();
     }
 
@@ -318,7 +312,7 @@ impl BSPComplex {
         cid: usize,
         bump: &'b Bump,
     ) -> (Vec<VertexId, &'b Bump>, Vec<EdgeId, &'b Bump>) {
-        let mesh = self.mesh.borrow();
+        let mesh = &self.mesh;
         let mut verts = Vec::new_in(bump);
         let mut edges = Vec::new_in(bump);
         for &fid in &self.cell_data[cid].faces {
@@ -346,12 +340,12 @@ impl BSPComplex {
 
     #[inline]
     fn split_edge(&mut self, eid: EdgeId, tri: &[VertexId], bump: &Bump) -> VertexId {
-        let vid = self.mesh.borrow_mut().split_edge(eid, bump);
+        let vid = self.mesh.split_edge(eid, bump);
         self.edge_visits.push(false);
         let p0 = self.points[tri[0]].explicit().unwrap().clone();
         let p1 = self.points[tri[1]].explicit().unwrap().clone();
         let p2 = self.points[tri[2]].explicit().unwrap().clone();
-        let ori_edge_parents = self.edge_data.borrow().data[eid].parents.clone();
+        let ori_edge_parents = self.edge_data[eid].parents.clone();
         if ori_edge_parents.len() > 2 {
             self.points.push(three_planes_intersection(
                 [&ori_edge_parents[..3], &ori_edge_parents[3..], tri],
@@ -369,8 +363,43 @@ impl BSPComplex {
         }
         self.vert_visits.push(false);
 
-        self.edge_data.borrow_mut().data.last_mut().unwrap().parents = ori_edge_parents;
+        self.edge_visits.push(false);
+        self.edge_data.push(BSPEdgeData::new(ori_edge_parents));
         vid
+    }
+
+    #[inline]
+    fn split_face(
+        &mut self,
+        fid: FaceId,
+        va: VertexId,
+        vb: VertexId,
+        tid: usize,
+        bump: &Bump,
+    ) -> FaceId {
+        let mesh = &mut self.mesh;
+        let new_hid = mesh.split_face(fid, va, vb, bump);
+        let new_fid = mesh.he_face(new_hid);
+
+        let tri = {
+            let start = tid * 3;
+            &self.constraints[start..(start + 3)]
+        };
+
+        let mut parent = tri.to_vec();
+        parent.extend(&self.face_data[fid].plane);
+        self.edge_data.push(BSPEdgeData::new(parent));
+
+        let face_data = self.face_data[fid].clone();
+        for cid in face_data.cells {
+            if cid != INVALID_IND {
+                self.cell_data[cid].faces.push(new_fid);
+            }
+        }
+
+        self.face_data.push(face_data);
+        self.edge_visits.push(false);
+        new_fid
     }
 }
 
@@ -495,17 +524,17 @@ fn three_planes_intersection<'b>(
     ))
 }
 
-/*#[inline]
+#[inline]
 fn split_face_verts(
     mesh: &SurfaceMesh,
     fid: FaceId,
-    vert_orientations: &[Orientation],
+    vert_orientations: &HashMap<VertexId, Orientation>,
 ) -> Option<[VertexId; 2]> {
     let (mut first, mut second) = (None, None);
     let (mut has_pos, mut has_neg) = (false, false);
     for hid in mesh.face(fid).halfedges() {
         let vid = mesh.he_vertex(hid);
-        match vert_orientations[vid] {
+        match vert_orientations.get(&vid).unwrap() {
             Orientation::Positive => {
                 has_pos = true;
                 if has_neg && let Some(first) = first && let Some(second) = second {
@@ -523,7 +552,7 @@ fn split_face_verts(
                     first = Some(vid);
                 } else if second.is_none() {
                     if has_pos && has_neg {
-                        return Some([*first.unwrap(), vid]);
+                        return Some([first.unwrap(), vid]);
                     } else {
                         second = Some(vid);
                     }
@@ -533,4 +562,4 @@ fn split_face_verts(
         }
     }
     None
-}*/
+}
