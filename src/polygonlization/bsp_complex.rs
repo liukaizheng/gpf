@@ -5,7 +5,7 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 
 use crate::{
-    mesh::{validate_mesh_connectivity, EdgeId, Face, FaceId, Mesh, SurfaceMesh, VertexId},
+    mesh::{EdgeId, Face, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
         orient3d::orient3d, sign_reversed, ExplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
         Orientation, Point3D,
@@ -243,11 +243,36 @@ impl BSPComplex {
         }
 
         let n_cell_faces = self.cell_data[cid].faces.len();
+        let mut pos_faces = Vec::new_in(bump);
+        let mut neg_faces = Vec::new_in(bump);
+        let mut zero_ori_halfedges = Vec::new_in(bump);
         for i in 0..n_cell_faces {
             let fid = self.cell_data[cid].faces[i];
-            let coplanar_verts = split_face_verts(&self.mesh, fid, &self.vert_orientations[tid]);
-            if let Some([va, vb]) = coplanar_verts {
-                let _ = self.split_face(fid, va, vb, tid, bump);
+            let coplanar = split_face_verts(&self.mesh, fid, &self.vert_orientations[tid], bump);
+            match coplanar {
+                Ok([va, vb]) => {
+                    let _ = self.split_face(fid, va, vb, tid, bump);
+                }
+                Err(coplanar) => match coplanar {
+                    Ok(halfedges) => {
+                        let vid = self.mesh.he_tip_vertex(*halfedges.last().unwrap());
+                        // it is impossible orientation is zero
+                        if self.vert_orientations[tid].get(&vid).unwrap() == &Orientation::Positive
+                        {
+                            pos_faces.push(fid);
+                        } else {
+                            neg_faces.push(fid);
+                        }
+                        zero_ori_halfedges.extend(halfedges);
+                    }
+                    Err(has_pos) => {
+                        if has_pos {
+                            pos_faces.push(fid);
+                        } else {
+                            neg_faces.push(fid);
+                        }
+                    }
+                },
             }
         }
 
@@ -524,35 +549,37 @@ fn three_planes_intersection<'b>(
     ))
 }
 
-#[inline]
-fn split_face_verts(
+fn split_face_verts<'b>(
     mesh: &SurfaceMesh,
     fid: FaceId,
     vert_orientations: &HashMap<VertexId, Orientation>,
-) -> Option<[VertexId; 2]> {
+    bump: &'b Bump,
+) -> Result<[VertexId; 2], Result<Vec<HalfedgeId, &'b Bump>, bool>> {
     let (mut first, mut second) = (None, None);
     let (mut has_pos, mut has_neg) = (false, false);
+    let mut zero_ori_candidates = Vec::new_in(bump);
     for hid in mesh.face(fid).halfedges() {
         let vid = mesh.he_vertex(hid);
         match vert_orientations.get(&vid).unwrap() {
             Orientation::Positive => {
                 has_pos = true;
                 if has_neg && let Some(first) = first && let Some(second) = second {
-                    return Some([first, second]);
+                    return Ok([first, second]);
                 }
             }
             Orientation::Negative => {
                 has_neg = true;
                 if has_pos && let Some(first) = first && let Some(second) = second {
-                    return Some([first, second]);
+                    return Ok([first, second]);
                 }
             }
             Orientation::Zero => {
+                zero_ori_candidates.push(hid);
                 if first.is_none() {
                     first = Some(vid);
                 } else if second.is_none() {
                     if has_pos && has_neg {
-                        return Some([first.unwrap(), vid]);
+                        return Ok([first.unwrap(), vid]);
                     } else {
                         second = Some(vid);
                     }
@@ -561,5 +588,24 @@ fn split_face_verts(
             Orientation::Undefined => {}
         }
     }
-    None
+
+    zero_ori_candidates.retain(|&hid| {
+        vert_orientations.get(&mesh.he_tip_vertex(hid)).unwrap() == &Orientation::Zero
+    });
+
+    if zero_ori_candidates.is_empty() {
+        return Err(Err(has_pos));
+    } else {
+        if zero_ori_candidates.len() == 1 {
+            return Err(Ok(zero_ori_candidates));
+        } else {
+            let pos = zero_ori_candidates
+                .windows(2)
+                .position(|pair| mesh.he_tip_vertex(pair[0]) != mesh.he_vertex(pair[1]));
+            if let Some(pos) = pos {
+                zero_ori_candidates.rotate_left(pos);
+            }
+            return Err(Ok(zero_ori_candidates));
+        }
+    }
 }
