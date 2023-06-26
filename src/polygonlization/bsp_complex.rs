@@ -27,12 +27,12 @@ impl BSPEdgeData {
     }
 }
 
-#[derive(Clone)]
-enum FaceColor {
-    // White,
-    // Black,
-    Gray,
-}
+// #[derive(Clone)]
+// enum FaceColor {
+// White,
+// Black,
+// Gray,
+// }
 
 #[derive(Clone)]
 struct BSPFaceData {
@@ -40,7 +40,6 @@ struct BSPFaceData {
     // coplanar triangles
     triangles: Vec<usize>,
     plane: [VertexId; 3],
-    color: FaceColor,
 }
 
 impl BSPFaceData {
@@ -49,7 +48,6 @@ impl BSPFaceData {
             cells: [c1, c2],
             triangles,
             plane,
-            color: FaceColor::Gray,
         }
     }
 }
@@ -248,17 +246,90 @@ impl BSPComplex {
         let mut zero_ori_halfedges = Vec::new_in(bump);
         for i in 0..n_cell_faces {
             let fid = self.cell_data[cid].faces[i];
-            let coplanar = split_face_verts(&self.mesh, fid, &self.vert_orientations[tid], bump);
+            let orientaion = &mut self.vert_orientations[tid];
+            let coplanar = split_face_verts(&self.mesh, fid, orientaion, bump);
             match coplanar {
                 Ok([va, vb]) => {
-                    let _ = self.split_face(fid, va, vb, tid, bump);
+                    let new_hid = self.mesh.split_face(fid, va, vb, bump);
+                    let new_fid = self.mesh.he_face(new_hid);
+
+                    let mut parent = tri.to_vec();
+
+                    parent.extend(&self.face_data[fid].plane);
+                    self.edge_data.push(BSPEdgeData::new(parent));
+                    let new_is_pos = orientaion.get(&self.mesh.he_tip_vertex(new_hid)).unwrap()
+                        == &Orientation::Positive;
+                    if new_is_pos {
+                        pos_faces.push(new_fid);
+                        neg_faces.push(fid);
+                    } else {
+                        pos_faces.push(fid);
+                        neg_faces.push(new_fid);
+                    }
+                    let old_is_pos = !new_is_pos;
+
+                    for nei_cid in self.face_data[fid].cells {
+                        if nei_cid != INVALID_IND {
+                            self.cell_data[nei_cid].faces.push(new_fid);
+                        }
+                    }
+
+                    let mut new_face_triangles = Vec::new();
+                    self.face_data[fid].triangles.retain(|&face_tid| {
+                        let face_tri = {
+                            let start = face_tid * 3;
+                            &self.constraints[start..(start + 3)]
+                        };
+                        verts_orient_wrt_plane(
+                            &self.points[tri[0]],
+                            &self.points[tri[1]],
+                            &self.points[tri[2]],
+                            face_tri,
+                            &self.points,
+                            orientaion,
+                            bump,
+                        );
+                        let (mut has_pos, mut has_neg) = (false, false);
+                        for vid in face_tri {
+                            match orientaion.get(vid).unwrap() {
+                                Orientation::Positive => {
+                                    has_pos = true;
+                                }
+                                Orientation::Negative => {
+                                    has_neg = true;
+                                }
+                                _ => {}
+                            }
+                        }
+                        if new_is_pos {
+                            if has_pos {
+                                new_face_triangles.push(face_tid);
+                            }
+                        } else {
+                            if has_neg {
+                                new_face_triangles.push(face_tid);
+                            }
+                        }
+                        if old_is_pos {
+                            has_pos
+                        } else {
+                            has_neg
+                        }
+                    });
+
+                    let old_face_data = &self.face_data[fid];
+                    self.face_data.push(BSPFaceData {
+                        cells: old_face_data.cells,
+                        triangles: new_face_triangles,
+                        plane: old_face_data.plane,
+                    });
+                    self.edge_visits.push(false);
                 }
                 Err(coplanar) => match coplanar {
                     Ok(halfedges) => {
                         let vid = self.mesh.he_tip_vertex(*halfedges.last().unwrap());
                         // it is impossible orientation is zero
-                        if self.vert_orientations[tid].get(&vid).unwrap() == &Orientation::Positive
-                        {
+                        if orientaion.get(&vid).unwrap() == &Orientation::Positive {
                             pos_faces.push(fid);
                         } else {
                             neg_faces.push(fid);
@@ -391,40 +462,6 @@ impl BSPComplex {
         self.edge_visits.push(false);
         self.edge_data.push(BSPEdgeData::new(ori_edge_parents));
         vid
-    }
-
-    #[inline]
-    fn split_face(
-        &mut self,
-        fid: FaceId,
-        va: VertexId,
-        vb: VertexId,
-        tid: usize,
-        bump: &Bump,
-    ) -> FaceId {
-        let mesh = &mut self.mesh;
-        let new_hid = mesh.split_face(fid, va, vb, bump);
-        let new_fid = mesh.he_face(new_hid);
-
-        let tri = {
-            let start = tid * 3;
-            &self.constraints[start..(start + 3)]
-        };
-
-        let mut parent = tri.to_vec();
-        parent.extend(&self.face_data[fid].plane);
-        self.edge_data.push(BSPEdgeData::new(parent));
-
-        let face_data = self.face_data[fid].clone();
-        for cid in face_data.cells {
-            if cid != INVALID_IND {
-                self.cell_data[cid].faces.push(new_fid);
-            }
-        }
-
-        self.face_data.push(face_data);
-        self.edge_visits.push(false);
-        new_fid
     }
 }
 
