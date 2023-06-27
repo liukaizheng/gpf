@@ -503,9 +503,19 @@ impl Mesh for SurfaceMesh {
     }
 
     /// the twin halfedge of the halfedge
-    #[inline(always)]
     fn he_twin(&self, hid: HalfedgeId) -> HalfedgeId {
-        HalfedgeId::from(self.he_sibling_arr[hid])
+        let mut curr = hid;
+        loop {
+            let next = self.he_sibling_arr[curr];
+            if next == hid {
+                return hid;
+            }
+
+            if self.he_vertex_arr[curr] != self.he_vertex_arr[next] {
+                return next;
+            }
+            curr = next;
+        }
     }
 
     /// the sibling halfedge of the halfedge

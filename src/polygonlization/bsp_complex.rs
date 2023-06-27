@@ -257,7 +257,9 @@ impl BSPComplex {
 
                     parent.extend(&self.face_data[fid].plane);
                     self.edge_data.push(BSPEdgeData::new(parent));
-                    let new_is_pos = orientaion.get(&self.mesh.he_tip_vertex(new_hid)).unwrap()
+                    let new_is_pos = orientaion
+                        .get(&self.mesh.he_tip_vertex(self.mesh.he_next(new_hid)))
+                        .unwrap()
                         == &Orientation::Positive;
                     if new_is_pos {
                         pos_faces.push(new_fid);
@@ -266,6 +268,13 @@ impl BSPComplex {
                         pos_faces.push(fid);
                         neg_faces.push(new_fid);
                     }
+
+                    if new_is_pos ^ (self.face_data[fid].cells[0] == cid) {
+                        zero_ori_halfedges.push(new_hid);
+                    } else {
+                        zero_ori_halfedges.push(self.mesh.he_sibling(new_hid));
+                    }
+
                     let old_is_pos = !new_is_pos;
 
                     for nei_cid in self.face_data[fid].cells {
@@ -327,14 +336,26 @@ impl BSPComplex {
                 }
                 Err(coplanar) => match coplanar {
                     Ok(halfedges) => {
-                        let vid = self.mesh.he_tip_vertex(*halfedges.last().unwrap());
+                        let vid = self
+                            .mesh
+                            .he_tip_vertex(self.mesh.he_next(*halfedges.last().unwrap()));
                         // it is impossible orientation is zero
-                        if orientaion.get(&vid).unwrap() == &Orientation::Positive {
+                        let is_pos = *orientaion.get(&vid).unwrap() == Orientation::Positive;
+                        if is_pos {
                             pos_faces.push(fid);
                         } else {
                             neg_faces.push(fid);
                         }
-                        zero_ori_halfedges.extend(halfedges);
+                        if is_pos {
+                            if self.face_data[fid].cells[0] == cid {
+                                // every edge always has two opposite halfedge
+                                zero_ori_halfedges.extend(
+                                    halfedges.into_iter().map(|hid| self.mesh.he_twin(hid)),
+                                );
+                            } else {
+                                zero_ori_halfedges.extend(halfedges);
+                            }
+                        }
                     }
                     Err(has_pos) => {
                         if has_pos {
@@ -346,6 +367,8 @@ impl BSPComplex {
                 },
             }
         }
+
+        let face_halfedges = make_loop(&self.mesh, zero_ori_halfedges, bump);
 
         // if let Err(err) = validate_mesh_connectivity(&self.mesh) {
         //     panic!("the err is {}", err);
@@ -645,4 +668,28 @@ fn split_face_verts<'b>(
             return Err(Ok(zero_ori_candidates));
         }
     }
+}
+
+fn make_loop<'b>(
+    mesh: &SurfaceMesh,
+    halfedges: Vec<HalfedgeId, &'b Bump>,
+    bump: &'b Bump,
+) -> Vec<HalfedgeId, &'b Bump> {
+    let map = HashMap::<VertexId, HalfedgeId>::from_iter(
+        halfedges.iter().map(|&hid| (mesh.he_vertex(hid), hid)),
+    );
+
+    let first = halfedges[0];
+    let mut result = Vec::new_in(bump);
+    result.push(first);
+    let mut curr = first;
+    loop {
+        let next = *map.get(&mesh.he_tip_vertex(curr)).unwrap();
+        if next == first {
+            break;
+        }
+        result.push(next);
+        curr = next;
+    }
+    result
 }
