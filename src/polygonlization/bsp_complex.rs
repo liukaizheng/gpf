@@ -5,7 +5,9 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 
 use crate::{
-    mesh::{EdgeId, Face, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
+    mesh::{
+        validate_mesh_connectivity, EdgeId, Face, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId,
+    },
     predicates::{
         orient3d::orient3d, sign_reversed, ExplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
         Orientation, Point3D,
@@ -191,6 +193,16 @@ impl BSPComplex {
     }
 
     pub(crate) fn split_cell(&mut self, cid: usize, bump: &Bump) {
+        {
+            for &fid in &self.cell_data[cid].faces {
+                for hid in self.mesh.face(fid).halfedges() {
+                    let eid = self.mesh.he_edge(hid);
+                    let va = self.mesh.he_vertex(hid);
+                    let vb = self.mesh.he_tip_vertex(hid);
+                    let next = self.mesh.he_next(hid);
+                }
+            }
+        }
         let tid = *self.cell_data[cid].inner_triangles.last().unwrap();
         let tri = self.triangle(tid).to_vec_in(bump);
         let start = Instant::now();
@@ -225,7 +237,8 @@ impl BSPComplex {
             }
         }
         if n_over == 0 || n_under == 0 {
-            panic!("don't find plane to split cell");
+            // panic!("don't find plane to split cell");
+            return;
         }
 
         for &eid in &cell_edges {
@@ -241,8 +254,8 @@ impl BSPComplex {
         }
 
         let n_cell_faces = self.cell_data[cid].faces.len();
-        let mut pos_faces = Vec::new_in(bump);
-        let mut neg_faces = Vec::new_in(bump);
+        let mut pos_faces = Vec::new();
+        let mut neg_faces = Vec::new();
         let mut zero_ori_halfedges = Vec::new_in(bump);
         for i in 0..n_cell_faces {
             let fid = self.cell_data[cid].faces[i];
@@ -278,7 +291,7 @@ impl BSPComplex {
                     let old_is_pos = !new_is_pos;
 
                     for nei_cid in self.face_data[fid].cells {
-                        if nei_cid != INVALID_IND {
+                        if nei_cid != INVALID_IND && nei_cid != cid {
                             self.cell_data[nei_cid].faces.push(new_fid);
                         }
                     }
@@ -368,7 +381,38 @@ impl BSPComplex {
             }
         }
 
-        let face_halfedges = make_loop(&self.mesh, zero_ori_halfedges, bump);
+        // add separating face
+        {
+            let start_verts = Vec::from_iter(
+                zero_ori_halfedges
+                    .iter()
+                    .map(|&hid| self.mesh.he_vertex(hid)),
+            );
+            let end_verts = Vec::from_iter(
+                zero_ori_halfedges
+                    .iter()
+                    .map(|&hid| self.mesh.he_tip_vertex(hid)),
+            );
+            let face_halfedges = make_loop(&self.mesh, zero_ori_halfedges, bump);
+            let new_fid = self.mesh.add_face_by_halfedges(&face_halfedges, bump);
+            let new_cid = self.cell_data.len();
+            self.face_data.push(BSPFaceData::new(
+                new_cid,
+                cid,
+                coplanar_triangles,
+                [tri[0], tri[1], tri[2]],
+            ));
+            pos_faces.push(new_fid);
+            neg_faces.push(new_fid);
+
+            let [pos_inner_triangles, neg_inner_triangles] =
+                self.separate_cell_triangles(cid, tid, bump);
+            self.cell_data[cid].faces = neg_faces;
+            self.cell_data[cid].inner_triangles = neg_inner_triangles;
+
+            self.cell_data
+                .push(BSPCellData::new(pos_faces, pos_inner_triangles));
+        }
 
         // if let Err(err) = validate_mesh_connectivity(&self.mesh) {
         //     panic!("the err is {}", err);
@@ -388,19 +432,19 @@ impl BSPComplex {
         tid >= self.n_ori_triangles
     }
 
-    fn separate_out_coplanar_triangles<'b>(
+    fn separate_out_coplanar_triangles(
         &mut self,
         pivot_tid: usize,
         cid: usize,
-        bump: &'b Bump,
-    ) -> Vec<usize, &'b Bump> {
+        bump: &Bump,
+    ) -> Vec<usize> {
         let mut plane_pts = Vec::with_capacity_in(3, bump);
         plane_pts.extend(
             self.triangle(pivot_tid)
                 .iter()
                 .map(|&vid| &self.points[vid]),
         );
-        let mut coplanar_triangles = Vec::new_in(bump);
+        let mut coplanar_triangles = Vec::new();
         self.cell_data[cid].inner_triangles.retain(|&tid| {
             let start = tid * 3;
             let tri = &self.constraints[start..(start + 3)];
@@ -486,6 +530,50 @@ impl BSPComplex {
         self.edge_data.push(BSPEdgeData::new(ori_edge_parents));
         vid
     }
+
+    fn separate_cell_triangles(
+        &mut self,
+        cid: usize,
+        pivot_tid: usize,
+        bump: &Bump,
+    ) -> [Vec<usize>; 2] {
+        let cell_triangles = &self.cell_data[cid].inner_triangles;
+        let pivot_tri = self.triangle(pivot_tid);
+        let pa = &self.points[pivot_tri[0]];
+        let pb = &self.points[pivot_tri[1]];
+        let pc = &self.points[pivot_tri[2]];
+        let mut pos_triangles = Vec::new();
+        let mut neg_triangles = Vec::new();
+        for &tid in cell_triangles {
+            let tri = triangle(tid, &self.constraints);
+            let orientation = &mut self.vert_orientations[pivot_tid];
+            verts_orient_wrt_plane(pa, pb, pc, tri, &self.points, orientation, bump);
+            let (mut has_pos, mut has_neg) = (false, false);
+            for vid in tri {
+                match orientation.get(vid).unwrap() {
+                    Orientation::Positive => {
+                        has_pos = true;
+                    }
+                    Orientation::Negative => {
+                        has_neg = true;
+                    }
+                    _ => {}
+                }
+            }
+            if has_pos {
+                pos_triangles.push(tid);
+            }
+            if has_neg {
+                neg_triangles.push(tid);
+            }
+        }
+        [pos_triangles, neg_triangles]
+    }
+}
+
+fn triangle(tid: usize, triangles: &[VertexId]) -> &[VertexId] {
+    let start = tid * 3;
+    &triangles[start..(start + 3)]
 }
 
 fn remove_ghost_tets<'b>(mesh: &TetMesh) -> Vec<usize> {

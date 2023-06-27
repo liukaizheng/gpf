@@ -341,6 +341,42 @@ impl SurfaceMesh {
         self.f_halfedge_arr[new_f] = second_he;
         second_he
     }
+
+    #[inline]
+    pub fn add_face_by_halfedges(&mut self, halfedges: &[HalfedgeId], bump: &Bump) -> FaceId {
+        let new_halfedges =
+            ele_ranges::<HalfedgeId>(self.new_halfedges(halfedges.len()).0, halfedges.len(), bump);
+
+        for (&old_hid, &new_hid) in halfedges.iter().zip(&new_halfedges) {
+            // h-v
+            self.he_vertex_arr[new_hid] = self.he_vertex_arr[old_hid];
+
+            // h-h
+            // sibling
+            insert_halfedge(&mut self.he_sibling_arr, old_hid, new_hid);
+            // incoming
+            insert_halfedge(&mut self.he_vert_in_next_arr, old_hid, new_hid);
+            // outgoing
+            insert_halfedge(&mut self.he_vert_out_next_arr, old_hid, new_hid);
+
+            // h-e
+            self.he_edge_arr[new_hid] = self.he_edge_arr[old_hid];
+        }
+
+        // h-h: next halfedge
+        for (&curr, &next) in new_halfedges.iter().circular_tuple_windows() {
+            self.he_next_arr[curr] = next;
+        }
+
+        // h-f
+        let new_f = self.new_faces(1);
+        for &hid in &new_halfedges {
+            self.he_face_arr[hid] = new_f;
+        }
+        // f-h
+        self.f_halfedge_arr[new_f] = new_halfedges[0];
+        new_f
+    }
 }
 
 #[inline(always)]
