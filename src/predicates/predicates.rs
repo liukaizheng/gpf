@@ -396,27 +396,19 @@ pub fn scale_expansion_zeroelim<A: Allocator + Copy>(
     harr
 }
 
-#[inline]
+#[inline(always)]
 fn mul_expansion_zeroelim_imp<A: Allocator + Copy>(
     earr: &[f64],
     farr: &[f64],
     allocator: A,
 ) -> Vec<f64, A> {
-    let init = scale_expansion_zeroelim(&farr, earr[0], allocator);
-    earr[1..]
-        .iter()
-        .scan(init, |res, &s| {
-            Some(fast_expansion_sum_zeroelim(
-                &scale_expansion_zeroelim(&farr, s, allocator),
-                &res,
-                allocator,
-            ))
-        })
-        .last()
+    earr.iter()
+        .map(|&s| scale_expansion_zeroelim(&farr, s, allocator))
+        .reduce(|a, b| fast_expansion_sum_zeroelim(&a, &b, allocator))
         .unwrap()
 }
 
-#[inline]
+#[inline(always)]
 pub fn mul_expansion_zeroelim<A: Allocator + Copy>(
     earr: &[f64],
     farr: &[f64],
