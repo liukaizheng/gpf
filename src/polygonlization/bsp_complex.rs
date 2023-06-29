@@ -3,83 +3,16 @@ use std::time::{Duration, Instant};
 use bumpalo::Bump;
 use hashbrown::HashMap;
 use itertools::Itertools;
-use serde::Serialize;
 
 use crate::{
-    mesh::{
-        validate_mesh_connectivity, EdgeId, Face, FaceId, HalfedgeId, Mesh, SurfaceMesh, Vertex,
-        VertexId,
-    },
+    mesh::{EdgeId, Face, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
         orient3d::orient3d, sign_reversed, ExplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
-        Orientation, Point3D, ImplicitPoint3D,
+        Orientation, Point3D,
     },
     triangle::TetMesh,
     INVALID_IND,
 };
-
-#[derive(Serialize)]
-struct E {
-    data: [f64; 3],
-}
-
-impl From<&ExplicitPoint3D> for E {
-    fn from(p: &ExplicitPoint3D) -> Self {
-        Self {
-            data: p.data.clone(),
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct LPI {
-    p: E,
-    q: E,
-    r: E,
-    s: E,
-    t: E,
-}
-
-impl From<&ImplicitPointLPI> for LPI {
-    fn from(pt: &ImplicitPointLPI) -> Self {
-        Self {
-            p: E::from(&pt.p),
-            q: E::from(&pt.q),
-            r: E::from(&pt.r),
-            s: E::from(&pt.s),
-            t: E::from(&pt.t),
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct TPI {
-    v1: E,
-    v2: E,
-    v3: E,
-    w1: E,
-    w2: E,
-    w3: E,
-    u1: E,
-    u2: E,
-    u3: E,
-}
-
-impl From<&ImplicitPointTPI> for TPI {
-    fn from(pt: &ImplicitPointTPI) -> Self {
-        Self {
-            v1: E::from(&pt.v1),
-            v2: E::from(&pt.v2),
-            v3: E::from(&pt.v3),
-            w1: E::from(&pt.w1),
-            w2: E::from(&pt.w2),
-            w3: E::from(&pt.w3),
-            u1: E::from(&pt.u1),
-            u2: E::from(&pt.u2),
-            u3: E::from(&pt.u3),
-        }
-    }
-}
 
 use super::conforming_mesh::Constraints;
 
@@ -258,32 +191,6 @@ impl BSPComplex {
     }
 
     pub(crate) fn split_cell(&mut self, cid: usize, bump: &Bump) {
-        // if self.cell_data.len() > 7971 && self.cell_data[7971].faces.len() > 3 {
-        if cid == 7971 {
-            let mut af = Vec::new();
-            for hid in self.mesh.vertex(2784.into()).incoming_halfedge() {
-                let fid = self.mesh.he_face(hid);
-                if self.face_data[fid].cells[0] == 7971 || self.face_data[fid].cells[1] == 7971 {
-                    af.push(self.mesh.he_face(hid));
-                }
-            }
-            let mut bf = Vec::new();
-            for hid in self.mesh.vertex(3737.into()).incoming_halfedge() {
-                let fid = self.mesh.he_face(hid);
-                if self.face_data[fid].cells[0] == 7971 || self.face_data[fid].cells[1] == 7971 {
-                    bf.push(self.mesh.he_face(hid));
-                }
-            }
-            let faces = &self.cell_data[7971].faces;
-            for &fid in &self.cell_data[7971].faces {
-                for hid in self.mesh.face(fid).halfedges() {
-                    let eid = self.mesh.he_edge(hid);
-                    let va = self.mesh.he_vertex(hid);
-                    let vb = self.mesh.he_tip_vertex(hid);
-                    let next = self.mesh.he_next(hid);
-                }
-            }
-        }
         let tid = *self.cell_data[cid].inner_triangles.last().unwrap();
         let tri = self.triangle(tid).to_vec_in(bump);
         let start = Instant::now();
@@ -344,76 +251,14 @@ impl BSPComplex {
             let fid = self.cell_data[cid].faces[i];
             let orientaion = &mut self.vert_orientations[tid];
             let coplanar = split_face_verts(&self.mesh, fid, orientaion, bump);
-            let face_verts = self
-                .mesh
-                .face(fid)
-                .halfedges()
-                .map(|hid| self.mesh.he_vertex(hid))
-                .collect::<Vec<_>>();
-            let face_oris =
-                Vec::from_iter(face_verts.iter().map(|vid| *orientaion.get(vid).unwrap()));
-            let face_points = Vec::from_iter(face_verts.iter().map(|&vid| &self.points[vid]));
-            if fid.0 == 74650 {
-                if let Point3D::TPI(p) = face_points[4] {
-                    let np = ImplicitPointTPI::new(
-                        p.v1.clone(), p.v2.clone(), p.v3.clone(),
-                        p.w1.clone(), p.w2.clone(), p.w3.clone(),
-                         p.u1.clone(), p.u2.clone(), p.u3.clone()
-                        );
-                    let a = np.exact(std::alloc::Global);
-                }
-                let o = orient3d(
-                    &self.points[tri[0]],
-                    &self.points[tri[1]],
-                    &self.points[tri[2]],
-                    face_points[4],
-                bump);
-                let p0t = serde_json::to_string(&E::from(self.points[tri[0]].explicit().unwrap())).unwrap();
-                let p1t = serde_json::to_string(&E::from(self.points[tri[1]].explicit().unwrap())).unwrap();
-                let p2t = serde_json::to_string(&E::from(self.points[tri[2]].explicit().unwrap())).unwrap();
-                for &p in &face_points {
-                    match p {
-                        Point3D::Explicit(p) => {
-                            let txt = serde_json::to_string(&E::from(p)).unwrap();
-                            println!("here");
-                        }
-                        Point3D::LPI(p) => {
-                            let txt = serde_json::to_string(&LPI::from(p)).unwrap();
-                            println!("here");
-                        }
-                        Point3D::TPI(p) => {
-                            let txt = serde_json::to_string(&TPI::from(p)).unwrap();
-                            println!("here");
-                        }
-                    }
-                }
-            }
             match coplanar {
                 Ok([va, vb]) => {
                     let new_hid = self.mesh.split_face(fid, va, vb, bump);
                     let new_fid = self.mesh.he_face(new_hid);
 
-                    let fa_verts = self
-                        .mesh
-                        .face(fid)
-                        .halfedges()
-                        .map(|hid| self.mesh.he_vertex(hid))
-                        .collect::<Vec<_>>();
-                    let fa_oris =
-                        Vec::from_iter(fa_verts.iter().map(|vid| *orientaion.get(vid).unwrap()));
-                    let fb_verts = self
-                        .mesh
-                        .face(new_fid)
-                        .halfedges()
-                        .map(|hid| self.mesh.he_vertex(hid))
-                        .collect::<Vec<_>>();
-                    let fb_oris =
-                        Vec::from_iter(fb_verts.iter().map(|vid| *orientaion.get(vid).unwrap()));
-
                     let mut parent = tri.to_vec();
 
                     parent.extend(&self.face_data[fid].plane);
-                    let temp_v = self.mesh.he_tip_vertex(self.mesh.he_next(new_hid));
                     self.edge_data.push(BSPEdgeData::new(parent));
                     let new_is_pos = orientaion
                         .get(&self.mesh.he_tip_vertex(self.mesh.he_next(new_hid)))
@@ -504,8 +349,6 @@ impl BSPComplex {
                         } else {
                             neg_faces.push(fid);
                         }
-                        let aa = self.mesh.he_vertex(halfedges[0]);
-                        let bb = self.mesh.he_tip_vertex(halfedges[0]);
                         if is_pos {
                             if self.face_data[fid].cells[0] == cid {
                                 // every edge always has two opposite halfedge
@@ -530,16 +373,6 @@ impl BSPComplex {
 
         // add separating face
         {
-            let start_verts = Vec::from_iter(
-                zero_ori_halfedges
-                    .iter()
-                    .map(|&hid| self.mesh.he_vertex(hid)),
-            );
-            let end_verts = Vec::from_iter(
-                zero_ori_halfedges
-                    .iter()
-                    .map(|&hid| self.mesh.he_tip_vertex(hid)),
-            );
             let face_halfedges = make_loop(&self.mesh, zero_ori_halfedges, bump);
             let new_fid = self.mesh.add_face_by_halfedges(&face_halfedges, bump);
             let new_cid = self.cell_data.len();

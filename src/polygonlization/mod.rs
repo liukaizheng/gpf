@@ -64,14 +64,14 @@ fn make_mesh_for_triangles(points: &[f64], triangles: Vec<usize>) {
     let mut bump = Bump::new();
     while cid < complex.n_cells() {
         if complex.splittable(cid) {
-            println!(
-                "split cell {}, n_vertices: {}, n_halfedges {}, n_edges {}, n_faces {}",
-                cid,
-                complex.mesh.n_vertices(),
-                complex.mesh.n_halfedges(),
-                complex.mesh.n_edges(),
-                complex.mesh.n_faces()
-            );
+            // println!(
+            //     "split cell {}, n_vertices: {}, n_halfedges {}, n_edges {}, n_faces {}",
+            //     cid,
+            //     complex.mesh.n_vertices(),
+            //     complex.mesh.n_halfedges(),
+            //     complex.mesh.n_edges(),
+            //     complex.mesh.n_faces()
+            // );
             bump.reset();
             complex.split_cell(cid, &bump);
         } else {
