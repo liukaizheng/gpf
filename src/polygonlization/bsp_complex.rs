@@ -1,6 +1,8 @@
-use std::time::{Duration, Instant};
+use std::{
+    alloc::Allocator,
+    time::{Duration, Instant},
+};
 
-use bumpalo::Bump;
 use hashbrown::HashMap;
 use itertools::Itertools;
 
@@ -190,7 +192,7 @@ impl BSPComplex {
         !self.cell_data[cid].inner_triangles.is_empty()
     }
 
-    pub(crate) fn split_cell(&mut self, cid: usize, bump: &Bump) {
+    pub(crate) fn split_cell<A: Allocator + Copy>(&mut self, cid: usize, bump: A) {
         let tid = *self.cell_data[cid].inner_triangles.last().unwrap();
         let tri = self.triangle(tid).to_vec_in(bump);
         let start = Instant::now();
@@ -373,7 +375,7 @@ impl BSPComplex {
 
         // add separating face
         {
-            let face_halfedges = make_loop(&self.mesh, zero_ori_halfedges, bump);
+            let face_halfedges = make_loop(&self.mesh, zero_ori_halfedges);
             let new_fid = self.mesh.add_face_by_halfedges(&face_halfedges, bump);
             let new_cid = self.cell_data.len();
             self.face_data.push(BSPFaceData::new(
@@ -424,11 +426,11 @@ impl BSPComplex {
         tid >= self.n_ori_triangles
     }
 
-    fn separate_out_coplanar_triangles(
+    fn separate_out_coplanar_triangles<A: Allocator + Copy>(
         &mut self,
         pivot_tid: usize,
         cid: usize,
-        bump: &Bump,
+        bump: A,
     ) -> Vec<usize> {
         let mut plane_pts = Vec::with_capacity_in(3, bump);
         plane_pts.extend(
@@ -462,11 +464,11 @@ impl BSPComplex {
     }
 
     #[inline]
-    fn cell_verts_and_edges<'b>(
+    fn cell_verts_and_edges<A: Allocator + Copy>(
         &mut self,
         cid: usize,
-        bump: &'b Bump,
-    ) -> (Vec<VertexId, &'b Bump>, Vec<EdgeId, &'b Bump>) {
+        bump: A,
+    ) -> (Vec<VertexId, A>, Vec<EdgeId, A>) {
         let mesh = &self.mesh;
         let mut verts = Vec::new_in(bump);
         let mut edges = Vec::new_in(bump);
@@ -494,7 +496,12 @@ impl BSPComplex {
     }
 
     #[inline]
-    fn split_edge(&mut self, eid: EdgeId, tri: &[VertexId], bump: &Bump) -> VertexId {
+    fn split_edge<A: Allocator + Copy>(
+        &mut self,
+        eid: EdgeId,
+        tri: &[VertexId],
+        bump: A,
+    ) -> VertexId {
         let vid = self.mesh.split_edge(eid, bump);
         self.edge_visits.push(false);
         let p0 = self.points[tri[0]].explicit().unwrap().clone();
@@ -523,11 +530,11 @@ impl BSPComplex {
         vid
     }
 
-    fn separate_cell_triangles(
+    fn separate_cell_triangles<A: Allocator + Copy>(
         &mut self,
         cid: usize,
         pivot_tid: usize,
-        bump: &Bump,
+        bump: A,
     ) -> [Vec<usize>; 2] {
         let cell_triangles = &self.cell_data[cid].inner_triangles;
         let pivot_tri = self.triangle(pivot_tid);
@@ -604,14 +611,14 @@ fn insert_coplanar_triangles(src: &[usize], dest: &mut Vec<usize>, n_constraints
 }
 
 #[inline]
-fn verts_orient_wrt_plane(
+fn verts_orient_wrt_plane<A: Allocator + Copy>(
     pa: &Point3D,
     pb: &Point3D,
     pc: &Point3D,
     verts: &[VertexId],
     points: &[Point3D],
     vert_orientations: &mut HashMap<VertexId, Orientation>,
-    bump: &Bump,
+    bump: A,
 ) {
     let p0 = pa.explicit().unwrap();
     let p1 = pb.explicit().unwrap();
@@ -662,10 +669,10 @@ fn is_point_built_from_plane(
 }
 
 #[inline]
-fn three_planes_intersection<'b>(
+fn three_planes_intersection<A: Allocator + Copy>(
     planes: [&[VertexId]; 3],
     points: &[Point3D],
-    bump: &Bump,
+    bump: A,
 ) -> Point3D {
     for (&tri, &tri1, &tri2) in planes.iter().circular_tuple_windows() {
         let mut common = Vec::new_in(bump);
@@ -701,12 +708,12 @@ fn three_planes_intersection<'b>(
     ))
 }
 
-fn split_face_verts<'b>(
+fn split_face_verts<A: Allocator + Copy>(
     mesh: &SurfaceMesh,
     fid: FaceId,
     vert_orientations: &HashMap<VertexId, Orientation>,
-    bump: &'b Bump,
-) -> Result<[VertexId; 2], Result<Vec<HalfedgeId, &'b Bump>, bool>> {
+    bump: A,
+) -> Result<[VertexId; 2], Result<Vec<HalfedgeId, A>, bool>> {
     let (mut first, mut second) = (None, None);
     let (mut has_pos, mut has_neg) = (false, false);
     let mut zero_ori_candidates = Vec::new_in(bump);
@@ -762,14 +769,13 @@ fn split_face_verts<'b>(
     }
 }
 
-fn make_loop<'b>(
+fn make_loop<A: Allocator + Copy>(
     mesh: &SurfaceMesh,
-    halfedges: Vec<HalfedgeId, &'b Bump>,
-    bump: &'b Bump,
-) -> Vec<HalfedgeId, &'b Bump> {
-    let map = HashMap::<VertexId, HalfedgeId>::from_iter(
-        halfedges.iter().map(|&hid| (mesh.he_vertex(hid), hid)),
-    );
+    halfedges: Vec<HalfedgeId, A>,
+) -> Vec<HalfedgeId, A> {
+    let bump = *halfedges.allocator();
+    let mut map = HashMap::new_in(bump);
+    map.extend(halfedges.iter().map(|&hid| (mesh.he_vertex(hid), hid)));
 
     let first = halfedges[0];
     let mut result = Vec::new_in(bump);

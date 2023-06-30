@@ -7,6 +7,8 @@ mod vertex;
 #[macro_use]
 mod macros;
 
+use std::alloc::Allocator;
+
 pub use boundary_loop::*;
 pub use edge::*;
 pub use face::*;
@@ -14,7 +16,6 @@ pub use halfedge::*;
 pub use vertex::*;
 
 use super::Mesh;
-use bumpalo::collections::Vec;
 
 pub trait ElementId: From<usize> {
     fn new() -> Self;
@@ -32,12 +33,14 @@ pub trait Element {
 }
 
 #[inline(always)]
-pub fn ele_ranges<'b, E: ElementId>(
+pub fn ele_ranges<E: ElementId, A: Allocator + Copy>(
     start: usize,
     len: usize,
-    bump: &'b bumpalo::Bump,
-) -> Vec<'b, E> {
-    Vec::from_iter_in((start..(start + len)).map(|idx| idx.into()), bump)
+    bump: A,
+) -> Vec<E, A> {
+    let mut result = Vec::new_in(bump);
+    result.extend((start..(start + len)).map(|idx| idx.into()));
+    result
 }
 
 fn iter_next<E: Element>(ele: &mut E) -> Option<<E as Element>::Id> {

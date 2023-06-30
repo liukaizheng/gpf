@@ -1,13 +1,13 @@
 use crate::{build_connect_info, mesh::Mesh, INVALID_IND};
 use hashbrown::HashMap;
-use std::{cell::RefCell, rc::Weak};
+use std::{alloc::Allocator, cell::RefCell, rc::Weak};
 
 use super::{
     ele_ranges, Edge, EdgeData, EdgeId, EdgeIter, ElementId, Face, FaceData, FaceId, FaceIter,
     FaceOrBoundaryLoopId, HalfedgeData, HalfedgeId, HalfedgeIter, MeshData, Vertex, VertexData,
     VertexId, VertexIter,
 };
-use bumpalo::Bump;
+
 use itertools::Itertools;
 
 pub struct SurfaceMesh {
@@ -137,7 +137,7 @@ impl SurfaceMesh {
     }
 
     #[inline]
-    pub fn split_edge(&mut self, eid: EdgeId, bump: &Bump) -> VertexId {
+    pub fn split_edge<A: Allocator + Copy>(&mut self, eid: EdgeId, bump: A) -> VertexId {
         let mut e_halfedges = Vec::new_in(bump);
         e_halfedges.extend(self.edge(eid).halfedges());
         let (va, vb) = (
@@ -145,7 +145,7 @@ impl SurfaceMesh {
             self.he_tip_vertex(e_halfedges[0]),
         );
         let new_v = self.new_vertices(1);
-        let new_halfedges = ele_ranges::<HalfedgeId>(
+        let new_halfedges = ele_ranges::<HalfedgeId, _>(
             self.new_halfedges(e_halfedges.len()).0,
             e_halfedges.len(),
             bump,
@@ -247,12 +247,12 @@ impl SurfaceMesh {
     }
 
     #[inline]
-    pub fn split_face(
+    pub fn split_face<A: Allocator + Copy>(
         &mut self,
         fid: FaceId,
         va: VertexId,
         vb: VertexId,
-        bump: &Bump,
+        bump: A,
     ) -> HalfedgeId {
         let mut face_halfedges = Vec::new_in(bump);
         face_halfedges.extend(self.face(fid).halfedges());
@@ -343,9 +343,16 @@ impl SurfaceMesh {
     }
 
     #[inline]
-    pub fn add_face_by_halfedges(&mut self, halfedges: &[HalfedgeId], bump: &Bump) -> FaceId {
-        let new_halfedges =
-            ele_ranges::<HalfedgeId>(self.new_halfedges(halfedges.len()).0, halfedges.len(), bump);
+    pub fn add_face_by_halfedges<A: Allocator + Copy>(
+        &mut self,
+        halfedges: &[HalfedgeId],
+        bump: A,
+    ) -> FaceId {
+        let new_halfedges = ele_ranges::<HalfedgeId, _>(
+            self.new_halfedges(halfedges.len()).0,
+            halfedges.len(),
+            bump,
+        );
 
         for (&old_hid, &new_hid) in halfedges.iter().zip(&new_halfedges) {
             // h-v
