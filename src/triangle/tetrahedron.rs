@@ -424,13 +424,13 @@ const EPIVOT: [usize; 12] = [4, 5, 2, 11, 4, 5, 2, 11, 4, 5, 2, 11];
 
 /// prev edge
 #[inline(always)]
-fn eprev(t1: &TriFace, t2: &mut TriFace) {
+pub fn eprev(t1: &TriFace, t2: &mut TriFace) {
     t2.tet = t1.tet;
     t2.ver = EPREV_TBL[t1.ver];
 }
 
 /// next edge
-fn enext(t1: &TriFace, t2: &mut TriFace) {
+pub fn enext(t1: &TriFace, t2: &mut TriFace) {
     t2.tet = t1.tet;
     t2.ver = ENEXT_TBL[t1.ver];
 }
@@ -1114,7 +1114,7 @@ pub fn tetrahedralize<'a>(points: &'a [f64]) -> TetMesh<'a> {
     ];
     let mut mesh = TetMesh::new(points);
     let mut sorted_pt_inds = Vec::from_iter(0..mesh.n_points);
-    // sorted_pt_inds.shuffle(&mut rand::thread_rng());
+    sorted_pt_inds.shuffle(&mut rand::thread_rng());
     const SORT_OPTION: SortOption = SortOption {
         threshold: 64,
         hilbert_order: 52,

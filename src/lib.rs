@@ -12,5 +12,6 @@ pub mod mesh;
 pub mod polygonlization;
 pub mod predicates;
 pub mod triangle;
+pub mod graphcut;
 
 const INVALID_IND: usize = usize::MAX;

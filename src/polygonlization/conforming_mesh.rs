@@ -1,4 +1,4 @@
-use std::{alloc::Allocator};
+use std::alloc::Allocator;
 
 use hashbrown::HashMap;
 
@@ -34,11 +34,6 @@ impl Constraints {
     pub(crate) fn triangle(&self, idx: usize) -> &[usize] {
         let start = idx * 3;
         &self.triangles[start..(start + 3)]
-    }
-
-    #[inline(always)]
-    pub(crate) fn is_virtual(&self, idx: usize) -> bool {
-        !(idx < self.n_ori_triangles)
     }
 
     pub fn place_virtual_constraints(&mut self, tet_mesh: &TetMesh) {
