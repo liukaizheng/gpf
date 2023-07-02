@@ -54,33 +54,37 @@ pub fn remove_duplicates(points: &[f64], epsilon: f64) -> (Vec<f64>, Vec<usize>)
     )
 }
 
-fn make_mesh_for_triangles(points: &[f64], triangles: Vec<usize>) {
+fn make_mesh_for_triangles(points: &[f64], triangles: Vec<usize>, tri_in_shells: &[usize]) {
     let mut constraints = Constraints::new(triangles);
     let mut tet_mesh = tetrahedralize(points);
     constraints.place_virtual_constraints(&tet_mesh);
     let tet_marks = constraints.insert_constraints(&mut tet_mesh);
     let mut complex = BSPComplex::new(tet_mesh, &constraints, tet_marks);
-    let mut cid = 0;
-    let mut bump = Bump::new();
-    while cid < complex.n_cells() {
-        if complex.splittable(cid) {
-            // println!(
-            //     "split cell {}, n_vertices: {}, n_halfedges {}, n_edges {}, n_faces {}",
-            //     cid,
-            //     complex.mesh.n_vertices(),
-            //     complex.mesh.n_halfedges(),
-            //     complex.mesh.n_edges(),
-            //     complex.mesh.n_faces()
-            // );
-            bump.reset();
-            complex.split_cell(cid, &bump);
-        } else {
-            cid += 1;
+    {
+        let mut cid = 0;
+        let mut bump = Bump::new();
+        while cid < complex.n_cells() {
+            if complex.splittable(cid) {
+                // println!(
+                //     "split cell {}, n_vertices: {}, n_halfedges {}, n_edges {}, n_faces {}",
+                //     cid,
+                //     complex.mesh.n_vertices(),
+                //     complex.mesh.n_halfedges(),
+                //     complex.mesh.n_edges(),
+                //     complex.mesh.n_faces()
+                // );
+                bump.reset();
+                complex.split_cell(cid, &bump);
+            } else {
+                cid += 1;
+            }
         }
+
+        println!("ori is {:?}", complex.ori_duration);
+        println!("split is {:?}", complex.split_duration);
     }
 
-    println!("ori is {:?}", complex.ori_duration);
-    println!("split is {:?}", complex.split_duration);
+    complex.complex_parition(&tri_in_shells);
 }
 
 pub fn make_polyhedra_mesh(
@@ -107,5 +111,13 @@ pub fn make_polyhedra_mesh(
         )
     }));
     let (triangles, tri_parents) = triangulate_polygon_soup(&points, &face_edges, axis_data);
-    make_mesh_for_triangles(&points, triangles);
+    make_mesh_for_triangles(
+        &points,
+        triangles,
+        &Vec::from_iter(
+            tri_parents
+                .into_iter()
+                .map(|parent| face_in_shell_data[parent]),
+        ),
+    );
 }

@@ -3,20 +3,23 @@ use std::{
     time::{Duration, Instant},
 };
 
+use bumpalo::Bump;
 use hashbrown::HashMap;
 use itertools::Itertools;
 
 use crate::{
+    graphcut::{self, GraphCut},
+    math::{cross, norm, sub},
     mesh::{EdgeId, Face, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
-        orient3d::orient3d, sign_reversed, ExplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
-        Orientation, Point3D,
+        orient3d::orient3d, sign_reversed, ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI,
+        ImplicitPointTPI, Orientation, Point3D,
     },
     triangle::TetMesh,
     INVALID_IND,
 };
 
-use super::conforming_mesh::Constraints;
+use super::{conforming_mesh::Constraints, point};
 
 #[derive(Clone)]
 struct BSPEdgeData {
@@ -402,10 +405,6 @@ impl BSPComplex {
             pos_faces.push(new_fid);
             self.cell_data
                 .push(BSPCellData::new(pos_faces, pos_inner_triangles));
-
-            if !self.validate_cells(cid) || !self.validate_cells(new_cid) {
-                panic!("open cell");
-            }
         }
 
         // if let Err(err) = validate_mesh_connectivity(&self.mesh) {
@@ -413,6 +412,147 @@ impl BSPComplex {
         // }
 
         self.split_duration += start.elapsed();
+    }
+
+    pub fn complex_parition(&mut self, tri_in_shell: &[usize]) {
+        let mut explicit_points = vec![0.0; self.points.len() * 3];
+        for (p, data) in self.points.iter().zip(explicit_points.chunks_mut(3)) {
+            match p {
+                Point3D::Explicit(p) => {
+                    data[0] = p.data[0];
+                    data[1] = p.data[1];
+                    data[2] = p.data[2];
+                }
+                Point3D::LPI(p) => {
+                    p.to_explicit(data);
+                }
+                Point3D::TPI(p) => {
+                    p.to_explicit(data);
+                }
+            }
+        }
+        let mut bump = Bump::new();
+        let face_areas = {
+            let mut areas = Vec::from_iter(self.mesh.faces().map(|fid| {
+                bump.reset();
+                let mut face_verts = Vec::new_in(&bump);
+                face_verts.extend(
+                    self.mesh
+                        .face(fid)
+                        .halfedges()
+                        .map(|hid| self.mesh.he_vertex(hid)),
+                );
+                face_area(&explicit_points, &face_verts, &bump)
+            }));
+            let area_sum = areas.iter().sum::<f64>();
+            for area in &mut areas {
+                *area /= area_sum;
+            }
+            areas
+        };
+        let n_shells = *tri_in_shell.iter().max().unwrap() + 1;
+        let mut cell_costs_external = vec![vec![0.0; self.cell_data.len() + 1]; n_shells];
+        let mut cell_costs_internal = vec![vec![0.0; self.cell_data.len() + 1]; n_shells];
+        let mut is_black = vec![vec![false; self.mesh.n_faces()]; n_shells];
+        for fid in self.mesh.faces() {
+            let face_data = &self.face_data[fid];
+            let face_triangles = &face_data.triangles;
+            if face_triangles.is_empty() {
+                continue;
+            }
+
+            bump.reset();
+            let first_tid = face_triangles[0];
+            // uncoplanar vertex
+            let vert = [find_uncoplanar_verts(
+                triangle(first_tid, &self.constraints),
+                face_data.cells[0],
+                &mut self.vert_orientations[first_tid],
+                &self.points,
+                &self.cell_data[face_data.cells[0]].faces,
+                &self.mesh,
+                &bump,
+            )];
+
+            let face_ori = {
+                let tri = &face_data.plane;
+                // vert must be not coplanar with tri
+                orient3d(
+                    &self.points[tri[0]],
+                    &self.points[tri[1]],
+                    &self.points[tri[2]],
+                    &self.points[vert[0]],
+                    &bump,
+                )
+            };
+            let mut tri_ori_map = HashMap::<usize, i8, _, _>::new_in(&bump);
+            for &tid in face_triangles {
+                let tri = triangle(tid, &self.constraints);
+                verts_orient_wrt_plane(
+                    &self.points[tri[0]],
+                    &self.points[tri[1]],
+                    &self.points[tri[2]],
+                    &vert,
+                    &self.points,
+                    &mut self.vert_orientations[tid],
+                    &bump,
+                );
+                let ori = *self.vert_orientations[tid].get(&vert[0]).unwrap();
+                let shell = tri_in_shell[tid];
+                let val = tri_ori_map.entry(shell).or_insert(0);
+                if ori == face_ori {
+                    *val += 1;
+                } else {
+                    *val -= 1;
+                }
+            }
+
+            for (shell_id, cnt) in tri_ori_map {
+                if cnt > 0 {
+                    cell_costs_external[shell_id][face_data.cells[0]] += face_areas[fid];
+                    let second_cid = face_data.cells[1];
+                    if second_cid != INVALID_IND {
+                        cell_costs_internal[shell_id][second_cid] += face_areas[fid];
+                    }
+                    is_black[shell_id][fid] = true;
+                } else if cnt < 0 {
+                    cell_costs_internal[shell_id][face_data.cells[0]] += face_areas[fid];
+                    let second_cid = face_data.cells[1];
+                    if second_cid != INVALID_IND {
+                        cell_costs_external[shell_id][second_cid] += face_areas[fid];
+                    }
+                    is_black[shell_id][fid] = true;
+                }
+            }
+        }
+
+        let mut graphs = Vec::from_iter(
+            cell_costs_external
+                .into_iter()
+                .zip(cell_costs_internal)
+                .map(|(external, mut internal)| {
+                    internal[self.cell_data.len()] = 1.0;
+                    GraphCut::new(&external, &internal)
+                }),
+        );
+        for fid in self.mesh.faces() {
+            if self.face_data[fid].triangles.is_empty() {
+                let [c1, mut c2] = self.face_data[fid].cells;
+                if c2 == INVALID_IND {
+                    c2 = self.cell_data.len();
+                }
+
+                for shell_id in 0..n_shells {
+                    if !is_black[shell_id][fid] {
+                        graphs[shell_id].add_edge(c1, c2, face_areas[fid], face_areas[fid]);
+                    }
+                }
+            }
+        }
+        for graph in &mut graphs {
+            let flow = graph.max_flow();
+            println!("the flow is {}", flow);
+        }
     }
 
     #[inline(always)]
@@ -567,18 +707,6 @@ impl BSPComplex {
             }
         }
         [pos_triangles, neg_triangles]
-    }
-
-    fn validate_cells(&self, cid: usize) -> bool {
-        let mut map = HashMap::<EdgeId, usize>::new();
-        for &fid in &self.cell_data[cid].faces {
-            for hid in self.mesh.face(fid).halfedges() {
-                let eid = self.mesh.he_edge(hid);
-                let count = map.entry(eid).or_insert(0);
-                *count += 1;
-            }
-        }
-        map.into_values().all(|c| c % 2 == 0)
     }
 }
 
@@ -790,4 +918,49 @@ fn make_loop<A: Allocator + Copy>(
         curr = next;
     }
     result
+}
+
+#[inline(always)]
+fn find_uncoplanar_verts<A: Allocator + Copy>(
+    tri: &[VertexId],
+    cid: usize,
+    orientations: &mut HashMap<VertexId, Orientation>,
+    points: &[Point3D],
+    faces: &[FaceId],
+    mesh: &SurfaceMesh,
+    bump: A,
+) -> VertexId {
+    let pa = &points[tri[0]];
+    let pb = &points[tri[1]];
+    let pc = &points[tri[2]];
+    for &fid in faces {
+        for vid in mesh.face(fid).halfedges().map(|hid| mesh.he_vertex(hid)) {
+            verts_orient_wrt_plane(pa, pb, pc, &[vid], &points, orientations, bump);
+            if *orientations.get(&vid).unwrap() != Orientation::Zero {
+                return vid;
+            }
+        }
+    }
+    panic!("no uncoplanar vertex in cell");
+}
+
+#[inline(always)]
+fn face_area<A: Allocator + Copy>(points: &[f64], verts: &[VertexId], bump: A) -> f64 {
+    let pa = point(points, verts[0].0);
+    let mut v1 = Vec::with_capacity_in(3, bump);
+    v1.resize(3, 0.0);
+    let mut v2 = Vec::with_capacity_in(3, bump);
+    v2.resize(3, 0.0);
+    let mut n = Vec::with_capacity_in(3, bump);
+    n.resize(3, 0.0);
+    let mut area = 0.0;
+    for two_verts in verts[1..].windows(2) {
+        let pb = point(points, two_verts[0].0);
+        sub(pb, pa, &mut v1);
+        let pc = point(points, two_verts[1].0);
+        sub(pc, pa, &mut v2);
+        cross(&v1, &v2, &mut n);
+        area += norm(&n);
+    }
+    return area;
 }

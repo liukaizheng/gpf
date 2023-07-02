@@ -73,6 +73,16 @@ pub trait ImplicitPoint3D {
     fn static_filter(&self) -> Option<&(Implicit3DCache<f64>, f64)>;
     fn dynamic_filter(&self) -> Option<&Implicit3DCache<IntervalNumber>>;
     fn exact<A: Allocator + Copy>(&self, allocator: A) -> Option<Implicit3DCache<ExpansionNum<A>>>;
+    fn to_explicit(&self, data: &mut [f64]) {
+        let exact = self.exact(std::alloc::Global).unwrap();
+        let x = estimate(&exact.x);
+        let y = estimate(&exact.y);
+        let z = estimate(&exact.z);
+        let d = estimate(&exact.d);
+        data[0] = x / d;
+        data[1] = y / d;
+        data[2] = z / d;
+    }
 }
 
 /// A point in 3D space representing the intersection of a line and a plane.

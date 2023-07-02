@@ -7,11 +7,17 @@
 #![feature(portable_simd)]
 #![feature(let_chains)]
 
+pub mod graphcut;
 pub mod math;
 pub mod mesh;
 pub mod polygonlization;
 pub mod predicates;
 pub mod triangle;
-pub mod graphcut;
 
 const INVALID_IND: usize = usize::MAX;
+
+#[inline(always)]
+fn point(points: &[f64], tid: usize) -> &[f64] {
+    let start = tid * 3;
+    &points[start..(start + 3)]
+}

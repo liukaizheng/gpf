@@ -500,8 +500,10 @@ impl GraphCut {
                         } else {
                             self.process_source_orphan(i);
                         }
+                        i = self.orphan_first;
                     }
                     self.orphan_first = next_node;
+                    i = self.orphan_first;
                 }
             } else {
                 current_node = INVALID_IND;
