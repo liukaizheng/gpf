@@ -6,6 +6,7 @@ use std::{
 use bumpalo::Bump;
 use hashbrown::HashMap;
 use itertools::Itertools;
+use serde::Serialize;
 
 use crate::{
     graphcut::GraphCut,
@@ -32,12 +33,34 @@ impl BSPEdgeData {
     }
 }
 
-// #[derive(Clone)]
-// enum FaceColor {
-// White,
-// Black,
-// Gray,
-// }
+#[derive(Serialize)]
+struct Edge {
+    e: [usize; 2],
+    w: f64,
+}
+
+impl Edge {
+    fn new(a: usize, b: usize, w: f64) -> Self {
+        Self { e: [a, b], w }
+    }
+}
+
+#[derive(Serialize)]
+struct G {
+    external: Vec<f64>,
+    internal: Vec<f64>,
+    edges: Vec<Edge>,
+}
+
+impl G {
+    fn new() -> Self {
+        Self {
+            external: Vec::new(),
+            internal: Vec::new(),
+            edges: Vec::new(),
+        }
+    }
+}
 
 #[derive(Clone)]
 struct BSPFaceData {
@@ -530,6 +553,11 @@ impl BSPComplex {
             }
         }
 
+        let mut g = G::new();
+        g.external = cell_costs_external[0].clone();
+        g.internal = cell_costs_external[0].clone();
+        *g.internal.last_mut().unwrap() = 1.0;
+
         let mut graphs = Vec::from_iter(
             cell_costs_external
                 .into_iter()
@@ -549,10 +577,13 @@ impl BSPComplex {
                 for shell_id in 0..n_shells {
                     if !is_black[shell_id][fid] {
                         graphs[shell_id].add_edge(c1, c2, face_areas[fid], face_areas[fid]);
+                        g.edges.push(Edge::new(c1, c2, face_areas[fid]));
                     }
                 }
             }
         }
+        let gj = serde_json::to_string(&g).unwrap();
+        std::fs::write("123.json", gj).unwrap();
         let mut cell_kept = vec![false; self.cell_data.len() + 1];
         for graph in &mut graphs {
             graph.max_flow();
