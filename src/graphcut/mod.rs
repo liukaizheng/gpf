@@ -40,7 +40,7 @@ pub struct GraphCut {
     queue_last: [usize; 2],
     orphan_first: usize,
     orphan_last: usize,
-    is_sink: Vec<bool>,
+    pub is_sink: Vec<bool>,
     /// residual capacities of nodes
     tr_cap: Vec<f64>,
     flow: f64,

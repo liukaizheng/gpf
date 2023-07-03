@@ -8,7 +8,7 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 
 use crate::{
-    graphcut::{self, GraphCut},
+    graphcut::GraphCut,
     math::{cross, norm, sub},
     mesh::{EdgeId, Face, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
@@ -123,7 +123,7 @@ impl BSPComplex {
             for (i, nei) in tet.nei.iter().enumerate() {
                 let adj_cell_idx = new_tet_orders[nei.tet];
                 if tet_face_is_new(tid, nei.tet, adj_cell_idx) {
-                    let tri = vec![tet_mesh.org(nei), tet_mesh.dest(nei), tet_mesh.apex(nei)];
+                    let tri = vec![tet_mesh.org(nei), tet_mesh.apex(nei), tet_mesh.dest(nei)];
                     let mut face = BSPFaceData::new(
                         cell_idx,
                         adj_cell_idx,
@@ -415,6 +415,10 @@ impl BSPComplex {
     }
 
     pub fn complex_parition(&mut self, tri_in_shell: &[usize]) {
+        for cid in 0..self.cell_data.len() {
+            self.validate_cell(cid);
+        }
+
         let mut explicit_points = vec![0.0; self.points.len() * 3];
         for (p, data) in self.points.iter().zip(explicit_points.chunks_mut(3)) {
             match p {
@@ -509,17 +513,17 @@ impl BSPComplex {
 
             for (shell_id, cnt) in tri_ori_map {
                 if cnt > 0 {
-                    cell_costs_external[shell_id][face_data.cells[0]] += face_areas[fid];
-                    let second_cid = face_data.cells[1];
-                    if second_cid != INVALID_IND {
-                        cell_costs_internal[shell_id][second_cid] += face_areas[fid];
-                    }
-                    is_black[shell_id][fid] = true;
-                } else if cnt < 0 {
                     cell_costs_internal[shell_id][face_data.cells[0]] += face_areas[fid];
                     let second_cid = face_data.cells[1];
                     if second_cid != INVALID_IND {
                         cell_costs_external[shell_id][second_cid] += face_areas[fid];
+                    }
+                    is_black[shell_id][fid] = true;
+                } else if cnt < 0 {
+                    cell_costs_external[shell_id][face_data.cells[0]] += face_areas[fid];
+                    let second_cid = face_data.cells[1];
+                    if second_cid != INVALID_IND {
+                        cell_costs_internal[shell_id][second_cid] += face_areas[fid];
                     }
                     is_black[shell_id][fid] = true;
                 }
@@ -549,10 +553,54 @@ impl BSPComplex {
                 }
             }
         }
+        let mut cell_kept = vec![false; self.cell_data.len() + 1];
         for graph in &mut graphs {
-            let flow = graph.max_flow();
-            println!("the flow is {}", flow);
+            graph.max_flow();
+            for cid in 0..self.cell_data.len() {
+                cell_kept[cid] |= !graph.is_sink[cid];
+            }
         }
+
+        let mut kept_faces = Vec::new();
+        for fid in self.mesh.faces() {
+            let [c1, mut c2] = self.face_data[fid].cells;
+            if c2 == INVALID_IND {
+                c2 = self.cell_data.len();
+            }
+            if cell_kept[c1] ^ cell_kept[c2] {
+                let verts = if cell_kept[c1] {
+                    let mut verts = Vec::from_iter(
+                        self.mesh
+                            .face(fid)
+                            .halfedges()
+                            .map(|hid| self.mesh.he_vertex(hid).0),
+                    );
+                    verts.reverse();
+                    verts
+                } else {
+                    Vec::from_iter(
+                        self.mesh
+                            .face(fid)
+                            .halfedges()
+                            .map(|hid| self.mesh.he_vertex(hid).0),
+                    )
+                };
+                kept_faces.push(verts);
+            }
+        }
+
+        let mut txt = "".to_owned();
+        for p in explicit_points.chunks(3) {
+            txt.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
+        }
+        for face in &kept_faces {
+            txt.push('f');
+            for &vid in face {
+                txt.push_str(&format!(" {}", vid + 1));
+            }
+            txt.push('\n');
+        }
+        std::fs::write("123.obj", txt).unwrap();
     }
 
     #[inline(always)]
@@ -707,6 +755,40 @@ impl BSPComplex {
             }
         }
         [pos_triangles, neg_triangles]
+    }
+
+    pub fn validate_cell(&mut self, cid: usize) {
+        let bump = Bump::new();
+        let (cell_verts, _) = self.cell_verts_and_edges(cid, &bump);
+        for &fid in &self.cell_data[cid].faces {
+            let mut set = hashbrown::HashSet::new();
+            set.extend(
+                self.mesh
+                    .face(fid)
+                    .halfedges()
+                    .map(|hid| self.mesh.he_vertex(hid)),
+            );
+            let face_tri = Vec::from_iter(self.face_data[fid].plane.map(|vid| &self.points[vid]));
+            let reversed = self.face_data[fid].cells[0] != cid;
+            for &vid in &cell_verts {
+                if set.contains(&vid) {
+                    continue;
+                }
+                let ori = orient3d(
+                    face_tri[0],
+                    face_tri[1],
+                    face_tri[2],
+                    &self.points[vid],
+                    &bump,
+                );
+                if ori == Orientation::Zero {
+                    continue;
+                }
+                if !((ori == Orientation::Positive) ^ reversed) {
+                    panic!("ori reversed");
+                }
+            }
+        }
     }
 }
 
