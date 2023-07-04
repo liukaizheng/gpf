@@ -1,4 +1,4 @@
-mod bsp_complex;
+pub mod bsp_complex;
 mod conforming_mesh;
 
 use bumpalo::Bump;

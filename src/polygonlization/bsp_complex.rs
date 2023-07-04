@@ -6,7 +6,7 @@ use std::{
 use bumpalo::Bump;
 use hashbrown::HashMap;
 use itertools::Itertools;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 
 use crate::{
     graphcut::GraphCut,
@@ -33,27 +33,27 @@ impl BSPEdgeData {
     }
 }
 
-#[derive(Serialize)]
-struct Edge {
-    e: [usize; 2],
-    w: f64,
+#[derive(Serialize, Deserialize)]
+pub struct Edge {
+    pub e: [usize; 2],
+    pub w: f64,
 }
 
 impl Edge {
-    fn new(a: usize, b: usize, w: f64) -> Self {
+    pub fn new(a: usize, b: usize, w: f64) -> Self {
         Self { e: [a, b], w }
     }
 }
 
-#[derive(Serialize)]
-struct G {
-    external: Vec<f64>,
-    internal: Vec<f64>,
-    edges: Vec<Edge>,
+#[derive(Serialize, Deserialize)]
+pub struct G {
+    pub external: Vec<f64>,
+    pub internal: Vec<f64>,
+    pub edges: Vec<Edge>,
 }
 
 impl G {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             external: Vec::new(),
             internal: Vec::new(),
@@ -555,7 +555,7 @@ impl BSPComplex {
 
         let mut g = G::new();
         g.external = cell_costs_external[0].clone();
-        g.internal = cell_costs_external[0].clone();
+        g.internal = cell_costs_internal[0].clone();
         *g.internal.last_mut().unwrap() = 1.0;
 
         let mut graphs = Vec::from_iter(
