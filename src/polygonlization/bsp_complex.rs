@@ -13,8 +13,8 @@ use crate::{
     math::{cross, norm, sub},
     mesh::{EdgeId, Face, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
-        orient3d::orient3d, sign_reversed, ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI,
-        ImplicitPointTPI, Orientation, Point3D,
+        orient3d::orient3d, point_in_triangle, sign_reversed, ExplicitPoint3D, ImplicitPoint3D,
+        ImplicitPointLPI, ImplicitPointTPI, Orientation, Point3D,
     },
     triangle::TetMesh,
     INVALID_IND,
@@ -454,11 +454,7 @@ impl BSPComplex {
         self.split_duration += start.elapsed();
     }
 
-    pub fn complex_parition(&mut self, tri_in_shell: &[usize]) {
-        for cid in 0..self.cell_data.len() {
-            self.validate_cell(cid);
-        }
-
+    pub fn complex_partition(&mut self, tri_in_shell: &[usize]) {
         let mut explicit_points = vec![0.0; self.points.len() * 3];
         for (p, data) in self.points.iter().zip(explicit_points.chunks_mut(3)) {
             match p {
@@ -476,8 +472,10 @@ impl BSPComplex {
             }
         }
         let mut bump = Bump::new();
-        let face_areas = {
-            let mut areas = Vec::from_iter(self.mesh.faces().map(|fid| {
+        let (face_areas, face_centers) = {
+            let mut areas = Vec::with_capacity(self.face_data.len());
+            let mut face_centers = Vec::with_capacity(self.face_data.len());
+            for fid in self.mesh.faces() {
                 bump.reset();
                 let mut face_verts = Vec::new_in(&bump);
                 face_verts.extend(
@@ -486,13 +484,14 @@ impl BSPComplex {
                         .halfedges()
                         .map(|hid| self.mesh.he_vertex(hid)),
                 );
-                face_area(&explicit_points, &face_verts, &bump)
-            }));
+                areas.push(face_area(&explicit_points, &face_verts, &bump));
+                face_centers.push(face_center(&explicit_points, &face_verts));
+            }
             let area_sum = areas.iter().sum::<f64>();
             for area in &mut areas {
                 *area /= area_sum;
             }
-            areas
+            (areas, face_centers)
         };
         let n_shells = *tri_in_shell.iter().max().unwrap() + 1;
         let mut cell_costs_external = vec![vec![0.0; self.cell_data.len() + 1]; n_shells];
@@ -510,7 +509,6 @@ impl BSPComplex {
             // uncoplanar vertex
             let vert = [find_uncoplanar_verts(
                 triangle(first_tid, &self.constraints),
-                face_data.cells[0],
                 &mut self.vert_orientations[first_tid],
                 &self.vertex_data,
                 &self.points,
@@ -530,42 +528,43 @@ impl BSPComplex {
                     &bump,
                 )
             };
-            let mut tri_ori_map = HashMap::<usize, i8, _, _>::new_in(&bump);
-            for &tid in face_triangles {
-                let tri = triangle(tid, &self.constraints);
-                verts_orient_wrt_plane(
-                    &self.points[tri[0]],
-                    &self.points[tri[1]],
-                    &self.points[tri[2]],
-                    &vert,
-                    &self.points,
-                    &self.vertex_data,
-                    &mut self.vert_orientations[tid],
-                    &bump,
-                );
-                let ori = *self.vert_orientations[tid].get(&vert[0]).unwrap();
-                let shell = tri_in_shell[tid];
-                let val = tri_ori_map.entry(shell).or_insert(0);
-                if ori == face_ori {
-                    *val += 1;
-                } else {
-                    *val -= 1;
-                }
-            }
 
-            for (shell_id, cnt) in tri_ori_map {
-                if cnt > 0 {
-                    cell_costs_internal[shell_id][face_data.cells[0]] += face_areas[fid];
-                    let second_cid = face_data.cells[1];
-                    if second_cid != INVALID_IND {
-                        cell_costs_external[shell_id][second_cid] += face_areas[fid];
-                    }
-                    is_black[shell_id][fid] = true;
-                } else if cnt < 0 {
-                    cell_costs_external[shell_id][face_data.cells[0]] += face_areas[fid];
-                    let second_cid = face_data.cells[1];
-                    if second_cid != INVALID_IND {
-                        cell_costs_internal[shell_id][second_cid] += face_areas[fid];
+            for &tid in face_triangles {
+                let shell_id = tri_in_shell[tid];
+                if is_black[shell_id][fid] {
+                    continue;
+                }
+                let tri = triangle(tid, &self.constraints);
+                if point_in_triangle(
+                    &face_centers[fid],
+                    point(&explicit_points, *tri[0]),
+                    point(&explicit_points, *tri[1]),
+                    point(&explicit_points, *tri[2]),
+                    &bump,
+                ) {
+                    verts_orient_wrt_plane(
+                        &self.points[tri[0]],
+                        &self.points[tri[1]],
+                        &self.points[tri[2]],
+                        &vert,
+                        &self.points,
+                        &self.vertex_data,
+                        &mut self.vert_orientations[tid],
+                        &bump,
+                    );
+                    let ori = *self.vert_orientations[tid].get(&vert[0]).unwrap();
+                    if ori == face_ori {
+                        cell_costs_internal[shell_id][face_data.cells[0]] += face_areas[fid];
+                        let second_cid = face_data.cells[1];
+                        if second_cid != INVALID_IND {
+                            cell_costs_external[shell_id][second_cid] += face_areas[fid];
+                        }
+                    } else {
+                        cell_costs_external[shell_id][face_data.cells[0]] += face_areas[fid];
+                        let second_cid = face_data.cells[1];
+                        if second_cid != INVALID_IND {
+                            cell_costs_internal[shell_id][second_cid] += face_areas[fid];
+                        }
                     }
                     is_black[shell_id][fid] = true;
                 }
@@ -574,14 +573,12 @@ impl BSPComplex {
 
         for i in 0..=self.cell_data.len() {
             if cell_costs_external[0][i] > 0.0 && cell_costs_internal[0][i] > 0.0 {
-                println!("here");
+                println!("here1");
+            }
+            if cell_costs_external[0][i] > 0.0 && cell_costs_internal[0][i] > 0.0 {
+                println!("here2");
             }
         }
-
-        let mut g = G::new();
-        g.external = cell_costs_external[0].clone();
-        g.internal = cell_costs_internal[0].clone();
-        *g.internal.last_mut().unwrap() = 1.0;
 
         let mut graphs = Vec::from_iter(
             cell_costs_external
@@ -592,6 +589,9 @@ impl BSPComplex {
                     GraphCut::new(&external, &internal)
                 }),
         );
+
+        println!("the ori flow is {}", graphs[1].flow);
+
         for fid in self.mesh.faces() {
             if self.face_data[fid].triangles.is_empty() {
                 let [c1, mut c2] = self.face_data[fid].cells;
@@ -602,13 +602,10 @@ impl BSPComplex {
                 for shell_id in 0..n_shells {
                     if !is_black[shell_id][fid] {
                         graphs[shell_id].add_edge(c1, c2, face_areas[fid], face_areas[fid]);
-                        g.edges.push(Edge::new(c1, c2, face_areas[fid]));
                     }
                 }
             }
         }
-        let gj = serde_json::to_string(&g).unwrap();
-        std::fs::write("123.json", gj).unwrap();
         let mut cell_kept = vec![false; self.cell_data.len() + 1];
         for graph in &mut graphs {
             graph.max_flow();
@@ -616,6 +613,7 @@ impl BSPComplex {
                 cell_kept[cid] |= !graph.is_sink[cid];
             }
         }
+        println!("the after flow is {}", graphs[1].flow);
 
         let mut kept_faces = Vec::new();
         for fid in self.mesh.faces() {
@@ -821,40 +819,6 @@ impl BSPComplex {
             }
         }
         [pos_triangles, neg_triangles]
-    }
-
-    pub fn validate_cell(&mut self, cid: usize) {
-        let bump = Bump::new();
-        let (cell_verts, _) = self.cell_verts_and_edges(cid, &bump);
-        for &fid in &self.cell_data[cid].faces {
-            let mut set = hashbrown::HashSet::new();
-            set.extend(
-                self.mesh
-                    .face(fid)
-                    .halfedges()
-                    .map(|hid| self.mesh.he_vertex(hid)),
-            );
-            let face_tri = Vec::from_iter(self.face_data[fid].plane.map(|vid| &self.points[vid]));
-            let reversed = self.face_data[fid].cells[0] != cid;
-            for &vid in &cell_verts {
-                if set.contains(&vid) {
-                    continue;
-                }
-                let ori = orient3d(
-                    face_tri[0],
-                    face_tri[1],
-                    face_tri[2],
-                    &self.points[vid],
-                    &bump,
-                );
-                if ori == Orientation::Zero {
-                    continue;
-                }
-                if !((ori == Orientation::Positive) ^ reversed) {
-                    panic!("ori reversed");
-                }
-            }
-        }
     }
 }
 
@@ -1104,7 +1068,6 @@ fn make_loop<A: Allocator + Copy>(
 #[inline(always)]
 fn find_uncoplanar_verts<A: Allocator + Copy>(
     tri: &[VertexId],
-    cid: usize,
     orientations: &mut HashMap<VertexId, Orientation>,
     vertex_data: &[BSPVertexData],
     points: &[Point3D],
@@ -1145,4 +1108,15 @@ fn face_area<A: Allocator + Copy>(points: &[f64], verts: &[VertexId], bump: A) -
         area += norm(&n);
     }
     return area;
+}
+#[inline(always)]
+fn face_center(points: &[f64], verts: &[VertexId]) -> [f64; 3] {
+    let mut result = [0.0; 3];
+    for &vid in verts {
+        let p = point(points, vid.0);
+        result[0] += p[0] / verts.len() as f64;
+        result[1] += p[1] / verts.len() as f64;
+        result[2] += p[2] / verts.len() as f64;
+    }
+    result
 }

@@ -84,7 +84,7 @@ fn make_mesh_for_triangles(points: &[f64], triangles: Vec<usize>, tri_in_shells:
         println!("split is {:?}", complex.split_duration);
     }
 
-    complex.complex_parition(&tri_in_shells);
+    complex.complex_partition(&tri_in_shells);
 }
 
 pub fn make_polyhedra_mesh(

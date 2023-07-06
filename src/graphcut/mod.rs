@@ -43,7 +43,7 @@ pub struct GraphCut {
     pub is_sink: Vec<bool>,
     /// residual capacities of nodes
     tr_cap: Vec<f64>,
-    flow: f64,
+    pub flow: f64,
     /// all arcs
     arcs: Vec<Arc>,
     /// distance to the terminal
@@ -422,9 +422,6 @@ impl GraphCut {
     pub fn max_flow(&mut self) -> f64 {
         let mut current_node = INVALID_IND;
         loop {
-            if self.time == 3218 {
-                println!("here");
-            }
             let mut i = current_node;
             if i != INVALID_IND {
                 self.next[i] = INVALID_IND;
@@ -513,11 +510,6 @@ impl GraphCut {
                 current_node = INVALID_IND;
             }
         }
-        let _count = self.count_sink();
         return self.flow;
-    }
-
-    fn count_sink(&self) -> usize {
-        self.is_sink.iter().enumerate().filter_map(|(i, &v)| if v {Some(i)} else {None}).count()
     }
 }
