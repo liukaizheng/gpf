@@ -120,9 +120,6 @@ impl GraphCut {
     #[inline]
     fn next_active(&mut self) -> usize {
         loop {
-            if self.time > 3205 {
-                println!("here");
-            }
             let mut i = self.queue_first[0];
             if i == INVALID_IND {
                 i = self.queue_first[1];
@@ -431,7 +428,6 @@ impl GraphCut {
             let mut i = current_node;
             if i != INVALID_IND {
                 self.next[i] = INVALID_IND;
-                let p = self.parent[i];
                 if self.parent[i] == INVALID_IND {
                     i = INVALID_IND;
                 }
@@ -489,9 +485,6 @@ impl GraphCut {
                 }
             }
             self.time += 1;
-            if self.time == 3208 {
-                println!("here");
-            }
             if aid != INVALID_IND {
                 self.next[i] = i;
                 current_node = i;

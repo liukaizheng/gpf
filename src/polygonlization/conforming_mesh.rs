@@ -113,7 +113,7 @@ impl Constraints {
                     || tet_mesh.orient3d(apex, triangle0[0], triangle0[1], triangle0[2], bump)
                         == 0.0
                 {
-                    apex = tet[i + 1];
+                    apex = tet[i];
                 } else {
                     break;
                 }

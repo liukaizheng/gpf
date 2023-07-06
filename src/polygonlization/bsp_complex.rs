@@ -6,7 +6,7 @@ use std::{
 use bumpalo::Bump;
 use hashbrown::HashMap;
 use itertools::Itertools;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     graphcut::GraphCut,
@@ -21,6 +21,17 @@ use crate::{
 };
 
 use super::{conforming_mesh::Constraints, point};
+
+#[derive(Clone)]
+struct BSPVertexData {
+    parent: [VertexId; 2],
+}
+
+impl BSPVertexData {
+    fn new(vid: VertexId) -> Self {
+        Self { parent: [vid, vid] }
+    }
+}
 
 #[derive(Clone)]
 struct BSPEdgeData {
@@ -98,6 +109,7 @@ impl BSPCellData {
 pub(crate) struct BSPComplex {
     points: Vec<Point3D>,
     pub mesh: SurfaceMesh,
+    vertex_data: Vec<BSPVertexData>,
     edge_data: Vec<BSPEdgeData>,
     face_data: Vec<BSPFaceData>,
     cell_data: Vec<BSPCellData>,
@@ -182,6 +194,7 @@ impl BSPComplex {
 
         let vert_orientations = vec![HashMap::new(); constraints_data.triangles.len() / 3];
         let vert_visits = vec![false; points.len()];
+        let vertex_data = Vec::from_iter(mesh.vertices().map(|vid| BSPVertexData::new(vid)));
 
         let edge_visits = vec![false; mesh.n_edges()];
         let edge_data = Vec::from_iter(
@@ -194,6 +207,7 @@ impl BSPComplex {
         Self {
             points,
             mesh,
+            vertex_data,
             edge_data,
             face_data,
             cell_data,
@@ -234,6 +248,7 @@ impl BSPComplex {
             &self.points[tri[2]],
             &cell_verts,
             &self.points,
+            &self.vertex_data,
             &mut self.vert_orientations[tid],
             bump,
         );
@@ -267,6 +282,7 @@ impl BSPComplex {
                 *self.vert_orientations[tid].get(&e_verts[1]).unwrap(),
             ) {
                 let new_vid = self.split_edge(eid, &tri, &bump);
+                self.vertex_data.push(BSPVertexData { parent: e_verts });
                 self.vert_orientations[tid].insert(new_vid, Orientation::Zero);
             }
         }
@@ -326,6 +342,7 @@ impl BSPComplex {
                             &self.points[tri[2]],
                             face_tri,
                             &self.points,
+                            &self.vertex_data,
                             orientaion,
                             bump,
                         );
@@ -495,6 +512,7 @@ impl BSPComplex {
                 triangle(first_tid, &self.constraints),
                 face_data.cells[0],
                 &mut self.vert_orientations[first_tid],
+                &self.vertex_data,
                 &self.points,
                 &self.cell_data[face_data.cells[0]].faces,
                 &self.mesh,
@@ -521,6 +539,7 @@ impl BSPComplex {
                     &self.points[tri[2]],
                     &vert,
                     &self.points,
+                    &self.vertex_data,
                     &mut self.vert_orientations[tid],
                     &bump,
                 );
@@ -550,6 +569,12 @@ impl BSPComplex {
                     }
                     is_black[shell_id][fid] = true;
                 }
+            }
+        }
+
+        for i in 0..=self.cell_data.len() {
+            if cell_costs_external[0][i] > 0.0 && cell_costs_internal[0][i] > 0.0 {
+                println!("here");
             }
         }
 
@@ -667,6 +692,7 @@ impl BSPComplex {
                 plane_pts[2],
                 tri,
                 &self.points,
+                &self.vertex_data,
                 &mut self.vert_orientations[pivot_tid],
                 bump,
             );
@@ -765,7 +791,16 @@ impl BSPComplex {
         for &tid in cell_triangles {
             let tri = triangle(tid, &self.constraints);
             let orientation = &mut self.vert_orientations[pivot_tid];
-            verts_orient_wrt_plane(pa, pb, pc, tri, &self.points, orientation, bump);
+            verts_orient_wrt_plane(
+                pa,
+                pb,
+                pc,
+                tri,
+                &self.points,
+                &self.vertex_data,
+                orientation,
+                bump,
+            );
             let (mut has_pos, mut has_neg) = (false, false);
             for vid in tri {
                 match orientation.get(vid).unwrap() {
@@ -858,6 +893,7 @@ fn verts_orient_wrt_plane<A: Allocator + Copy>(
     pc: &Point3D,
     verts: &[VertexId],
     points: &[Point3D],
+    vertex_data: &[BSPVertexData],
     vert_orientations: &mut HashMap<VertexId, Orientation>,
     bump: A,
 ) {
@@ -865,12 +901,44 @@ fn verts_orient_wrt_plane<A: Allocator + Copy>(
     let p1 = pb.explicit().unwrap();
     let p2 = pc.explicit().unwrap();
     for &vid in verts {
-        if let hashbrown::hash_map::Entry::Vacant(ori) = vert_orientations.entry(vid) {
-            if is_point_built_from_plane(&points[vid], p0, p1, p2) {
-                ori.insert(Orientation::Zero);
-            } else {
-                ori.insert(orient3d(pa, pb, pc, &points[vid], bump));
+        if vert_orientations.contains_key(&vid) {
+            continue;
+        }
+        let vp = &vertex_data[vid].parent;
+        // inside a segment
+        if vid != vp[0] {
+            if !vert_orientations.contains_key(&vp[0]) || !vert_orientations.contains_key(&vp[1]) {
+                verts_orient_wrt_plane(
+                    pa,
+                    pb,
+                    pc,
+                    vp,
+                    points,
+                    vertex_data,
+                    vert_orientations,
+                    bump,
+                );
             }
+            let ori_a = *vert_orientations.get(&vp[0]).unwrap();
+            let ori_b = *vert_orientations.get(&vp[1]).unwrap();
+            if ori_a == ori_b {
+                vert_orientations.insert(vid, ori_a);
+                continue;
+            }
+            if ori_a == Orientation::Zero {
+                vert_orientations.insert(vid, ori_b);
+                continue;
+            }
+            if ori_b == Orientation::Zero {
+                vert_orientations.insert(vid, ori_a);
+                continue;
+            }
+        }
+
+        if is_point_built_from_plane(&points[vid], p0, p1, p2) {
+            vert_orientations.insert(vid, Orientation::Zero);
+        } else {
+            vert_orientations.insert(vid, orient3d(pa, pb, pc, &points[vid], bump));
         }
     }
 }
@@ -1038,6 +1106,7 @@ fn find_uncoplanar_verts<A: Allocator + Copy>(
     tri: &[VertexId],
     cid: usize,
     orientations: &mut HashMap<VertexId, Orientation>,
+    vertex_data: &[BSPVertexData],
     points: &[Point3D],
     faces: &[FaceId],
     mesh: &SurfaceMesh,
@@ -1048,7 +1117,7 @@ fn find_uncoplanar_verts<A: Allocator + Copy>(
     let pc = &points[tri[2]];
     for &fid in faces {
         for vid in mesh.face(fid).halfedges().map(|hid| mesh.he_vertex(hid)) {
-            verts_orient_wrt_plane(pa, pb, pc, &[vid], &points, orientations, bump);
+            verts_orient_wrt_plane(pa, pb, pc, &[vid], &points, vertex_data, orientations, bump);
             if *orientations.get(&vid).unwrap() != Orientation::Zero {
                 return vid;
             }
