@@ -1114,7 +1114,7 @@ pub fn tetrahedralize<'a>(points: &'a [f64]) -> TetMesh<'a> {
     ];
     let mut mesh = TetMesh::new(points);
     let mut sorted_pt_inds = Vec::from_iter(0..mesh.n_points);
-    sorted_pt_inds.shuffle(&mut rand::thread_rng());
+    // sorted_pt_inds.shuffle(&mut rand::thread_rng());
     const SORT_OPTION: SortOption = SortOption {
         threshold: 64,
         hilbert_order: 52,

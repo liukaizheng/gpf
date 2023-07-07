@@ -13,8 +13,8 @@ use crate::{
     math::{cross, norm, sub},
     mesh::{EdgeId, Face, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
-        orient3d::orient3d, point_in_triangle, sign_reversed, ExplicitPoint3D, ImplicitPoint3D,
-        ImplicitPointLPI, ImplicitPointTPI, Orientation, Point3D,
+        max_comp_in_tri_normal, orient2d, orient3d::orient3d, point_in_triangle, sign_reversed,
+        ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI, Orientation, Point3D,
     },
     triangle::TetMesh,
     INVALID_IND,
@@ -116,10 +116,12 @@ pub(crate) struct BSPComplex {
     constraints: Vec<VertexId>,
     n_ori_triangles: usize,
 
-    vert_orientations: Vec<HashMap<VertexId, Orientation>>,
+    face_vert_orientations: Vec<HashMap<VertexId, Orientation>>,
     vert_visits: Vec<bool>,
 
     edge_visits: Vec<bool>,
+
+    triangle_orientations: Vec<usize>,
 
     pub ori_duration: Duration,
     pub split_duration: Duration,
@@ -192,7 +194,7 @@ impl BSPComplex {
 
         let mesh = SurfaceMesh::from(faces);
 
-        let vert_orientations = vec![HashMap::new(); constraints_data.triangles.len() / 3];
+        let face_vert_orientations = vec![HashMap::new(); constraints_data.triangles.len() / 3];
         let vert_visits = vec![false; points.len()];
         let vertex_data = Vec::from_iter(mesh.vertices().map(|vid| BSPVertexData::new(vid)));
 
@@ -200,6 +202,24 @@ impl BSPComplex {
         let edge_data = Vec::from_iter(
             mesh.edges()
                 .map(|eid| BSPEdgeData::new(Vec::from_iter(mesh.e_vertices(eid)))),
+        );
+
+        let mut bump = Bump::new();
+        let triangle_orientations = Vec::from_iter(
+            constraints_data.triangles[..(constraints_data.n_ori_triangles * 3)]
+                .chunks(3)
+                .map(|tri| {
+                    bump.reset();
+                    let tri_points =
+                        Vec::from_iter(tri.iter().map(|&vid| point(tet_mesh.points, vid)));
+                    let axis =
+                        max_comp_in_tri_normal(tri_points[0], tri_points[1], tri_points[2], &bump);
+                    if orient2d(tri_points[0], tri_points[1], tri_points[2], &bump) > 0.0 {
+                        axis << 1
+                    } else {
+                        (axis << 1) + 1
+                    }
+                }),
         );
 
         let constraints = Vec::from_iter(constraints_data.triangles.iter().map(|&idx| idx.into()));
@@ -214,8 +234,10 @@ impl BSPComplex {
             constraints,
             n_ori_triangles: constraints_data.n_ori_triangles,
             edge_visits,
-            vert_orientations,
+            face_vert_orientations,
             vert_visits,
+
+            triangle_orientations,
 
             ori_duration: Duration::from_millis(0),
             split_duration: Duration::from_millis(0),
@@ -249,7 +271,7 @@ impl BSPComplex {
             &cell_verts,
             &self.points,
             &self.vertex_data,
-            &mut self.vert_orientations[tid],
+            &mut self.face_vert_orientations[tid],
             bump,
         );
         self.ori_duration += start.elapsed();
@@ -258,8 +280,8 @@ impl BSPComplex {
         let (mut n_over, mut n_under) = (0, 0);
         let mut cell_orientations = Vec::new();
         for vid in &cell_verts {
-            cell_orientations.push(*self.vert_orientations[tid].get(vid).unwrap());
-            match self.vert_orientations[tid].get(vid).unwrap() {
+            cell_orientations.push(*self.face_vert_orientations[tid].get(vid).unwrap());
+            match self.face_vert_orientations[tid].get(vid).unwrap() {
                 Orientation::Positive => {
                     n_over += 1;
                 }
@@ -270,7 +292,6 @@ impl BSPComplex {
             }
         }
         if n_over == 0 || n_under == 0 {
-            // panic!("don't find plane to split cell");
             return;
         }
 
@@ -278,12 +299,12 @@ impl BSPComplex {
             let eid = eid.into();
             let e_verts = self.mesh.e_vertices(eid);
             if sign_reversed(
-                *self.vert_orientations[tid].get(&e_verts[0]).unwrap(),
-                *self.vert_orientations[tid].get(&e_verts[1]).unwrap(),
+                *self.face_vert_orientations[tid].get(&e_verts[0]).unwrap(),
+                *self.face_vert_orientations[tid].get(&e_verts[1]).unwrap(),
             ) {
                 let new_vid = self.split_edge(eid, &tri, &bump);
                 self.vertex_data.push(BSPVertexData { parent: e_verts });
-                self.vert_orientations[tid].insert(new_vid, Orientation::Zero);
+                self.face_vert_orientations[tid].insert(new_vid, Orientation::Zero);
             }
         }
 
@@ -293,7 +314,7 @@ impl BSPComplex {
         let mut zero_ori_halfedges = Vec::new_in(bump);
         for i in 0..n_cell_faces {
             let fid = self.cell_data[cid].faces[i];
-            let orientaion = &mut self.vert_orientations[tid];
+            let orientaion = &mut self.face_vert_orientations[tid];
             let coplanar = split_face_verts(&self.mesh, fid, orientaion, bump);
             match coplanar {
                 Ok([va, vb]) => {
@@ -509,7 +530,7 @@ impl BSPComplex {
             // uncoplanar vertex
             let vert = [find_uncoplanar_verts(
                 triangle(first_tid, &self.constraints),
-                &mut self.vert_orientations[first_tid],
+                &mut self.face_vert_orientations[first_tid],
                 &self.vertex_data,
                 &self.points,
                 &self.cell_data[face_data.cells[0]].faces,
@@ -549,10 +570,10 @@ impl BSPComplex {
                         &vert,
                         &self.points,
                         &self.vertex_data,
-                        &mut self.vert_orientations[tid],
+                        &mut self.face_vert_orientations[tid],
                         &bump,
                     );
-                    let ori = *self.vert_orientations[tid].get(&vert[0]).unwrap();
+                    let ori = *self.face_vert_orientations[tid].get(&vert[0]).unwrap();
                     if ori == face_ori {
                         cell_costs_internal[shell_id][face_data.cells[0]] += face_areas[fid];
                         let second_cid = face_data.cells[1];
@@ -691,10 +712,10 @@ impl BSPComplex {
                 tri,
                 &self.points,
                 &self.vertex_data,
-                &mut self.vert_orientations[pivot_tid],
+                &mut self.face_vert_orientations[pivot_tid],
                 bump,
             );
-            let ori = &self.vert_orientations[pivot_tid];
+            let ori = &self.face_vert_orientations[pivot_tid];
             let coplanar = *ori.get(&tri[0]).unwrap() == Orientation::Zero
                 && *ori.get(&tri[1]).unwrap() == Orientation::Zero
                 && *ori.get(&tri[2]).unwrap() == Orientation::Zero;
@@ -788,7 +809,7 @@ impl BSPComplex {
         let mut neg_triangles = Vec::new();
         for &tid in cell_triangles {
             let tri = triangle(tid, &self.constraints);
-            let orientation = &mut self.vert_orientations[pivot_tid];
+            let orientation = &mut self.face_vert_orientations[pivot_tid];
             verts_orient_wrt_plane(
                 pa,
                 pb,
