@@ -13,8 +13,9 @@ use crate::{
     math::{cross, norm, sub},
     mesh::{EdgeId, Face, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
-        max_comp_in_tri_normal, orient2d, orient3d::orient3d, point_in_triangle, sign_reversed,
-        ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI, Orientation, Point3D,
+        max_comp_in_tri_normal, orient2d, orient2d_xy, orient2d_yz, orient2d_zx,
+        orient3d::orient3d, point_in_triangle, sign_reversed, ExplicitPoint3D, ImplicitPoint3D,
+        ImplicitPointLPI, ImplicitPointTPI, Orientation, Point3D,
     },
     triangle::TetMesh,
     INVALID_IND,
@@ -117,6 +118,11 @@ pub(crate) struct BSPComplex {
     n_ori_triangles: usize,
 
     face_vert_orientations: Vec<HashMap<VertexId, Orientation>>,
+    edge_vert_orientations: Vec<HashMap<VertexId, Orientation>>,
+
+    /// constraint triangle halfedge to edge index
+    h2e_map: Vec<usize>,
+
     vert_visits: Vec<bool>,
 
     edge_visits: Vec<bool>,
@@ -204,6 +210,17 @@ impl BSPComplex {
                 .map(|eid| BSPEdgeData::new(Vec::from_iter(mesh.e_vertices(eid)))),
         );
 
+        let mut edge_map: HashMap<(usize, usize), usize> = HashMap::new();
+        let mut h2e_map = Vec::with_capacity(constraints_data.triangles.len());
+        for tri in constraints_data.triangles.chunks(3) {
+            for (&va, &vb) in tri.iter().circular_tuple_windows() {
+                let key = if va < vb { (va, vb) } else { (vb, va) };
+                let len = edge_map.len();
+                let eid = *edge_map.entry(key).or_insert(len);
+                h2e_map.push(eid);
+            }
+        }
+
         let mut bump = Bump::new();
         let triangle_orientations = Vec::from_iter(
             constraints_data.triangles[..(constraints_data.n_ori_triangles * 3)]
@@ -235,8 +252,10 @@ impl BSPComplex {
             n_ori_triangles: constraints_data.n_ori_triangles,
             edge_visits,
             face_vert_orientations,
+            edge_vert_orientations: vec![HashMap::new(); edge_map.len()],
             vert_visits,
 
+            h2e_map,
             triangle_orientations,
 
             ori_duration: Duration::from_millis(0),
@@ -1000,6 +1019,86 @@ fn three_planes_intersection<A: Allocator + Copy>(
         points[t2[1]].explicit().unwrap().clone(),
         points[t2[2]].explicit().unwrap().clone(),
     ))
+}
+
+fn verts_orient_wrt_line<A: Allocator + Copy>(
+    va: VertexId,
+    vb: VertexId,
+    verts: &[VertexId],
+    points: &[Point3D],
+    vertex_data: &[BSPVertexData],
+    vert_orientations: &mut HashMap<VertexId, Orientation>,
+    axis: usize,
+    bump: A,
+) {
+    for &vid in verts {
+        if vert_orientations.contains_key(&vid) {
+            continue;
+        }
+        if vid == va || vid == vb {
+            vert_orientations.insert(vid, Orientation::Zero);
+        }
+
+        let vp = &vertex_data[vid].parent;
+        // inside a segment
+        if vid != vp[0] {
+            if !vert_orientations.contains_key(&vp[0]) || !vert_orientations.contains_key(&vp[1]) {
+                verts_orient_wrt_line(
+                    va,
+                    vb,
+                    vp,
+                    points,
+                    vertex_data,
+                    vert_orientations,
+                    axis,
+                    bump,
+                );
+            }
+            let two_ori = [
+                *vert_orientations.get(&vp[0]).unwrap(),
+                *vert_orientations.get(&vp[0]).unwrap(),
+            ];
+
+            if two_ori[0] == two_ori[1] {
+                vert_orientations.insert(vid, two_ori[0]);
+                continue;
+            }
+
+            let states =
+                two_ori.map(|ori| ori != Orientation::Positive && ori != Orientation::Negative);
+            if states[0] ^ states[1] {
+                if states[0] {
+                    vert_orientations.insert(vid, two_ori[1]);
+                } else {
+                    vert_orientations.insert(vid, two_ori[0]);
+                }
+                continue;
+            }
+        }
+
+        let ori = if axis == 0 {
+            orient2d_yz(&points[vid], &points[va], &points[vb], bump)
+        } else if axis == 1 {
+            orient2d_zx(&points[vid], &points[va], &points[vb], bump)
+        } else {
+            orient2d_xy(&points[vid], &points[va], &points[vb], bump)
+        };
+
+        if ori != Orientation::Zero {
+            vert_orientations.insert(vid, ori);
+        } else {
+            if 
+        }
+    }
+}
+
+fn seg_innter_intersect_tri(
+    tid: usize,
+    tri_points: &[VertexId],
+    h2e_map: &[usize],
+    edge_vert_orientations: &mut [HashMap<usize, Orientation>],
+) -> bool {
+    true
 }
 
 fn split_face_verts<A: Allocator + Copy>(
