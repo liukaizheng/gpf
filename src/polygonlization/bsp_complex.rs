@@ -1087,7 +1087,6 @@ fn verts_orient_wrt_line<A: Allocator + Copy>(
         if ori != Orientation::Zero {
             vert_orientations.insert(vid, ori);
         } else {
-            if 
         }
     }
 }

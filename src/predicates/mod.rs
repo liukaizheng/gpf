@@ -1,6 +1,7 @@
 mod expansion_number;
 mod generic_point;
 mod interval_number;
+mod less_than;
 mod orient2d;
 pub mod orient3d;
 mod predicates;
@@ -13,6 +14,7 @@ use std::{
 pub use expansion_number::*;
 pub use generic_point::*;
 pub use interval_number::*;
+pub use less_than::*;
 pub use orient2d::*;
 pub use predicates::*;
 
