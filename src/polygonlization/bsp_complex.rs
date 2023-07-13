@@ -13,9 +13,10 @@ use crate::{
     math::{cross, norm, sub},
     mesh::{EdgeId, Face, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
-        max_comp_in_tri_normal, orient2d, orient2d_xy, orient2d_yz, orient2d_zx,
-        orient3d::orient3d, point_in_triangle, sign_reversed, ExplicitPoint3D, ImplicitPoint3D,
-        ImplicitPointLPI, ImplicitPointTPI, Orientation, Point3D,
+        less_than_on_x, less_than_on_y, less_than_on_z, max_comp_in_tri_normal, orient2d,
+        orient2d_xy, orient2d_yz, orient2d_zx, orient3d::orient3d, point_in_triangle,
+        sign_reversed, ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
+        Orientation, Point3D,
     },
     triangle::TetMesh,
     INVALID_IND,
@@ -1087,6 +1088,22 @@ fn verts_orient_wrt_line<A: Allocator + Copy>(
         if ori != Orientation::Zero {
             vert_orientations.insert(vid, ori);
         } else {
+            let pa = &points[va];
+            let pb = &points[vb];
+            let p = &points[vid];
+            let is_on_seg = if less_than_on_x(pa, pb, bump) != Orientation::Zero {
+                less_than_on_x(pa, p, bump) == less_than_on_x(p, pb, bump)
+            } else if less_than_on_y(pa, pb, bump) != Orientation::Zero {
+                less_than_on_y(pa, p, bump) == less_than_on_y(p, pb, bump)
+            } else {
+                less_than_on_z(pa, p, bump) == less_than_on_z(p, pb, bump)
+            };
+
+            if is_on_seg {
+                vert_orientations.insert(vid, Orientation::Zero);
+            } else {
+                vert_orientations.insert(vid, Orientation::Undefined);
+            }
         }
     }
 }
