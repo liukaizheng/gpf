@@ -1108,12 +1108,37 @@ fn verts_orient_wrt_line<A: Allocator + Copy>(
     }
 }
 
-fn seg_innter_intersect_tri(
+fn seg_innter_intersect_tri<A: Allocator + Copy>(
+    va: VertexId,
+    vb: VertexId,
     tid: usize,
-    tri_points: &[VertexId],
+    tri_vertices: &[VertexId],
     h2e_map: &[usize],
-    edge_vert_orientations: &mut [HashMap<usize, Orientation>],
+    edge_vert_orientations: &mut [HashMap<VertexId, Orientation>],
+    points: &[Point3D],
+    vertex_data: &[BSPVertexData],
+    axis: usize,
+    bump: A,
 ) -> bool {
+    let verts = [va, vb];
+    let hid = tid * 3;
+    let mut vert_orientations = [[Orientation::Undefined; 3]; 2];
+    for (i, (&ea, &eb)) in tri_vertices.iter().circular_tuple_windows().enumerate() {
+        let eid = h2e_map[hid + i];
+        let edge_ori_map = &mut edge_vert_orientations[eid];
+        verts_orient_wrt_line(
+            ea,
+            eb,
+            &verts,
+            points,
+            vertex_data,
+            edge_ori_map,
+            axis,
+            bump,
+        );
+        vert_orientations[0][i] = *edge_ori_map.get(&va).unwrap();
+        vert_orientations[1][i] = *edge_ori_map.get(&vb).unwrap();
+    }
     true
 }
 
