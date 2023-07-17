@@ -5,6 +5,23 @@ use super::{
     ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI, Orientation, Point3D,
 };
 
+#[inline(always)]
+pub fn orient2d_by_axis<A: Allocator + Copy>(
+    pa: &Point3D,
+    pb: &Point3D,
+    pc: &Point3D,
+    axis: usize,
+    bump: A,
+) -> Orientation {
+    if axis == 0 {
+        orient2d_yz(pa, pb, pc, bump)
+    } else if axis == 1 {
+        orient2d_zx(pa, pb, pc, bump)
+    } else {
+        orient2d_xy(pa, pb, pc, bump)
+    }
+}
+
 /// Compute the orientation of the 3D points `pa`, `pb` and `pc`.
 /// If `pc` is above the line defined by `pa` and `pb`, then the
 /// orientation is negative. If `pc` is below the line, then the

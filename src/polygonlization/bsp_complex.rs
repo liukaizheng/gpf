@@ -13,10 +13,9 @@ use crate::{
     math::{cross, norm, sub},
     mesh::{EdgeId, Face, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
-        less_than_on_x, less_than_on_y, less_than_on_z, max_comp_in_tri_normal, orient2d,
-        orient2d_xy, orient2d_yz, orient2d_zx, orient3d::orient3d, point_in_triangle,
-        sign_reversed, ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
-        Orientation, Point3D,
+        less_than_on_x, less_than_on_y, less_than_on_z, max_comp_in_tri_normal, orient2d_by_axis,
+        orient3d::orient3d, sign_reverse, sign_reversed, ExplicitPoint3D, ImplicitPoint3D,
+        ImplicitPointLPI, ImplicitPointTPI, Orientation, Point3D,
     },
     triangle::TetMesh,
     INVALID_IND,
@@ -38,11 +37,12 @@ impl BSPVertexData {
 #[derive(Clone)]
 struct BSPEdgeData {
     parents: Vec<VertexId>,
+    vertices: [VertexId; 2],
 }
 
 impl BSPEdgeData {
-    fn new(parents: Vec<VertexId>) -> Self {
-        Self { parents }
+    fn new(parents: Vec<VertexId>, vertices: [VertexId; 2]) -> Self {
+        Self { parents, vertices }
     }
 }
 
@@ -206,10 +206,10 @@ impl BSPComplex {
         let vertex_data = Vec::from_iter(mesh.vertices().map(|vid| BSPVertexData::new(vid)));
 
         let edge_visits = vec![false; mesh.n_edges()];
-        let edge_data = Vec::from_iter(
-            mesh.edges()
-                .map(|eid| BSPEdgeData::new(Vec::from_iter(mesh.e_vertices(eid)))),
-        );
+        let edge_data = Vec::from_iter(mesh.edges().map(|eid| {
+            let e_verts = mesh.e_vertices(eid);
+            BSPEdgeData::new(vec![e_verts[0], e_verts[1]], e_verts)
+        }));
 
         let mut edge_map: HashMap<(usize, usize), usize> = HashMap::new();
         let mut h2e_map = Vec::with_capacity(constraints_data.triangles.len());
@@ -230,13 +230,7 @@ impl BSPComplex {
                     bump.reset();
                     let tri_points =
                         Vec::from_iter(tri.iter().map(|&vid| point(tet_mesh.points, vid)));
-                    let axis =
-                        max_comp_in_tri_normal(tri_points[0], tri_points[1], tri_points[2], &bump);
-                    if orient2d(tri_points[0], tri_points[1], tri_points[2], &bump) > 0.0 {
-                        axis << 1
-                    } else {
-                        (axis << 1) + 1
-                    }
+                    max_comp_in_tri_normal(tri_points[0], tri_points[1], tri_points[2], &bump)
                 }),
         );
 
@@ -344,7 +338,7 @@ impl BSPComplex {
                     let mut parent = tri.to_vec();
 
                     parent.extend(&self.face_data[fid].plane);
-                    self.edge_data.push(BSPEdgeData::new(parent));
+                    self.edge_data.push(BSPEdgeData::new(parent, [va, vb]));
                     let new_is_pos = orientaion
                         .get(&self.mesh.he_tip_vertex(self.mesh.he_next(new_hid)))
                         .unwrap()
@@ -363,16 +357,15 @@ impl BSPComplex {
                         zero_ori_halfedges.push(self.mesh.he_sibling(new_hid));
                     }
 
-                    let old_is_pos = !new_is_pos;
-
                     for &nei_cid in &self.face_data[fid].cells {
                         if nei_cid != INVALID_IND && nei_cid != cid {
                             self.cell_data[nei_cid].faces.push(new_fid);
                         }
                     }
 
+                    let mut old_face_triangles = Vec::new();
                     let mut new_face_triangles = Vec::new();
-                    self.face_data[fid].triangles.retain(|&face_tid| {
+                    for &face_tid in &self.face_data[fid].triangles {
                         let face_tri = {
                             let start = face_tid * 3;
                             &self.constraints[start..(start + 3)]
@@ -399,21 +392,49 @@ impl BSPComplex {
                                 _ => {}
                             }
                         }
-                        if new_is_pos {
-                            if has_pos {
+                        if has_pos & has_neg {
+                            if face_intersects_tri(
+                                new_fid,
+                                &self.mesh,
+                                &self.edge_data,
+                                face_tid,
+                                face_tri,
+                                &self.h2e_map,
+                                &mut self.edge_vert_orientations,
+                                &self.points,
+                                &self.vertex_data,
+                                self.triangle_orientations[face_tid],
+                                bump,
+                            ) {
                                 new_face_triangles.push(face_tid);
+                                if face_intersects_tri(
+                                    fid,
+                                    &self.mesh,
+                                    &self.edge_data,
+                                    face_tid,
+                                    face_tri,
+                                    &self.h2e_map,
+                                    &mut self.edge_vert_orientations,
+                                    &self.points,
+                                    &self.vertex_data,
+                                    self.triangle_orientations[face_tid],
+                                    bump,
+                                ) {
+                                    old_face_triangles.push(face_tid);
+                                }
+                            } else {
+                                old_face_triangles.push(face_tid);
                             }
                         } else {
-                            if has_neg {
+                            if has_pos == new_is_pos {
                                 new_face_triangles.push(face_tid);
+                            } else {
+                                old_face_triangles.push(face_tid);
                             }
                         }
-                        if old_is_pos {
-                            has_pos
-                        } else {
-                            has_neg
-                        }
-                    });
+                    }
+
+                    self.face_data[fid].triangles = old_face_triangles;
 
                     let old_face_data = &self.face_data[fid];
                     self.face_data.push(BSPFaceData {
@@ -468,6 +489,10 @@ impl BSPComplex {
                 coplanar_triangles,
                 [tri[0], tri[1], tri[2]],
             ));
+            if new_fid.0 == 179262 {
+                println!("the cid is {:?}", cid);
+                println!("the coplanar is {:?}", self.face_data[new_fid].triangles);
+            }
 
             neg_faces.push(new_fid);
             let [pos_inner_triangles, neg_inner_triangles] =
@@ -495,6 +520,50 @@ impl BSPComplex {
         self.split_duration += start.elapsed();
     }
 
+    fn write_obj(&self, verts: &[VertexId], name: &str) {
+        let mut points = vec![0.0; verts.len() * 3];
+        for (i, &vid) in verts.iter().enumerate() {
+            match &self.points[vid] {
+                Point3D::Explicit(p) => {
+                    points[i * 3] = p[0];
+                    points[i * 3 + 1] = p[1];
+                    points[i * 3 + 2] = p[2];
+                }
+                Point3D::LPI(p) => {
+                    p.to_explicit(&mut points[i * 3..]);
+                }
+                Point3D::TPI(p) => {
+                    p.to_explicit(&mut points[i * 3..]);
+                }
+            }
+        }
+        let mut txt = "".to_owned();
+        for p in points.chunks(3) {
+            txt.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
+        }
+
+        txt.push('f');
+        for vid in 0..verts.len() {
+            txt.push_str(&format!(" {}", vid + 1));
+        }
+        txt.push('\n');
+        std::fs::write(name, txt).unwrap();
+    }
+
+    fn print_face(&self, fid: FaceId) {
+        let verts = Vec::from_iter(
+            self.mesh
+                .face(fid)
+                .halfedges()
+                .map(|hid| self.mesh.he_vertex(hid)),
+        );
+        self.write_obj(&verts, &format!("f{}.obj", fid.0));
+        for &tid in &self.face_data[fid].triangles {
+            let tri = triangle(tid, &self.constraints);
+            self.write_obj(tri, &format!("t{}.obj", tid));
+        }
+    }
+
     pub fn complex_partition(&mut self, tri_in_shell: &[usize]) {
         let mut explicit_points = vec![0.0; self.points.len() * 3];
         for (p, data) in self.points.iter().zip(explicit_points.chunks_mut(3)) {
@@ -512,10 +581,10 @@ impl BSPComplex {
                 }
             }
         }
+        self.print_face(179262.into());
         let mut bump = Bump::new();
-        let (face_areas, face_centers) = {
+        let face_areas = {
             let mut areas = Vec::with_capacity(self.face_data.len());
-            let mut face_centers = Vec::with_capacity(self.face_data.len());
             for fid in self.mesh.faces() {
                 bump.reset();
                 let mut face_verts = Vec::new_in(&bump);
@@ -526,13 +595,12 @@ impl BSPComplex {
                         .map(|hid| self.mesh.he_vertex(hid)),
                 );
                 areas.push(face_area(&explicit_points, &face_verts, &bump));
-                face_centers.push(face_center(&explicit_points, &face_verts));
             }
             let area_sum = areas.iter().sum::<f64>();
             for area in &mut areas {
                 *area /= area_sum;
             }
-            (areas, face_centers)
+            areas
         };
         let n_shells = *tri_in_shell.iter().max().unwrap() + 1;
         let mut cell_costs_external = vec![vec![0.0; self.cell_data.len() + 1]; n_shells];
@@ -570,56 +638,56 @@ impl BSPComplex {
                 )
             };
 
+            let mut tri_ori_map = HashMap::<usize, i8, _, _>::new_in(&bump);
             for &tid in face_triangles {
-                let shell_id = tri_in_shell[tid];
-                if is_black[shell_id][fid] {
-                    continue;
-                }
                 let tri = triangle(tid, &self.constraints);
-                if point_in_triangle(
-                    &face_centers[fid],
-                    point(&explicit_points, *tri[0]),
-                    point(&explicit_points, *tri[1]),
-                    point(&explicit_points, *tri[2]),
+                verts_orient_wrt_plane(
+                    &self.points[tri[0]],
+                    &self.points[tri[1]],
+                    &self.points[tri[2]],
+                    &vert,
+                    &self.points,
+                    &self.vertex_data,
+                    &mut self.face_vert_orientations[tid],
                     &bump,
-                ) {
-                    verts_orient_wrt_plane(
-                        &self.points[tri[0]],
-                        &self.points[tri[1]],
-                        &self.points[tri[2]],
-                        &vert,
-                        &self.points,
-                        &self.vertex_data,
-                        &mut self.face_vert_orientations[tid],
-                        &bump,
-                    );
-                    let ori = *self.face_vert_orientations[tid].get(&vert[0]).unwrap();
-                    if ori == face_ori {
-                        cell_costs_internal[shell_id][face_data.cells[0]] += face_areas[fid];
-                        let second_cid = face_data.cells[1];
-                        if second_cid != INVALID_IND {
-                            cell_costs_external[shell_id][second_cid] += face_areas[fid];
-                        }
-                    } else {
-                        cell_costs_external[shell_id][face_data.cells[0]] += face_areas[fid];
-                        let second_cid = face_data.cells[1];
-                        if second_cid != INVALID_IND {
-                            cell_costs_internal[shell_id][second_cid] += face_areas[fid];
-                        }
+                );
+                let ori = *self.face_vert_orientations[tid].get(&vert[0]).unwrap();
+                let shell = tri_in_shell[tid];
+                let val = tri_ori_map.entry(shell).or_insert(0);
+                if ori == face_ori {
+                    *val += 1;
+                } else {
+                    *val -= 1;
+                }
+            }
+
+            for (shell_id, cnt) in tri_ori_map {
+                if cnt > 0 {
+                    cell_costs_internal[shell_id][face_data.cells[0]] += face_areas[fid];
+                    let second_cid = face_data.cells[1];
+                    if second_cid != INVALID_IND {
+                        cell_costs_external[shell_id][second_cid] += face_areas[fid];
+                    }
+                    is_black[shell_id][fid] = true;
+                } else if cnt < 0 {
+                    cell_costs_external[shell_id][face_data.cells[0]] += face_areas[fid];
+                    let second_cid = face_data.cells[1];
+                    if second_cid != INVALID_IND {
+                        cell_costs_internal[shell_id][second_cid] += face_areas[fid];
                     }
                     is_black[shell_id][fid] = true;
                 }
             }
         }
 
-        for i in 0..=self.cell_data.len() {
+        /*for i in 0..=self.cell_data.len() {
             if cell_costs_external[0][i] > 0.0 && cell_costs_internal[0][i] > 0.0 {
                 println!("here1");
             }
             if cell_costs_external[0][i] > 0.0 && cell_costs_internal[0][i] > 0.0 {
                 println!("here2");
             }
-        }
+        }*/
 
         let mut graphs = Vec::from_iter(
             cell_costs_external
@@ -680,6 +748,10 @@ impl BSPComplex {
                             .map(|hid| self.mesh.he_vertex(hid).0),
                     )
                 };
+                if kept_faces.len() == 43005 {
+                    println!("the verts is {:?}", verts);
+                    println!("the fid is {:?}", fid);
+                }
                 kept_faces.push(verts);
             }
         }
@@ -810,7 +882,10 @@ impl BSPComplex {
         self.vert_visits.push(false);
 
         self.edge_visits.push(false);
-        self.edge_data.push(BSPEdgeData::new(ori_edge_parents));
+        self.edge_data.push(BSPEdgeData::new(
+            ori_edge_parents,
+            self.edge_data[eid].vertices,
+        ));
         vid
     }
 
@@ -1077,13 +1152,7 @@ fn verts_orient_wrt_line<A: Allocator + Copy>(
             }
         }
 
-        let ori = if axis == 0 {
-            orient2d_yz(&points[vid], &points[va], &points[vb], bump)
-        } else if axis == 1 {
-            orient2d_zx(&points[vid], &points[va], &points[vb], bump)
-        } else {
-            orient2d_xy(&points[vid], &points[va], &points[vb], bump)
-        };
+        let ori = orient2d_by_axis(&points[vid], &points[va], &points[vb], axis, bump);
 
         if ori != Orientation::Zero {
             vert_orientations.insert(vid, ori);
@@ -1107,10 +1176,32 @@ fn verts_orient_wrt_line<A: Allocator + Copy>(
         }
     }
 }
+#[inline(always)]
+fn vert_in_tri(orientations: &[Orientation]) -> bool {
+    let mut not_zero = Orientation::Undefined;
+    for &ori in orientations {
+        match ori {
+            Orientation::Positive | Orientation::Negative => {
+                if not_zero == Orientation::Undefined {
+                    not_zero = ori;
+                } else if not_zero != ori {
+                    return false;
+                }
+            }
+            Orientation::Undefined => {
+                return false;
+            }
+            _ => {}
+        }
+    }
+    true
+}
 
-fn seg_innter_intersect_tri<A: Allocator + Copy>(
+/// segment intersects in the interior of the triangle
+fn seg_inner_intersect_tri<A: Allocator + Copy>(
     va: VertexId,
     vb: VertexId,
+    seg_parents: &[VertexId; 2],
     tid: usize,
     tri_vertices: &[VertexId],
     h2e_map: &[usize],
@@ -1123,9 +1214,10 @@ fn seg_innter_intersect_tri<A: Allocator + Copy>(
     let verts = [va, vb];
     let hid = tid * 3;
     let mut vert_orientations = [[Orientation::Undefined; 3]; 2];
-    for (i, (&ea, &eb)) in tri_vertices.iter().circular_tuple_windows().enumerate() {
+    for (i, (&ha, &hb)) in tri_vertices.iter().circular_tuple_windows().enumerate() {
         let eid = h2e_map[hid + i];
         let edge_ori_map = &mut edge_vert_orientations[eid];
+        let [ea, eb] = if ha.0 < hb.0 { [ha, hb] } else { [hb, ha] };
         verts_orient_wrt_line(
             ea,
             eb,
@@ -1136,10 +1228,82 @@ fn seg_innter_intersect_tri<A: Allocator + Copy>(
             axis,
             bump,
         );
-        vert_orientations[0][i] = *edge_ori_map.get(&va).unwrap();
-        vert_orientations[1][i] = *edge_ori_map.get(&vb).unwrap();
+        [vert_orientations[0][i], vert_orientations[1][i]] = if ha == ea {
+            [
+                *edge_ori_map.get(&va).unwrap(),
+                *edge_ori_map.get(&vb).unwrap(),
+            ]
+        } else {
+            [
+                sign_reverse(*edge_ori_map.get(&va).unwrap()),
+                sign_reverse(*edge_ori_map.get(&vb).unwrap()),
+            ]
+        };
     }
-    true
+
+    let va_in_tri = vert_in_tri(&vert_orientations[0]);
+    let vb_in_tri = vert_in_tri(&vert_orientations[1]);
+
+    #[inline(always)]
+    fn vert_on_edge(orientations: &[Orientation]) -> u8 {
+        (orientations[0] == Orientation::Zero) as u8
+            | ((orientations[1] == Orientation::Zero) as u8) << 1
+            | ((orientations[2] == Orientation::Zero) as u8) << 2
+    }
+
+    if va_in_tri && vb_in_tri {
+        let va_on_edge = vert_on_edge(&vert_orientations[0]);
+        let vb_on_edge = vert_on_edge(&vert_orientations[0]);
+        return (va_on_edge & vb_on_edge) == 0;
+    } else {
+        for i in 0..3 {
+            if sign_reversed(vert_orientations[0][i], vert_orientations[1][i]) {
+                let pa = &points[seg_parents[0]];
+                let pb = &points[seg_parents[1]];
+                let ori1 = orient2d_by_axis(pa, pb, &points[tri_vertices[i]], axis, bump);
+                let ori2 = orient2d_by_axis(pa, pb, &points[tri_vertices[(i + 1) % 3]], axis, bump);
+                if sign_reversed(ori1, ori2) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
+
+fn face_intersects_tri<A: Allocator + Copy>(
+    fid: FaceId,
+    mesh: &SurfaceMesh,
+    edge_data: &[BSPEdgeData],
+    tid: usize,
+    tri_vertices: &[VertexId],
+    h2e_map: &[usize],
+    edge_vert_orientations: &mut [HashMap<VertexId, Orientation>],
+    points: &[Point3D],
+    vertex_data: &[BSPVertexData],
+    axis: usize,
+    bump: A,
+) -> bool {
+    for hid in mesh.face(fid).halfedges() {
+        let eid = mesh.he_edge(hid);
+        let [ea, eb] = mesh.e_vertices(eid);
+        if seg_inner_intersect_tri(
+            ea,
+            eb,
+            &edge_data[eid].vertices,
+            tid,
+            tri_vertices,
+            h2e_map,
+            edge_vert_orientations,
+            points,
+            vertex_data,
+            axis,
+            bump,
+        ) {
+            return true;
+        }
+    }
+    false
 }
 
 fn split_face_verts<A: Allocator + Copy>(
@@ -1269,15 +1433,4 @@ fn face_area<A: Allocator + Copy>(points: &[f64], verts: &[VertexId], bump: A) -
         area += norm(&n);
     }
     return area;
-}
-#[inline(always)]
-fn face_center(points: &[f64], verts: &[VertexId]) -> [f64; 3] {
-    let mut result = [0.0; 3];
-    for &vid in verts {
-        let p = point(points, vid.0);
-        result[0] += p[0] / verts.len() as f64;
-        result[1] += p[1] / verts.len() as f64;
-        result[2] += p[2] / verts.len() as f64;
-    }
-    result
 }

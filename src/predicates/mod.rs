@@ -343,7 +343,7 @@ pub fn inner_segment_cross_inner_triangle<A: Allocator + Copy>(
         return false;
     }
 
-    // Since now, endpoints are one abouve and one below the triangle-plane.
+    // Since now, endpoints are one above and one below the triangle-plane.
 
     // Intersection between segment and triangle sides are not proper.
     // Check also if segment intersect the triangle-plane outside the triangle.
