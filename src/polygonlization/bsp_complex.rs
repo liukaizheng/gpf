@@ -483,16 +483,27 @@ impl BSPComplex {
             let face_halfedges = make_loop(&self.mesh, zero_ori_halfedges);
             let new_fid = self.mesh.add_face_by_halfedges(&face_halfedges, bump);
             let new_cid = self.cell_data.len();
+            coplanar_triangles.retain(|&tid| {
+                face_intersects_tri(
+                    new_fid,
+                    &self.mesh,
+                    &self.edge_data,
+                    tid,
+                    triangle(tid, &self.constraints),
+                    &self.h2e_map,
+                    &mut self.edge_vert_orientations,
+                    &self.points,
+                    &self.vertex_data,
+                    self.triangle_orientations[tid],
+                    bump,
+                )
+            });
             self.face_data.push(BSPFaceData::new(
                 new_cid,
                 cid,
                 coplanar_triangles,
                 [tri[0], tri[1], tri[2]],
             ));
-            if new_fid.0 == 179262 {
-                println!("the cid is {:?}", cid);
-                println!("the coplanar is {:?}", self.face_data[new_fid].triangles);
-            }
 
             neg_faces.push(new_fid);
             let [pos_inner_triangles, neg_inner_triangles] =
@@ -564,6 +575,47 @@ impl BSPComplex {
         }
     }
 
+    fn print_cid(&mut self, cid: usize) {
+        let (verts, edges) = self.cell_verts_and_edges(cid, std::alloc::Global);
+        let mut points = vec![0.0; verts.len() * 3];
+        for (i, &vid) in verts.iter().enumerate() {
+            match &self.points[vid] {
+                Point3D::Explicit(p) => {
+                    points[i * 3] = p[0];
+                    points[i * 3 + 1] = p[1];
+                    points[i * 3 + 2] = p[2];
+                }
+                Point3D::LPI(p) => {
+                    p.to_explicit(&mut points[i * 3..]);
+                }
+                Point3D::TPI(p) => {
+                    p.to_explicit(&mut points[i * 3..]);
+                }
+            }
+        }
+        let map = HashMap::<
+            VertexId,
+            usize,
+            hashbrown::hash_map::DefaultHashBuilder,
+            std::alloc::Global,
+        >::from_iter(verts.iter().enumerate().map(|(i, &vid)| (vid, i)));
+
+        let mut txt = "".to_owned();
+        for p in points.chunks(3) {
+            txt.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
+        }
+
+        for &fid in &self.cell_data[cid].faces {
+            txt.push('f');
+            for hid in self.mesh.face(fid).halfedges() {
+                let vid = self.mesh.he_vertex(hid);
+                txt.push_str(&format!(" {}", *map.get(&vid).unwrap() + 1));
+            }
+            txt.push('\n');
+        }
+        std::fs::write(format!("c{}.obj", cid), txt).unwrap();
+    }
+
     pub fn complex_partition(&mut self, tri_in_shell: &[usize]) {
         let mut explicit_points = vec![0.0; self.points.len() * 3];
         for (p, data) in self.points.iter().zip(explicit_points.chunks_mut(3)) {
@@ -581,7 +633,7 @@ impl BSPComplex {
                 }
             }
         }
-        self.print_face(179262.into());
+
         let mut bump = Bump::new();
         let face_areas = {
             let mut areas = Vec::with_capacity(self.face_data.len());
@@ -699,8 +751,6 @@ impl BSPComplex {
                 }),
         );
 
-        println!("the ori flow is {}", graphs[1].flow);
-
         for fid in self.mesh.faces() {
             if self.face_data[fid].triangles.is_empty() {
                 let [c1, mut c2] = self.face_data[fid].cells;
@@ -722,7 +772,6 @@ impl BSPComplex {
                 cell_kept[cid] |= !graph.is_sink[cid];
             }
         }
-        println!("the after flow is {}", graphs[1].flow);
 
         let mut kept_faces = Vec::new();
         for fid in self.mesh.faces() {
