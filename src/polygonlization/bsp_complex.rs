@@ -13,8 +13,9 @@ use crate::{
     math::{cross, norm, sub},
     mesh::{EdgeId, Face, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
-        orient3d::orient3d, point_in_triangle, sign_reversed, ExplicitPoint3D, ImplicitPoint3D,
-        ImplicitPointLPI, ImplicitPointTPI, Orientation, Point3D,
+        max_comp_in_tri_normal, orient2d, orient2d_by_axis, orient3d::orient3d, point_in_triangle,
+        sign_reversed, ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
+        Orientation, Point3D,
     },
     triangle::TetMesh,
     INVALID_IND,
@@ -121,6 +122,8 @@ pub(crate) struct BSPComplex {
 
     edge_visits: Vec<bool>,
 
+    tri_orientations: Vec<usize>,
+
     pub ori_duration: Duration,
     pub split_duration: Duration,
 }
@@ -203,6 +206,17 @@ impl BSPComplex {
         );
 
         let constraints = Vec::from_iter(constraints_data.triangles.iter().map(|&idx| idx.into()));
+        let mut bump = Bump::new();
+        let tri_orientations = Vec::from_iter(
+            constraints_data.triangles[..(constraints_data.n_ori_triangles * 3)]
+                .chunks(3)
+                .map(|tri| {
+                    bump.reset();
+                    let tri_points =
+                        Vec::from_iter(tri.iter().map(|&vid| point(tet_mesh.points, vid)));
+                    max_comp_in_tri_normal(tri_points[0], tri_points[1], tri_points[2], &bump)
+                }),
+        );
 
         Self {
             points,
@@ -216,6 +230,8 @@ impl BSPComplex {
             edge_visits,
             vert_orientations,
             vert_visits,
+
+            tri_orientations,
 
             ori_duration: Duration::from_millis(0),
             split_duration: Duration::from_millis(0),
@@ -454,6 +470,50 @@ impl BSPComplex {
         self.split_duration += start.elapsed();
     }
 
+    fn write_obj(&self, verts: &[VertexId], name: &str) {
+        let mut points = vec![0.0; verts.len() * 3];
+        for (i, &vid) in verts.iter().enumerate() {
+            match &self.points[vid] {
+                Point3D::Explicit(p) => {
+                    points[i * 3] = p[0];
+                    points[i * 3 + 1] = p[1];
+                    points[i * 3 + 2] = p[2];
+                }
+                Point3D::LPI(p) => {
+                    p.to_explicit(&mut points[i * 3..]);
+                }
+                Point3D::TPI(p) => {
+                    p.to_explicit(&mut points[i * 3..]);
+                }
+            }
+        }
+        let mut txt = "".to_owned();
+        for p in points.chunks(3) {
+            txt.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
+        }
+
+        txt.push('f');
+        for vid in 0..verts.len() {
+            txt.push_str(&format!(" {}", vid + 1));
+        }
+        txt.push('\n');
+        std::fs::write(name, txt).unwrap();
+    }
+
+    fn print_face(&self, fid: FaceId) {
+        let verts = Vec::from_iter(
+            self.mesh
+                .face(fid)
+                .halfedges()
+                .map(|hid| self.mesh.he_vertex(hid)),
+        );
+        self.write_obj(&verts, &format!("f{}.obj", fid.0));
+        for &tid in &self.face_data[fid].triangles {
+            let tri = triangle(tid, &self.constraints);
+            self.write_obj(tri, &format!("t{}.obj", tid));
+        }
+    }
+
     pub fn complex_partition(&mut self, tri_in_shell: &[usize]) {
         let mut explicit_points = vec![0.0; self.points.len() * 3];
         for (p, data) in self.points.iter().zip(explicit_points.chunks_mut(3)) {
@@ -529,19 +589,41 @@ impl BSPComplex {
                 )
             };
 
+            if fid.0 == 179262 {
+                self.print_face(fid);
+            }
+
             for &tid in face_triangles {
                 let shell_id = tri_in_shell[tid];
                 if is_black[shell_id][fid] {
                     continue;
                 }
                 let tri = triangle(tid, &self.constraints);
-                if point_in_triangle(
-                    &face_centers[fid],
-                    point(&explicit_points, *tri[0]),
-                    point(&explicit_points, *tri[1]),
-                    point(&explicit_points, *tri[2]),
-                    &bump,
-                ) {
+                let pa = point(&explicit_points, *tri[0]);
+                let pb = point(&explicit_points, *tri[1]);
+                let pc = point(&explicit_points, *tri[2]);
+
+                let axis = self.tri_orientations[tid];
+
+                let face_intersects_tri =
+                    if point_in_triangle(&face_centers[fid], pa, pb, pc, &bump) {
+                        let orientations = [
+                            orient2d_by_axis(pa, pb, &face_centers[fid], axis, &bump),
+                            orient2d_by_axis(pb, pc, &face_centers[fid], axis, &bump),
+                            orient2d_by_axis(pc, pa, &face_centers[fid], axis, &bump),
+                        ];
+                        if fid.0 == 179262 {
+                            println!("center");
+                        }
+                        vert_in_tri(&orientations)
+                    } else {
+                        self.face_intersects_tri(fid, tri, axis, &bump)
+                    };
+
+                if face_intersects_tri {
+                        if fid.0 == 179262 {
+                            println!("intersect triangle {}", tid);
+                        }
                     verts_orient_wrt_plane(
                         &self.points[tri[0]],
                         &self.points[tri[1]],
@@ -571,14 +653,14 @@ impl BSPComplex {
             }
         }
 
-        for i in 0..=self.cell_data.len() {
+        /*for i in 0..=self.cell_data.len() {
             if cell_costs_external[0][i] > 0.0 && cell_costs_internal[0][i] > 0.0 {
                 println!("here1");
             }
             if cell_costs_external[0][i] > 0.0 && cell_costs_internal[0][i] > 0.0 {
                 println!("here2");
             }
-        }
+        }*/
 
         let mut graphs = Vec::from_iter(
             cell_costs_external
@@ -622,6 +704,15 @@ impl BSPComplex {
                 c2 = self.cell_data.len();
             }
             if cell_kept[c1] ^ cell_kept[c2] {
+                if kept_faces.len() == 44997 {
+                    let verts = Vec::from_iter(
+                        self.mesh
+                            .face(fid)
+                            .halfedges()
+                            .map(|hid| self.mesh.he_vertex(hid)),
+                    );
+                    println!("f {:?} verts is {:?}", fid, verts);
+                }
                 let verts = if cell_kept[c1] {
                     let mut verts = Vec::from_iter(
                         self.mesh
@@ -819,6 +910,54 @@ impl BSPComplex {
             }
         }
         [pos_triangles, neg_triangles]
+    }
+
+    fn face_intersects_tri<A: Allocator + Copy>(
+        &self,
+        fid: FaceId,
+        tri: &[VertexId],
+        axis: usize,
+        bump: A,
+    ) -> bool {
+        let mut verts = Vec::new_in(bump);
+        verts.extend(
+            self.mesh
+                .face(fid)
+                .halfedges()
+                .map(|hid| self.mesh.he_vertex(hid)),
+        );
+        let mut orientations = Vec::with_capacity_in(verts.len(), bump);
+
+        for &vid in verts.iter() {
+            let p = &self.points[vid];
+            let mut tri_points = Vec::with_capacity_in(3, bump);
+            tri_points.extend(tri.iter().map(|&v| &self.points[v]));
+            let mut vert_orientations = Vec::with_capacity_in(3, bump);
+            vert_orientations.extend(tri_points.into_iter().circular_tuple_windows().map(|(pa, pb)|
+                orient2d::orient2d_by_axis(pa, pb, p, axis, bump)
+            ));
+            if vert_in_tri(&vert_orientations) {
+                return true;
+            }
+            orientations.push(vert_orientations);
+        }
+        for (i, j) in (0..verts.len()).circular_tuple_windows() {
+            for k in 0..3 {
+                if sign_reversed(orientations[i][k], orientations[j][k]) {
+                    let pa = &self.points[verts[i]];
+                    let pb = &self.points[verts[j]];
+                    let pc = &self.points[tri[k]];
+                    let pd = &self.points[tri[(k + 1) % 3]];
+                    if sign_reversed(
+                        orient2d::orient2d_by_axis(pa, pb, pc, axis, bump),
+                        orient2d::orient2d_by_axis(pa, pb, pd, axis, bump),
+                    ) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 }
 
@@ -1119,4 +1258,22 @@ fn face_center(points: &[f64], verts: &[VertexId]) -> [f64; 3] {
         result[2] += p[2] / verts.len() as f64;
     }
     result
+}
+
+#[inline(always)]
+fn vert_in_tri(orientations: &[Orientation]) -> bool {
+    let mut not_zero = Orientation::Undefined;
+    for &ori in orientations {
+        match ori {
+            Orientation::Positive | Orientation::Negative => {
+                if not_zero == Orientation::Undefined {
+                    not_zero = ori;
+                } else if not_zero != ori {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+    }
+    true
 }

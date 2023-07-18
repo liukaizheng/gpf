@@ -1,7 +1,7 @@
 mod expansion_number;
 mod generic_point;
 mod interval_number;
-mod orient2d;
+pub mod orient2d;
 pub mod orient3d;
 mod predicates;
 
@@ -540,4 +540,25 @@ pub fn point_in_triangle<A: Allocator + Copy>(
         || point_in_segment(p, v2, v3, allocator)
         || point_in_segment(p, v3, v1, allocator)
         || point_in_inner_triangle(p, v1, v2, v3, allocator);
+}
+
+#[inline(always)]
+pub fn orient2d_by_axis<A: Allocator + Copy>(
+    pa: &[f64],
+    pb: &[f64],
+    pc: &[f64],
+    axis: usize,
+    bump: A,
+) -> Orientation {
+    let ori = if axis == 0 {
+        orient2d(&pa[1..], &pb[1..], &pc[1..], bump)
+    } else if axis == 1 {
+        let pa = [pa[2], pa[0]];
+        let pb = [pb[2], pb[0]];
+        let pc = [pc[2], pc[0]];
+        orient2d(&pa, &pb, &pc, bump)
+    } else {
+        orient2d(pa, pb, pc, bump)
+    };
+    double_to_sign(-ori)
 }

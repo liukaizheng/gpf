@@ -5,6 +5,23 @@ use super::{
     ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI, Orientation, Point3D,
 };
 
+#[inline(always)]
+pub fn orient2d_by_axis<A: Allocator + Copy>(
+    pa: &Point3D,
+    pb: &Point3D,
+    pc: &Point3D,
+    axis: usize,
+    bump: A,
+) -> Orientation {
+    if axis == 0 {
+        orient2d_yz(pa, pb, pc, bump)
+    } else if axis == 1 {
+        orient2d_zx(pa, pb, pc, bump)
+    } else {
+        orient2d_xy(pa, pb, pc, bump)
+    }
+}
+
 /// Compute the orientation of the 3D points `pa`, `pb` and `pc`.
 /// If `pc` is above the line defined by `pa` and `pb`, then the
 /// orientation is negative. If `pc` is below the line, then the
@@ -18,7 +35,7 @@ pub fn orient2d_xy<A: Allocator + Copy>(
 ) -> Orientation {
     match (pa, pb, pc) {
         (Point3D::Explicit(pa), Point3D::Explicit(pb), Point3D::Explicit(pc)) => {
-            double_to_sign(predicates::orient2d(pa, pb, pc, bump))
+            double_to_sign(-predicates::orient2d(pa, pb, pc, bump))
         }
         (Point3D::Explicit(pa), Point3D::Explicit(pb), Point3D::LPI(pc)) => {
             orient2d_lee_xy(pc, pa, pb, bump)
@@ -94,7 +111,7 @@ pub fn orient2d_zx<A: Allocator + Copy>(
 ) -> Orientation {
     match (pa, pb, pc) {
         (Point3D::Explicit(pa), Point3D::Explicit(pb), Point3D::Explicit(pc)) => {
-            double_to_sign(predicates::orient2d(
+            double_to_sign(-predicates::orient2d(
                 &[pa.data[2], pa.data[0]],
                 &[pb.data[2], pb.data[0]],
                 &[pc.data[2], pc.data[0]],
@@ -175,7 +192,7 @@ pub fn orient2d_yz<A: Allocator + Copy>(
 ) -> Orientation {
     match (pa, pb, pc) {
         (Point3D::Explicit(pa), Point3D::Explicit(pb), Point3D::Explicit(pc)) => {
-            double_to_sign(predicates::orient2d(&pa[1..], &pb[1..], &pc[1..], bump))
+            double_to_sign(-predicates::orient2d(&pa[1..], &pb[1..], &pc[1..], bump))
         }
         (Point3D::Explicit(pa), Point3D::Explicit(pb), Point3D::LPI(pc)) => {
             orient2d_lee_yz(pc, pa, pb, bump)
