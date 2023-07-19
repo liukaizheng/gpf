@@ -35,7 +35,7 @@ pub fn orient2d_xy<A: Allocator + Copy>(
 ) -> Orientation {
     match (pa, pb, pc) {
         (Point3D::Explicit(pa), Point3D::Explicit(pb), Point3D::Explicit(pc)) => {
-            double_to_sign(-predicates::orient2d(pa, pb, pc, bump))
+            double_to_sign(predicates::orient2d(pa, pb, pc, bump))
         }
         (Point3D::Explicit(pa), Point3D::Explicit(pb), Point3D::LPI(pc)) => {
             orient2d_lee_xy(pc, pa, pb, bump)
@@ -111,7 +111,7 @@ pub fn orient2d_zx<A: Allocator + Copy>(
 ) -> Orientation {
     match (pa, pb, pc) {
         (Point3D::Explicit(pa), Point3D::Explicit(pb), Point3D::Explicit(pc)) => {
-            double_to_sign(-predicates::orient2d(
+            double_to_sign(predicates::orient2d(
                 &[pa.data[2], pa.data[0]],
                 &[pb.data[2], pb.data[0]],
                 &[pc.data[2], pc.data[0]],
@@ -192,7 +192,7 @@ pub fn orient2d_yz<A: Allocator + Copy>(
 ) -> Orientation {
     match (pa, pb, pc) {
         (Point3D::Explicit(pa), Point3D::Explicit(pb), Point3D::Explicit(pc)) => {
-            double_to_sign(-predicates::orient2d(&pa[1..], &pb[1..], &pc[1..], bump))
+            double_to_sign(predicates::orient2d(&pa[1..], &pb[1..], &pc[1..], bump))
         }
         (Point3D::Explicit(pa), Point3D::Explicit(pb), Point3D::LPI(pc)) => {
             orient2d_lee_yz(pc, pa, pb, bump)

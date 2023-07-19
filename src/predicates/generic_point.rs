@@ -8,7 +8,7 @@ use super::{
     abs_max, dummy_abs_max, estimate, get_exponent, ExpansionNum, GenericNum, IntervalNumber,
 };
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct ExplicitPoint3D {
     pub data: [f64; 3],
 }

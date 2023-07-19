@@ -16,7 +16,7 @@ pub use interval_number::*;
 pub use orient2d::*;
 pub use predicates::*;
 
-#[derive(PartialEq, Eq, Clone, Copy, Hash)]
+#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
 pub enum Orientation {
     Positive,
     Negative,
