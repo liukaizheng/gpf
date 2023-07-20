@@ -11,7 +11,7 @@ use crate::{
     disjoint_set::DisjointSet,
     graphcut::GraphCut,
     math::{cross, norm, sub},
-    mesh::{EdgeId, Face, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
+    mesh::{EdgeId, ElementId, Face, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
         max_comp_in_tri_normal, orient2d, orient2d_by_axis, orient3d::orient3d, sign_reversed,
         ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI, Orientation, Point3D,
@@ -169,7 +169,7 @@ impl BSPComplex {
                         adj_cell_idx,
                         Vec::new(),
                         [tri[0].into(), tri[1].into(), tri[2].into()],
-                        tid,
+                        face_data.len(),
                     );
                     faces.push(tri);
                     insert_coplanar_triangles(
@@ -647,7 +647,6 @@ impl BSPComplex {
             }
         }
 
-        let mut kept_face_verts = Vec::new();
         let mut kept_faces = vec![0; self.face_data.len()];
         for fid in self.mesh.faces() {
             let [c1, mut c2] = self.face_data[fid].cells;
@@ -661,27 +660,9 @@ impl BSPComplex {
                 } else {
                     kept_faces[fid] = 1;
                 }
-                let verts = if cell_kept[c1] {
-                    let mut verts = Vec::from_iter(
-                        self.mesh
-                            .face(fid)
-                            .halfedges()
-                            .map(|hid| self.mesh.he_vertex(hid).0),
-                    );
-                    verts.reverse();
-                    verts
-                } else {
-                    Vec::from_iter(
-                        self.mesh
-                            .face(fid)
-                            .halfedges()
-                            .map(|hid| self.mesh.he_vertex(hid).0),
-                    )
-                };
-                kept_face_verts.push(verts);
             }
         }
-        self.merge_faces(kept_faces);
+        let kept_face_verts = Vec::from_iter(self.merge_faces(kept_faces).into_iter().flatten());
 
         let mut txt = "".to_owned();
         for p in explicit_points.chunks(3) {
@@ -690,14 +671,14 @@ impl BSPComplex {
         for face in &kept_face_verts {
             txt.push('f');
             for &vid in face {
-                txt.push_str(&format!(" {}", vid + 1));
+                txt.push_str(&format!(" {}", vid.0 + 1));
             }
             txt.push('\n');
         }
         std::fs::write("123.obj", txt).unwrap();
     }
 
-    fn merge_faces(&self, kept_faces: Vec<i32>) {
+    fn merge_faces(&self, kept_faces: Vec<i32>) -> Vec<Vec<Vec<VertexId>>> {
         let mut edge_faces = vec![Vec::new(); self.edge_data.len()];
         let mut f_old_to_new = vec![INVALID_IND; self.face_data.len()];
         let mut f_new_to_old = Vec::new();
@@ -725,8 +706,14 @@ impl BSPComplex {
         println!("now faces num is {}", ds.n_groups);
 
         let mut bump = Bump::new();
-        for indices in ds.output().into_values() {
-            let mut edge_map = HashMap::<EdgeId, i32>::new();
+        let mut edge_groups = Vec::new();
+        let mut edge_in_group = vec![INVALID_IND; self.edge_data.len()];
+
+        Vec::from_iter(ds.output().into_values().map(|indices| {
+            bump.reset();
+            let mut edge_map = HashMap::<EdgeId, i32, _, _>::new_in(&bump);
+            let mut tid = INVALID_IND;
+            let mut base_fid = FaceId::new();
             for fid in indices.into_iter().map(|idx| f_new_to_old[idx]) {
                 for hid in self.mesh.face(fid).halfedges() {
                     let eid = self.mesh.he_edge(hid);
@@ -736,6 +723,12 @@ impl BSPComplex {
                         } else {
                             1
                         };
+                }
+                if !base_fid.valid() {
+                    base_fid = fid;
+                }
+                if tid == INVALID_IND && !self.face_data[fid].triangles.is_empty() {
+                    tid = self.face_data[fid].triangles[0];
                 }
             }
             let halfedges = Vec::from_iter(edge_map.into_iter().filter_map(|(eid, count)| {
@@ -749,13 +742,37 @@ impl BSPComplex {
                     }
                 }
             }));
-            bump.reset();
-            self.extract_outlines(halfedges, &bump);
-        }
+
+            let axis = if tid != INVALID_IND {
+                self.tri_orientations[tid]
+            } else {
+                let [pa, pb, pc] = self.face_data[base_fid]
+                    .plane
+                    .map(|vid| self.points[vid].explicit().unwrap());
+                max_comp_in_tri_normal(pa, pb, pc, &bump)
+            };
+
+            self.extract_outlines(
+                halfedges,
+                &mut edge_groups,
+                &mut edge_in_group,
+                &edge_faces,
+                axis,
+                &bump,
+            )
+        }))
     }
 
-    fn extract_outlines<A: Allocator + Copy>(&self, halfedges: Vec<(EdgeId, bool)>, bump: A) {
-        let mut outlines = Vec::new_in(bump);
+    fn extract_outlines<A: Allocator + Copy>(
+        &self,
+        halfedges: Vec<(EdgeId, bool)>,
+        edge_groups: &mut Vec<EdgeGroup>,
+        edge_in_group: &mut [usize],
+        edge_faces: &[Vec<FaceId>],
+        axis: usize,
+        bump: A,
+    ) -> Vec<Vec<VertexId>> {
+        let mut outlines = Vec::new();
         let mut vert_out_edge_map = HashMap::<VertexId, usize, _, _>::new_in(bump);
         for (i, &(eid, reversed)) in halfedges.iter().enumerate() {
             let [ea, eb] = self.mesh.e_vertices(eid);
@@ -785,20 +802,55 @@ impl BSPComplex {
                 visisted[next_hid] = true;
                 outline.push(halfedges[next_hid]);
             }
-            outlines.push(outline);
+            outlines.push(self.merge_colinear_edges(
+                outline,
+                edge_groups,
+                edge_in_group,
+                edge_faces,
+                axis,
+                bump,
+            ));
         }
+        outlines
     }
 
-    fn merge_colinear_edges(
+    fn merge_colinear_edges<A: Allocator + Copy>(
         &self,
         outline: Vec<(EdgeId, bool)>,
         edge_groups: &mut Vec<EdgeGroup>,
         edge_in_group: &mut [usize],
-    ) {
+        edge_faces: &[Vec<FaceId>],
+        axis: usize,
+        bump: A,
+    ) -> Vec<VertexId> {
         enum Edge {
             Edges(Vec<(EdgeId, bool)>),
             Group((usize, bool)),
         }
+        let end_vertex = |he: &(EdgeId, bool)| {
+            if he.1 {
+                self.mesh.he_vertex(self.mesh.e_halfedge(he.0))
+            } else {
+                self.mesh.he_tip_vertex(self.mesh.e_halfedge(he.0))
+            }
+        };
+
+        let colinear = |ha: &(EdgeId, bool), hb: &(EdgeId, bool)| {
+            let ea = ha.0;
+            let eb = hb.0;
+            if edge_faces[ea] != edge_faces[eb] {
+                return false;
+            }
+
+            if self.edge_data[ha.0].id == self.edge_data[hb.0].id {
+                return true;
+            }
+
+            let [va, vb] = self.mesh.e_vertices(ea);
+            let vc = end_vertex(hb);
+            let [pa, pb, pc] = [va, vb, vc].map(|vid| &self.points[vid]);
+            orient2d::orient2d_by_axis(pa, pb, pc, axis, bump) == Orientation::Zero
+        };
         let start_idx = outline
             .iter()
             .position(|he| edge_in_group[he.0] == INVALID_IND);
@@ -829,9 +881,36 @@ impl BSPComplex {
                         halfedges.push(Edge::Group((group_id, true)));
                     }
                 } else {
-                    cur_group.push(he.clone());
+                    if let Some(prev) = cur_group.last() {
+                        if colinear(prev, he) {
+                            cur_group.push(he.clone());
+                        } else {
+                            halfedges.push(Edge::Edges(cur_group));
+                            cur_group = vec![he.clone()];
+                        }
+                    } else {
+                        cur_group.push(he.clone());
+                    }
                 }
             }
+            if !cur_group.is_empty() {
+                if let Edge::Edges(first_group) = &halfedges[0] {
+                    if colinear(cur_group.last().unwrap(), &first_group[0]) {
+                        cur_group.extend(first_group);
+                        halfedges[0] = Edge::Edges(cur_group);
+                    } else {
+                        halfedges.push(Edge::Edges(cur_group));
+                    }
+                }
+            }
+            Vec::from_iter(halfedges.into_iter().map(|ele| match ele {
+                Edge::Edges(edges) => {
+                    let group_id = edge_groups.len();
+                    edge_groups.push(EdgeGroup::new(edges));
+                    (group_id, false)
+                }
+                Edge::Group(group) => group,
+            }))
         } else {
             let mut halfedges = Vec::<(usize, bool)>::new();
             for (eid, reversed) in outline {
@@ -852,7 +931,18 @@ impl BSPComplex {
             if halfedges.first().unwrap().0 == halfedges.last().unwrap().0 {
                 halfedges.pop();
             }
+            halfedges
         };
+
+        Vec::from_iter(halfedges.into_iter().map(|(group_id, reversed)| {
+            let group = &edge_groups[group_id];
+            if reversed {
+                let (eid, reversed) = group.edges[0];
+                end_vertex(&(eid, !reversed))
+            } else {
+                end_vertex(group.edges.last().unwrap())
+            }
+        }))
     }
 
     #[inline(always)]
@@ -1115,6 +1205,7 @@ impl BSPComplex {
         if fa_data.id == fb_data.id {
             return true;
         }
+
         if !fa_data.triangles.is_empty() && !fb_data.triangles.is_empty() {
             if fa_data
                 .triangles
