@@ -13,9 +13,8 @@ use crate::{
     math::{cross, norm, sub},
     mesh::{EdgeId, Face, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
-        max_comp_in_tri_normal, orient2d, orient2d_by_axis, orient3d::orient3d, point_in_triangle,
-        sign_reversed, ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
-        Orientation, Point3D,
+        max_comp_in_tri_normal, orient2d, orient2d_by_axis, orient3d::orient3d, sign_reversed,
+        ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI, Orientation, Point3D,
     },
     triangle::TetMesh,
     INVALID_IND,
@@ -531,9 +530,9 @@ impl BSPComplex {
                 }
             }
         }
-        for &fid in &self.cell_data[33126].faces {
+        /*for &fid in &self.cell_data[33126].faces {
             self.print_face(fid);
-        }
+        }*/
         let mut bump = Bump::new();
         let (face_areas, face_centers) = {
             let mut areas = Vec::with_capacity(self.face_data.len());
@@ -660,6 +659,29 @@ impl BSPComplex {
             }
         }
 
+        for cost in &mut cell_costs_external {
+            for c in cost {
+                if *c > 0.0 {
+                    *c = 1.0;
+                }
+            }
+        }
+        for cost in &mut cell_costs_internal {
+            for c in cost {
+                if *c > 0.0 {
+                    *c = 1.0;
+                }
+            }
+        }
+
+        let mut g = G::new();
+        g.external = cell_costs_external[0].clone();
+        g.internal = cell_costs_internal[0].clone();
+        *g.internal.last_mut().unwrap() = 1.0;
+
+        println!("external cost {}", cell_costs_external[0][33126]);
+        println!("internal cost {}", cell_costs_internal[0][33126]);
+
         for i in 0..=self.cell_data.len() {
             if cell_costs_external[0][i] > 0.0 && cell_costs_internal[0][i] > 0.0 {
                 println!("bad {} cell", i);
@@ -684,19 +706,23 @@ impl BSPComplex {
         println!("the ori flow is {}", graphs[0].flow);
 
         for fid in self.mesh.faces() {
-            if self.face_data[fid].triangles.is_empty() {
-                let [c1, mut c2] = self.face_data[fid].cells;
-                if c2 == INVALID_IND {
-                    c2 = self.cell_data.len();
-                }
+            let [c1, mut c2] = self.face_data[fid].cells;
+            if c2 == INVALID_IND {
+                c2 = self.cell_data.len();
+            }
 
-                for shell_id in 0..n_shells {
-                    if !is_black[shell_id][fid] {
-                        graphs[shell_id].add_edge(c1, c2, face_areas[fid], face_areas[fid]);
-                    }
+            for shell_id in 0..n_shells {
+                if !is_black[shell_id][fid] {
+                    // graphs[shell_id].add_edge(c1, c2, face_areas[fid], face_areas[fid]);
+                    graphs[shell_id].add_edge(c1, c2, 1.0, 1.0);
+                    g.edges.push(Edge::new(c1, c2, 1.0));
                 }
             }
         }
+
+        let gj = serde_json::to_string(&g).unwrap();
+        std::fs::write("123.json", gj).unwrap();
+
         println!("0 is sink {}", graphs[0].is_sink[33126]);
         println!("1 is sink {}", graphs[1].is_sink[33126]);
         // let mut cell_kept = vec![false; self.cell_data.len() + 1];
@@ -708,7 +734,23 @@ impl BSPComplex {
                 cell_kept[cid] &= !graph.is_sink[cid];
             }
         }
+        for cid in 0..self.cell_data.len() {
+            cell_kept[cid] = !graphs[0].is_sink[cid];
+        }
         println!("the after flow is {}", graphs[0].flow);
+
+        for &fid in &self.cell_data[33126].faces {
+            let cells = &self.face_data[fid].cells;
+            let cid = if cells[0] == 33126 {
+                cells[1]
+            } else {
+                cells[0]
+            };
+            println!(
+                "fid {}, black {}, the cell {} is sink {}",
+                fid.0, is_black[0][fid], cid, graphs[0].is_sink[cid]
+            );
+        }
 
         let mut kept_faces = Vec::new();
         for fid in self.mesh.faces() {
@@ -717,7 +759,7 @@ impl BSPComplex {
                 c2 = self.cell_data.len();
             }
             if cell_kept[c1] ^ cell_kept[c2] {
-                if kept_faces.len() == 168 {
+                if fid.0 == 109137 {
                     let verts = Vec::from_iter(
                         self.mesh
                             .face(fid)
