@@ -83,6 +83,11 @@ pub trait Mesh: Sized {
     /// the first halfedge of the face
     fn f_halfedge(&self, fid: FaceId) -> HalfedgeId;
 
+    #[inline(always)]
+    fn eh_same_dir(&self, eid: EdgeId, hid: HalfedgeId) -> bool {
+        self.he_vertex(hid) == self.he_vertex(self.e_halfedge(eid))
+    }
+
     fn use_implicit_twin(&self) -> bool;
     /// add vertices data
     fn add_vertices_data<T: Clone + 'static>(&mut self, data: Weak<RefCell<VertexData<T, Self>>>);
