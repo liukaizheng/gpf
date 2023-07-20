@@ -1,4 +1,4 @@
-use gpf::{polygonlization::make_polyhedra_mesh, predicates::ExpansionNum, graphcut::{self, GraphCut}};
+use gpf::{polygonlization::make_polyhedra_mesh};
 use serde::Deserialize;
 
 #[allow(non_snake_case)]
@@ -18,18 +18,6 @@ fn make_two_dim_arr<T: Clone>(arr: &[T], separators: &[usize]) -> Vec<Vec<T>> {
             .into_iter()
             .map(|a| Vec::from_iter(arr[a[0]..a[1]].iter().map(|t| t.clone()))),
     )
-}
-
-#[test]
-fn test_max_flow() {
-    let f = std::fs::File::open("tests/data/flow.json").expect("should open file");
-    let reader = std::io::BufReader::new(f);
-    let data = serde_json::from_reader::<_, gpf::polygonlization::bsp_complex::G>(reader).expect("parse");
-    let mut graphcut = GraphCut::new(&data.external, &data.internal);
-    for e in &data.edges {
-        graphcut.add_edge(e.e[0], e.e[1], e.w, e.w);
-    }
-    let flow = graphcut.max_flow();
 }
 
 #[test]

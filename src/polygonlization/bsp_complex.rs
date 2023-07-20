@@ -6,7 +6,6 @@ use std::{
 use bumpalo::Bump;
 use hashbrown::HashMap;
 use itertools::Itertools;
-use serde::{Deserialize, Serialize};
 
 use crate::{
     graphcut::GraphCut,
@@ -41,35 +40,6 @@ struct BSPEdgeData {
 impl BSPEdgeData {
     fn new(parents: Vec<VertexId>) -> Self {
         Self { parents }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct Edge {
-    pub e: [usize; 2],
-    pub w: f64,
-}
-
-impl Edge {
-    pub fn new(a: usize, b: usize, w: f64) -> Self {
-        Self { e: [a, b], w }
-    }
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct G {
-    pub external: Vec<f64>,
-    pub internal: Vec<f64>,
-    pub edges: Vec<Edge>,
-}
-
-impl G {
-    pub fn new() -> Self {
-        Self {
-            external: Vec::new(),
-            internal: Vec::new(),
-            edges: Vec::new(),
-        }
     }
 }
 
@@ -469,50 +439,6 @@ impl BSPComplex {
         self.split_duration += start.elapsed();
     }
 
-    fn write_obj(&self, verts: &[VertexId], name: &str) {
-        let mut points = vec![0.0; verts.len() * 3];
-        for (i, &vid) in verts.iter().enumerate() {
-            match &self.points[vid] {
-                Point3D::Explicit(p) => {
-                    points[i * 3] = p[0];
-                    points[i * 3 + 1] = p[1];
-                    points[i * 3 + 2] = p[2];
-                }
-                Point3D::LPI(p) => {
-                    p.to_explicit(&mut points[i * 3..]);
-                }
-                Point3D::TPI(p) => {
-                    p.to_explicit(&mut points[i * 3..]);
-                }
-            }
-        }
-        let mut txt = "".to_owned();
-        for p in points.chunks(3) {
-            txt.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
-        }
-
-        txt.push('f');
-        for vid in 0..verts.len() {
-            txt.push_str(&format!(" {}", vid + 1));
-        }
-        txt.push('\n');
-        std::fs::write(name, txt).unwrap();
-    }
-
-    fn print_face(&self, fid: FaceId) {
-        let verts = Vec::from_iter(
-            self.mesh
-                .face(fid)
-                .halfedges()
-                .map(|hid| self.mesh.he_vertex(hid)),
-        );
-        self.write_obj(&verts, &format!("f{}.obj", fid.0));
-        for &tid in &self.face_data[fid].triangles {
-            let tri = triangle(tid, &self.constraints);
-            self.write_obj(tri, &format!("t{}.obj", tid));
-        }
-    }
-
     pub fn complex_partition(&mut self, tri_in_shell: &[usize]) {
         let mut explicit_points = vec![0.0; self.points.len() * 3];
         for (p, data) in self.points.iter().zip(explicit_points.chunks_mut(3)) {
@@ -530,9 +456,6 @@ impl BSPComplex {
                 }
             }
         }
-        /*for &fid in &self.cell_data[33126].faces {
-            self.print_face(fid);
-        }*/
         let mut bump = Bump::new();
         let (face_areas, face_centers) = {
             let mut areas = Vec::with_capacity(self.face_data.len());
@@ -624,12 +547,6 @@ impl BSPComplex {
                 };
 
                 if face_intersects_tri {
-                    if face_data.cells[0] == 33126 || face_data.cells[1] == 33126 {
-                        println!(
-                            "the fid is {:?} and tid is {} and shell id is {}",
-                            fid, tid, tri_in_shell[tid]
-                        );
-                    }
                     verts_orient_wrt_plane(
                         &self.points[tri[0]],
                         &self.points[tri[1]],
@@ -659,40 +576,6 @@ impl BSPComplex {
             }
         }
 
-        for cost in &mut cell_costs_external {
-            for c in cost {
-                if *c > 0.0 {
-                    *c = 1.0;
-                }
-            }
-        }
-        for cost in &mut cell_costs_internal {
-            for c in cost {
-                if *c > 0.0 {
-                    *c = 1.0;
-                }
-            }
-        }
-
-        let mut g = G::new();
-        g.external = cell_costs_external[0].clone();
-        g.internal = cell_costs_internal[0].clone();
-        *g.internal.last_mut().unwrap() = 1.0;
-
-        println!("external cost {}", cell_costs_external[0][33126]);
-        println!("internal cost {}", cell_costs_internal[0][33126]);
-
-        for i in 0..=self.cell_data.len() {
-            if cell_costs_external[0][i] > 0.0 && cell_costs_internal[0][i] > 0.0 {
-                println!("bad {} cell", i);
-                break;
-            }
-            if cell_costs_external[1][i] > 0.0 && cell_costs_internal[1][i] > 0.0 {
-                println!("bad {} cell", i);
-                break;
-            }
-        }
-
         let mut graphs = Vec::from_iter(
             cell_costs_external
                 .into_iter()
@@ -703,8 +586,6 @@ impl BSPComplex {
                 }),
         );
 
-        println!("the ori flow is {}", graphs[0].flow);
-
         for fid in self.mesh.faces() {
             let [c1, mut c2] = self.face_data[fid].cells;
             if c2 == INVALID_IND {
@@ -713,18 +594,11 @@ impl BSPComplex {
 
             for shell_id in 0..n_shells {
                 if !is_black[shell_id][fid] {
-                    // graphs[shell_id].add_edge(c1, c2, face_areas[fid], face_areas[fid]);
-                    graphs[shell_id].add_edge(c1, c2, 1.0, 1.0);
-                    g.edges.push(Edge::new(c1, c2, 1.0));
+                    graphs[shell_id].add_edge(c1, c2, face_areas[fid], face_areas[fid]);
                 }
             }
         }
 
-        let gj = serde_json::to_string(&g).unwrap();
-        std::fs::write("123.json", gj).unwrap();
-
-        println!("0 is sink {}", graphs[0].is_sink[33126]);
-        println!("1 is sink {}", graphs[1].is_sink[33126]);
         // let mut cell_kept = vec![false; self.cell_data.len() + 1];
         let mut cell_kept = vec![true; self.cell_data.len() + 1];
         *cell_kept.last_mut().unwrap() = false;
@@ -734,23 +608,6 @@ impl BSPComplex {
                 cell_kept[cid] &= !graph.is_sink[cid];
             }
         }
-        for cid in 0..self.cell_data.len() {
-            cell_kept[cid] = !graphs[0].is_sink[cid];
-        }
-        println!("the after flow is {}", graphs[0].flow);
-
-        for &fid in &self.cell_data[33126].faces {
-            let cells = &self.face_data[fid].cells;
-            let cid = if cells[0] == 33126 {
-                cells[1]
-            } else {
-                cells[0]
-            };
-            println!(
-                "fid {}, black {}, the cell {} is sink {}",
-                fid.0, is_black[0][fid], cid, graphs[0].is_sink[cid]
-            );
-        }
 
         let mut kept_faces = Vec::new();
         for fid in self.mesh.faces() {
@@ -758,18 +615,8 @@ impl BSPComplex {
             if c2 == INVALID_IND {
                 c2 = self.cell_data.len();
             }
+
             if cell_kept[c1] ^ cell_kept[c2] {
-                if fid.0 == 109137 {
-                    let verts = Vec::from_iter(
-                        self.mesh
-                            .face(fid)
-                            .halfedges()
-                            .map(|hid| self.mesh.he_vertex(hid)),
-                    );
-                    println!("f {:?} verts is {:?}", fid, verts);
-                    println!("the cell1 is {}, {}", c1, cell_kept[c1]);
-                    println!("the cell2 is {}, {}", c2, cell_kept[c2]);
-                }
                 let verts = if cell_kept[c1] {
                     let mut verts = Vec::from_iter(
                         self.mesh
