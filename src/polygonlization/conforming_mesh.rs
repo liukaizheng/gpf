@@ -359,7 +359,7 @@ fn triangle_at_tet(mesh: &mut TetMesh, tri: &[usize], bump: &Bump) -> TriFace {
                 break;
             }
             let nei = mesh.tets[tid].nei[i].tet;
-            if mesh.is_hull_tet(nei) && !mesh.mark_tested(nei) {
+            if !mesh.is_hull_tet(nei) && !mesh.mark_tested(nei) {
                 mesh.mark_test(nei);
                 tets.push(nei);
             }

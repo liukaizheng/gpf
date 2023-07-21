@@ -9,6 +9,7 @@ use itertools::Itertools;
 
 use crate::{
     disjoint_set::DisjointSet,
+    face_area_2d,
     graphcut::GraphCut,
     math::{cross, norm, sub},
     mesh::{EdgeId, ElementId, Face, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
@@ -16,7 +17,7 @@ use crate::{
         max_comp_in_tri_normal, orient2d, orient2d_by_axis, orient3d::orient3d, sign_reversed,
         ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI, Orientation, Point3D,
     },
-    triangle::TetMesh,
+    triangle::{triangulate, TetMesh},
     INVALID_IND,
 };
 
@@ -35,16 +36,6 @@ impl EdgeGroup {
     #[inline(always)]
     fn position(&self, eid: EdgeId) -> usize {
         self.edges.iter().rposition(|he| he.0 == eid).unwrap()
-    }
-
-    #[inline(always)]
-    fn va(&self, mesh: &SurfaceMesh) -> VertexId {
-        let hid = mesh.e_halfedge(self.edges[0].0);
-        if self.edges[0].1 {
-            mesh.he_tip_vertex(hid)
-        } else {
-            mesh.he_vertex(hid)
-        }
     }
 }
 
@@ -477,7 +468,7 @@ impl BSPComplex {
         self.split_duration += start.elapsed();
     }
 
-    pub fn complex_partition(&mut self, tri_in_shell: &[usize]) {
+    pub fn complex_partition(&mut self, tri_in_shell: &[usize]) -> (Vec<f64>, Vec<usize>) {
         let mut explicit_points = vec![0.0; self.points.len() * 3];
         for (p, data) in self.points.iter().zip(explicit_points.chunks_mut(3)) {
             match p {
@@ -637,13 +628,13 @@ impl BSPComplex {
             }
         }
 
-        // let mut cell_kept = vec![false; self.cell_data.len() + 1];
-        let mut cell_kept = vec![true; self.cell_data.len() + 1];
-        *cell_kept.last_mut().unwrap() = false;
+        let mut cell_kept = vec![false; self.cell_data.len() + 1];
+        // let mut cell_kept = vec![true; self.cell_data.len() + 1];
+        // *cell_kept.last_mut().unwrap() = false;
         for graph in &mut graphs {
             graph.max_flow();
             for cid in 0..self.cell_data.len() {
-                cell_kept[cid] &= !graph.is_sink[cid];
+                cell_kept[cid] |= !graph.is_sink[cid];
             }
         }
 
@@ -662,23 +653,65 @@ impl BSPComplex {
                 }
             }
         }
-        let kept_face_verts = Vec::from_iter(self.merge_faces(kept_faces).into_iter().flatten());
 
-        let mut txt = "".to_owned();
-        for p in explicit_points.chunks(3) {
-            txt.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
-        }
-        for face in &kept_face_verts {
-            txt.push('f');
-            for &vid in face {
-                txt.push_str(&format!(" {}", vid.0 + 1));
+        fn project_point(p: &[f64], axis: usize) -> [f64; 2] {
+            if axis == 0 {
+                [p[1], p[2]]
+            } else if axis == 1 {
+                [p[2], p[0]]
+            } else {
+                [p[0], p[1]]
             }
-            txt.push('\n');
         }
-        std::fs::write("123.obj", txt).unwrap();
+        let mut out_points = Vec::<f64>::new();
+        let mut triangles = Vec::new();
+        let mut v_old_to_new = vec![INVALID_IND; self.vertex_data.len()];
+
+        for (face_verts, axis) in self.merge_faces(kept_faces) {
+            bump.reset();
+            let n_faces_verts = face_verts.iter().flatten().count();
+            let mut points_2d = Vec::with_capacity_in(n_faces_verts << 1, &bump);
+            let mut face_new_verts = Vec::with_capacity_in(n_faces_verts, &bump);
+            for face_loop in &face_verts {
+                for &vid in face_loop {
+                    let mut new_vid = v_old_to_new[vid];
+                    if new_vid == INVALID_IND {
+                        new_vid = out_points.len() / 3;
+                        v_old_to_new[vid] = new_vid;
+                        out_points.extend(point(&explicit_points, vid.0));
+                    }
+                    points_2d.extend(project_point(point(&out_points, new_vid), axis));
+                    face_new_verts.push(new_vid);
+                }
+            }
+            if face_new_verts.len() == 3 {
+                triangles.extend(face_new_verts);
+                continue;
+            }
+            let out_loop_area = face_area_2d(&points_2d[..(face_verts[0].len() << 1)]);
+            if out_loop_area < 0.0 {
+                for p in points_2d.chunks_mut(2) {
+                    p.swap(0, 1);
+                }
+            }
+            let segments = Vec::from_iter(
+                face_verts
+                    .into_iter()
+                    .map(|face_loop| {
+                        (0..face_loop.len())
+                            .circular_tuple_windows()
+                            .map(|(a, b)| [a, b])
+                            .flatten()
+                    })
+                    .flatten(),
+            );
+            let face_triangles = triangulate(&points_2d, &segments, &bump);
+            triangles.extend(face_triangles.into_iter().map(|idx| face_new_verts[idx]));
+        }
+        (out_points, triangles)
     }
 
-    fn merge_faces(&self, kept_faces: Vec<i32>) -> Vec<Vec<Vec<VertexId>>> {
+    fn merge_faces(&self, kept_faces: Vec<i32>) -> Vec<(Vec<Vec<VertexId>>, usize)> {
         let mut edge_faces = vec![Vec::new(); self.edge_data.len()];
         let mut f_old_to_new = vec![INVALID_IND; self.face_data.len()];
         let mut f_new_to_old = Vec::new();
@@ -693,23 +726,34 @@ impl BSPComplex {
         }
 
         let mut ds = DisjointSet::new(f_new_to_old.len());
-        println!("original faces num is {}", ds.n_groups);
         for eid in self.mesh.edges() {
             let faces = &mut edge_faces[eid];
-            faces.sort_unstable_by_key(|fid| fid.0);
             if faces.len() == 2 {
                 if self.on_the_same_plane(faces[0], faces[1]) {
                     ds.merge(f_old_to_new[faces[0]], f_old_to_new[faces[1]]);
                 }
             }
         }
-        println!("now faces num is {}", ds.n_groups);
 
         let mut bump = Bump::new();
         let mut edge_groups = Vec::new();
         let mut edge_in_group = vec![INVALID_IND; self.edge_data.len()];
 
-        Vec::from_iter(ds.output().into_values().map(|indices| {
+        let group_map = ds.output();
+        let mut face_in_group = vec![INVALID_IND; self.face_data.len()];
+        for (&id, new_faces) in &group_map {
+            for &new_fid in new_faces {
+                face_in_group[f_new_to_old[new_fid]] = id;
+            }
+        }
+        let edge_face_groups = Vec::from_iter(edge_faces.into_iter().map(|faces| {
+            let mut groups = Vec::from_iter(faces.into_iter().map(|fid| face_in_group[fid]));
+            groups.sort_unstable();
+            groups.dedup();
+            groups
+        }));
+
+        Vec::from_iter(group_map.into_values().map(|indices| {
             bump.reset();
             let mut edge_map = HashMap::<EdgeId, i32, _, _>::new_in(&bump);
             let mut tid = INVALID_IND;
@@ -752,13 +796,16 @@ impl BSPComplex {
                 max_comp_in_tri_normal(pa, pb, pc, &bump)
             };
 
-            self.extract_outlines(
-                halfedges,
-                &mut edge_groups,
-                &mut edge_in_group,
-                &edge_faces,
+            (
+                self.extract_outlines(
+                    halfedges,
+                    &mut edge_groups,
+                    &mut edge_in_group,
+                    &edge_face_groups,
+                    axis,
+                    &bump,
+                ),
                 axis,
-                &bump,
             )
         }))
     }
@@ -768,7 +815,7 @@ impl BSPComplex {
         halfedges: Vec<(EdgeId, bool)>,
         edge_groups: &mut Vec<EdgeGroup>,
         edge_in_group: &mut [usize],
-        edge_faces: &[Vec<FaceId>],
+        edge_face_groups: &[Vec<usize>],
         axis: usize,
         bump: A,
     ) -> Vec<Vec<VertexId>> {
@@ -806,7 +853,7 @@ impl BSPComplex {
                 outline,
                 edge_groups,
                 edge_in_group,
-                edge_faces,
+                edge_face_groups,
                 axis,
                 bump,
             ));
@@ -819,7 +866,7 @@ impl BSPComplex {
         outline: Vec<(EdgeId, bool)>,
         edge_groups: &mut Vec<EdgeGroup>,
         edge_in_group: &mut [usize],
-        edge_faces: &[Vec<FaceId>],
+        edge_face_groups: &[Vec<usize>],
         axis: usize,
         bump: A,
     ) -> Vec<VertexId> {
@@ -838,7 +885,7 @@ impl BSPComplex {
         let colinear = |ha: &(EdgeId, bool), hb: &(EdgeId, bool)| {
             let ea = ha.0;
             let eb = hb.0;
-            if edge_faces[ea] != edge_faces[eb] {
+            if edge_face_groups[ea] != edge_face_groups[eb] {
                 return false;
             }
 

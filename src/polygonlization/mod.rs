@@ -4,7 +4,6 @@ mod conforming_mesh;
 use bumpalo::Bump;
 
 use crate::{
-    mesh::Mesh,
     predicates::get_exponent,
     triangle::{tetrahedralize, triangulate_polygon_soup},
 };
@@ -54,7 +53,11 @@ pub fn remove_duplicates(points: &[f64], epsilon: f64) -> (Vec<f64>, Vec<usize>)
     )
 }
 
-fn make_mesh_for_triangles(points: &[f64], triangles: Vec<usize>, tri_in_shells: &[usize]) {
+fn make_mesh_for_triangles(
+    points: &[f64],
+    triangles: Vec<usize>,
+    tri_in_shells: &[usize],
+) -> (Vec<f64>, Vec<usize>) {
     let mut constraints = Constraints::new(triangles);
     let mut tet_mesh = tetrahedralize(points);
     constraints.place_virtual_constraints(&tet_mesh);
@@ -71,20 +74,9 @@ fn make_mesh_for_triangles(points: &[f64], triangles: Vec<usize>, tri_in_shells:
                 cid += 1;
             }
         }
-        println!(
-            "split cell {}, n_vertices: {}, n_halfedges {}, n_edges {}, n_faces {}",
-            cid,
-            complex.mesh.n_vertices(),
-            complex.mesh.n_halfedges(),
-            complex.mesh.n_edges(),
-            complex.mesh.n_faces()
-        );
-
-        println!("ori is {:?}", complex.ori_duration);
-        println!("split is {:?}", complex.split_duration);
     }
 
-    complex.complex_partition(&tri_in_shells);
+    complex.complex_partition(&tri_in_shells)
 }
 
 pub fn make_polyhedra_mesh(
@@ -93,7 +85,7 @@ pub fn make_polyhedra_mesh(
     face_in_shell_data: &[usize],
     face_edge_data: &[Vec<usize>],
     epsilon: f64,
-) {
+) -> (Vec<f64>, Vec<usize>) {
     let (points, pmap) = remove_duplicates(point_data, epsilon);
     let face_edges = Vec::from_iter(face_edge_data.iter().map(|arr| {
         Vec::from_iter(
@@ -119,5 +111,5 @@ pub fn make_polyhedra_mesh(
                 .into_iter()
                 .map(|parent| face_in_shell_data[parent]),
         ),
-    );
+    )
 }

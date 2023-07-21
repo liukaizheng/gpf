@@ -1,4 +1,4 @@
-use gpf::{polygonlization::make_polyhedra_mesh};
+use gpf::polygonlization::make_polyhedra_mesh;
 use serde::Deserialize;
 
 #[allow(non_snake_case)]
@@ -20,22 +20,34 @@ fn make_two_dim_arr<T: Clone>(arr: &[T], separators: &[usize]) -> Vec<Vec<T>> {
     )
 }
 
+fn write_obj(points: &[f64], triangles: &[usize], name: &str) {
+    let mut txt = "".to_owned();
+    for p in points.chunks(3) {
+        txt.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
+    }
+    for tri in triangles.chunks(3) {
+        txt.push_str(&format!("f {} {} {}\n", tri[0] + 1, tri[1] + 1, tri[2] + 1));
+    }
+    std::fs::write(name, txt).unwrap();
+}
+
 #[test]
 fn two_models() {
     let f = std::fs::File::open("tests/data/solidFix.json").expect("read file");
     let reader = std::io::BufReader::new(f);
     let data = serde_json::from_reader::<_, PolygonsData>(reader).expect("failed to read");
     let edges = make_two_dim_arr(&data.edgesData, &data.separators);
-    make_polyhedra_mesh(
+    let (points, triangles) = make_polyhedra_mesh(
         &data.pointsData,
         &data.axesData,
         &data.faceInShellData,
         &edges,
         1e-6,
     );
+    write_obj(&points, &triangles, "123.obj");
 }
 
-// #[test]
+#[test]
 fn test_make_polyhedra_mesh() {
     let points = vec![
         0.0, 0.0, 0.0, // 0
