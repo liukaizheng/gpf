@@ -7,6 +7,9 @@
 #![feature(portable_simd)]
 #![feature(let_chains)]
 
+use itertools::Itertools;
+
+pub mod disjoint_set;
 pub mod graphcut;
 pub mod math;
 pub mod mesh;
@@ -20,4 +23,13 @@ const INVALID_IND: usize = usize::MAX;
 fn point(points: &[f64], tid: usize) -> &[f64] {
     let start = tid * 3;
     &points[start..(start + 3)]
+}
+
+#[inline(always)]
+fn face_area_2d(points: &[f64]) -> f64 {
+    points
+        .chunks(2)
+        .circular_tuple_windows()
+        .map(|(pa, pb)| pa[0] * pb[1] - pa[1] * pb[0])
+        .sum::<f64>()
 }

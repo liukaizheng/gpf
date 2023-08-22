@@ -1,4 +1,4 @@
-pub mod bsp_complex;
+mod bsp_complex;
 mod conforming_mesh;
 
 use bumpalo::Bump;
@@ -53,7 +53,7 @@ pub fn remove_duplicates(points: &[f64], epsilon: f64) -> (Vec<f64>, Vec<usize>)
     )
 }
 
-fn make_mesh_for_triangles(
+pub fn make_mesh_for_triangles(
     points: &[f64],
     triangles: Vec<usize>,
     tri_in_shells: &[usize],

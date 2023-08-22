@@ -1,4 +1,4 @@
-use gpf::polygonlization::make_polyhedra_mesh;
+use gpf::polygonlization::{make_mesh_for_triangles, make_polyhedra_mesh};
 use serde::Deserialize;
 
 #[allow(non_snake_case)]
@@ -78,4 +78,45 @@ fn test_make_polyhedra_mesh() {
 
     let poly_in_shell = vec![0, 0, 0, 0, 0];
     make_polyhedra_mesh(&points, &axis, &poly_in_shell, &edges, 1e-6);
+}
+
+fn read_obj(name: &str) -> (Vec<f64>, Vec<usize>) {
+    let (models, _) =
+        tobj::load_obj(name, &tobj::LoadOptions::default()).expect("Failed to load obj file");
+    let model = &models[0];
+    let points = model
+        .mesh
+        .positions
+        .iter()
+        .map(|x| *x as f64)
+        .collect::<Vec<_>>();
+    let triangles = Vec::from_iter(model.mesh.indices.iter().map(|x| *x as usize));
+    (points, triangles)
+}
+
+#[test]
+fn test_cube_and_sphere() {
+    // read cube and sphere
+    let (cube_points, cube_tris) = read_obj("tests/data/cube.obj");
+    let (sphere_points, sphere_tris) = read_obj("tests/data/sphere.obj");
+
+    // merge cube and sphere into one mesh
+    let n_cube_points = cube_points.len() / 3;
+    // merge points
+    let points = Vec::from_iter(cube_points.into_iter().chain(sphere_points));
+    let tri_in_shells = Vec::from_iter(
+        // cube is the first shell
+        vec![0; cube_tris.len() / 3]
+            .into_iter()
+            // sphere is second shell
+            .chain(vec![1; sphere_tris.len() / 3]),
+    );
+    // merge triangles
+    let triangles = Vec::from_iter(
+        cube_tris
+            .into_iter()
+            .chain(sphere_tris.into_iter().map(|idx| idx + n_cube_points)),
+    );
+    let (new_points, new_triangles) = make_mesh_for_triangles(&points, triangles, &tri_in_shells);
+    write_obj(&new_points, &new_triangles, "123.obj");
 }
