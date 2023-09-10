@@ -1,7 +1,4 @@
-use std::{
-    alloc::Allocator,
-    time::{Duration, Instant},
-};
+use std::alloc::Allocator;
 
 use bumpalo::Bump;
 use hashbrown::HashMap;
@@ -116,9 +113,6 @@ pub(crate) struct BSPComplex {
     edge_visits: Vec<bool>,
 
     tri_orientations: Vec<usize>,
-
-    pub ori_duration: Duration,
-    pub split_duration: Duration,
 }
 
 #[inline(always)]
@@ -227,9 +221,6 @@ impl BSPComplex {
             vert_visits,
 
             tri_orientations,
-
-            ori_duration: Duration::from_millis(0),
-            split_duration: Duration::from_millis(0),
         }
     }
 
@@ -246,7 +237,6 @@ impl BSPComplex {
     pub(crate) fn split_cell<A: Allocator + Copy>(&mut self, cid: usize, bump: A) {
         let tid = *self.cell_data[cid].inner_triangles.last().unwrap();
         let tri = self.triangle(tid).to_vec_in(bump);
-        let start = Instant::now();
         self.cell_data[cid].inner_triangles.pop();
         let mut coplanar_triangles = self.separate_out_coplanar_triangles(tid, cid, bump);
         if !self.is_virtual(tid) {
@@ -263,8 +253,6 @@ impl BSPComplex {
             &mut self.vert_orientations[tid],
             bump,
         );
-        self.ori_duration += start.elapsed();
-        let start = Instant::now();
 
         let (mut n_over, mut n_under) = (0, 0);
         let mut cell_orientations = Vec::new();
@@ -464,8 +452,6 @@ impl BSPComplex {
         // if let Err(err) = validate_mesh_connectivity(&self.mesh) {
         //     panic!("the err is {}", err);
         // }
-
-        self.split_duration += start.elapsed();
     }
 
     pub fn complex_partition(&mut self, tri_in_shell: &[usize]) -> (Vec<f64>, Vec<usize>) {

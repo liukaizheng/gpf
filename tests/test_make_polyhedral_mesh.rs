@@ -1,4 +1,4 @@
-use gpf::polygonlization::{make_mesh_for_triangles, make_polyhedra_mesh};
+use gpf::polygonlization::{make_polyhedral_mesh, make_mesh_for_triangles};
 use serde::Deserialize;
 
 #[allow(non_snake_case)]
@@ -37,7 +37,7 @@ fn two_models() {
     let reader = std::io::BufReader::new(f);
     let data = serde_json::from_reader::<_, PolygonsData>(reader).expect("failed to read");
     let edges = make_two_dim_arr(&data.edgesData, &data.separators);
-    let (points, triangles) = make_polyhedra_mesh(
+    let (points, triangles) = make_polyhedral_mesh(
         &data.pointsData,
         &data.axesData,
         &data.faceInShellData,
@@ -77,7 +77,7 @@ fn test_make_polyhedra_mesh() {
     ];
 
     let poly_in_shell = vec![0, 0, 0, 0, 0];
-    make_polyhedra_mesh(&points, &axis, &poly_in_shell, &edges, 1e-6);
+    make_polyhedral_mesh(&points, &axis, &poly_in_shell, &edges, 1e-6);
 }
 
 fn read_obj(name: &str) -> (Vec<f64>, Vec<usize>) {
@@ -117,6 +117,7 @@ fn test_cube_and_sphere() {
             .into_iter()
             .chain(sphere_tris.into_iter().map(|idx| idx + n_cube_points)),
     );
-    let (new_points, new_triangles) = make_mesh_for_triangles(&points, triangles, &tri_in_shells);
+    let (new_points, new_triangles) =
+        make_mesh_for_triangles(&points, &triangles, &tri_in_shells);
     write_obj(&new_points, &new_triangles, "123.obj");
 }

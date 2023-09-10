@@ -53,7 +53,7 @@ pub fn remove_duplicates(points: &[f64], epsilon: f64) -> (Vec<f64>, Vec<usize>)
     )
 }
 
-pub fn make_mesh_for_triangles(
+fn make_mesh_for_proper_triangles(
     points: &[f64],
     triangles: Vec<usize>,
     tri_in_shells: &[usize],
@@ -79,7 +79,7 @@ pub fn make_mesh_for_triangles(
     complex.complex_partition(&tri_in_shells)
 }
 
-pub fn make_polyhedra_mesh(
+pub fn make_polyhedral_mesh(
     point_data: &[f64],
     axis_data: &[f64],
     face_in_shell_data: &[usize],
@@ -103,7 +103,7 @@ pub fn make_polyhedra_mesh(
         )
     }));
     let (triangles, tri_parents) = triangulate_polygon_soup(&points, &face_edges, axis_data);
-    make_mesh_for_triangles(
+    make_mesh_for_proper_triangles(
         &points,
         triangles,
         &Vec::from_iter(
@@ -112,4 +112,22 @@ pub fn make_polyhedra_mesh(
                 .map(|parent| face_in_shell_data[parent]),
         ),
     )
+}
+
+pub fn make_mesh_for_triangles(
+    points: &[f64],
+    triangles: &[usize],
+    tri_in_shells: &[usize],
+) -> (Vec<f64>, Vec<usize>) {
+    let (points, pmap) = remove_duplicates(points, 1e-6);
+    let mut reserved_triangles = Vec::new();
+    let mut reserved_tri_in_shells = Vec::new();
+    for (idx, tri) in triangles.chunks(3).enumerate() {
+        let tri = [pmap[tri[0]], pmap[tri[1]], pmap[tri[2]]];
+        if tri[0] != tri[1] && tri[1] != tri[2] && tri[2] != tri[0] {
+            reserved_triangles.extend(tri);
+            reserved_tri_in_shells.push(tri_in_shells[idx]);
+        }
+    }
+    make_mesh_for_proper_triangles(&points, reserved_triangles, &reserved_tri_in_shells)
 }
