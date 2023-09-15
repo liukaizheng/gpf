@@ -255,9 +255,7 @@ impl BSPComplex {
         );
 
         let (mut n_over, mut n_under) = (0, 0);
-        let mut cell_orientations = Vec::new();
         for vid in &cell_verts {
-            cell_orientations.push(*self.vert_orientations[tid].get(vid).unwrap());
             match self.vert_orientations[tid].get(vid).unwrap() {
                 Orientation::Positive => {
                     n_over += 1;
@@ -399,7 +397,10 @@ impl BSPComplex {
                             if self.face_data[fid].cells[0] == cid {
                                 // every edge always has two opposite halfedge
                                 zero_ori_halfedges.extend(
-                                    halfedges.into_iter().map(|hid| self.mesh.he_twin(hid)),
+                                    halfedges
+                                        .into_iter()
+                                        .map(|hid| self.mesh.he_twin(hid))
+                                        .rev(),
                                 );
                             } else {
                                 zero_ori_halfedges.extend(halfedges);
@@ -449,7 +450,7 @@ impl BSPComplex {
                 .push(BSPCellData::new(pos_faces, pos_inner_triangles));
         }
 
-        // if let Err(err) = validate_mesh_connectivity(&self.mesh) {
+        // if let Err(err) = crate::mesh::validate_mesh_connectivity(&self.mesh) {
         //     panic!("the err is {}", err);
         // }
     }
@@ -680,13 +681,20 @@ impl BSPComplex {
                     p.swap(0, 1);
                 }
             }
+            let mut loop_verts_sum = Vec::with_capacity_in(face_verts.len(), &bump);
+            loop_verts_sum.extend(face_verts.iter().scan(0, |s, verts| {
+                let cs = *s; // copy
+                *s += verts.len();
+                Some(cs)
+            }));
             let segments = Vec::from_iter(
                 face_verts
                     .into_iter()
-                    .map(|face_loop| {
+                    .zip(loop_verts_sum)
+                    .map(|(face_loop, sum)| {
                         (0..face_loop.len())
                             .circular_tuple_windows()
-                            .map(|(a, b)| [a, b])
+                            .map(move |(a, b)| [a + sum, b + sum])
                             .flatten()
                     })
                     .flatten(),
@@ -1462,11 +1470,13 @@ fn split_face_verts<A: Allocator + Copy>(
         if zero_ori_candidates.len() == 1 {
             return Err(Ok(zero_ori_candidates));
         } else {
-            let pos = zero_ori_candidates
-                .windows(2)
-                .position(|pair| mesh.he_tip_vertex(pair[0]) != mesh.he_vertex(pair[1]));
+            // find break point
+            let pos = (0..zero_ori_candidates.len() - 1).find(|i| {
+                mesh.he_tip_vertex(zero_ori_candidates[*i])
+                    != mesh.he_vertex(zero_ori_candidates[*i + 1])
+            });
             if let Some(pos) = pos {
-                zero_ori_candidates.rotate_left(pos);
+                zero_ori_candidates.rotate_left(pos + 1);
             }
             return Err(Ok(zero_ori_candidates));
         }
