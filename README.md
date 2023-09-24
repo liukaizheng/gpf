@@ -43,11 +43,16 @@ fn test_cube_and_sphere() {
             .into_iter()
             .chain(sphere_tris.into_iter().map(|idx| idx + n_cube_points)),
     );
-    let (new_points, new_triangles) = make_mesh_for_triangles(&points, triangles, &tri_in_shells);
+    let (new_points, new_triangles) =
+        make_mesh_for_triangles(&points, &triangles, &tri_in_shells);
     write_obj(&new_points, &new_triangles, "123.obj");
 }
+}
 ```
-Finally, we get a watertight mesh
+Finally, we get a watertight mesh.
 ![](./imgs/cube_and_sphere_fixed.png)
+
+Now, you can try it [online](https://liukaizheng.github.io/view/).
+
 ### Boolean algorithm
 TODO..
