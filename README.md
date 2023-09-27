@@ -52,7 +52,7 @@ fn test_cube_and_sphere() {
 Finally, we get a watertight mesh.
 ![](./imgs/cube_and_sphere_fixed.png)
 
-Now, you can try it [online](https://liukaizheng.github.io/view/).
+You can try it [online](https://view-nine.vercel.app/).
 
 ### Boolean algorithm
 TODO..
