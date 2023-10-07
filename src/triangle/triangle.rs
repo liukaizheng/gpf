@@ -1015,7 +1015,7 @@ fn flip<A: Allocator + Copy>(m: &mut Mesh<A>, flip_edge: &HEdge, vertex_map: &mu
     let tl_mark = mark(&m.triangles, &top_left);
     let tr_mark = mark(&m.triangles, &top_right);
     let bl_mark = mark(&m.triangles, &bot_left);
-    let br_mark = mark(&m.triangles, &bot_left);
+    let br_mark = mark(&m.triangles, &bot_right);
 
     if &vertex_map[right_vertex] == flip_edge || vertex_map[right_vertex] == top_right {
         copy(&bot_right, &mut vertex_map[right_vertex]);
