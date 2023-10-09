@@ -740,47 +740,30 @@ impl BSPComplex {
                 face_in_group[f_new_to_old[new_fid]] = id;
             }
         }
-        let edge_face_groups = Vec::from_iter(edge_faces.into_iter().map(|faces| {
-            let mut groups = Vec::from_iter(faces.into_iter().map(|fid| face_in_group[fid]));
+        let edge_face_groups = Vec::from_iter(edge_faces.iter().map(|faces| {
+            let mut groups = Vec::from_iter(faces.into_iter().map(|&fid| face_in_group[fid]));
             groups.sort_unstable();
             groups.dedup();
             groups
         }));
 
+        let mut face_marks = vec![false; self.mesh.n_faces()];
         Vec::from_iter(group_map.into_values().map(|indices| {
             bump.reset();
-            let mut edge_map = HashMap::<EdgeId, i32, _, _>::new_in(&bump);
             let mut tid = INVALID_IND;
             let mut base_fid = FaceId::new();
-            for fid in indices.into_iter().map(|idx| f_new_to_old[idx]) {
-                for hid in self.mesh.face(fid).halfedges() {
-                    let eid = self.mesh.he_edge(hid);
-                    *edge_map.entry(eid).or_insert(0) +=
-                        if self.mesh.eh_same_dir(eid, hid) ^ (kept_faces[fid] > 0) {
-                            -1
-                        } else {
-                            1
-                        };
-                }
+            let faces = Vec::from_iter(indices.into_iter().map(|idx| {
+                let fid = f_new_to_old[idx];
                 if !base_fid.valid() {
                     base_fid = fid;
                 }
                 if tid == INVALID_IND && !self.face_data[fid].triangles.is_empty() {
                     tid = self.face_data[fid].triangles[0];
                 }
-            }
-            let halfedges = Vec::from_iter(edge_map.into_iter().filter_map(|(eid, count)| {
-                if count == 0 {
-                    None
-                } else {
-                    if count > 0 {
-                        Some((eid, false))
-                    } else {
-                        Some((eid, true))
-                    }
-                }
+                fid
             }));
 
+            let outline_groups = self.extract_faces_outlines(&faces, &mut face_marks, &edge_faces);
             let axis = if tid != INVALID_IND {
                 self.tri_orientations[tid]
             } else {
@@ -791,68 +774,138 @@ impl BSPComplex {
             };
 
             (
-                self.extract_outlines(
-                    halfedges,
-                    &mut edge_groups,
-                    &mut edge_in_group,
-                    &edge_face_groups,
-                    axis,
-                    &bump,
-                ),
+                Vec::from_iter(outline_groups.into_iter().map(|outline| {
+                    self.merge_colinear_edges(
+                        outline,
+                        &mut edge_groups,
+                        &mut edge_in_group,
+                        &edge_face_groups,
+                        axis,
+                        &bump,
+                    )
+                })),
                 axis,
             )
         }))
     }
 
-    fn extract_outlines<A: Allocator + Copy>(
+    fn extract_faces_outlines(
         &self,
-        halfedges: Vec<(EdgeId, bool)>,
-        edge_groups: &mut Vec<EdgeGroup>,
-        edge_in_group: &mut [usize],
-        edge_face_groups: &[Vec<usize>],
-        axis: usize,
-        bump: A,
-    ) -> Vec<Vec<VertexId>> {
-        let mut outlines = Vec::new();
-        let mut vert_out_edge_map = HashMap::<VertexId, usize, _, _>::new_in(bump);
-        for (i, &(eid, reversed)) in halfedges.iter().enumerate() {
-            let [ea, eb] = self.mesh.e_vertices(eid);
-            vert_out_edge_map.insert(if reversed { eb } else { ea }, i);
+        faces: &[FaceId],
+        face_marks: &mut [bool],
+        edge_faces: &[Vec<FaceId>],
+    ) -> Vec<Vec<(EdgeId, bool)>> {
+        for &fid in faces {
+            face_marks[fid] = true;
         }
 
-        let mut visisted = std::vec::from_elem_in(false, halfedges.len(), bump);
-        let end_vertex = |he: &(EdgeId, bool)| {
-            if he.1 {
-                self.mesh.he_vertex(self.mesh.e_halfedge(he.0))
-            } else {
-                self.mesh.he_tip_vertex(self.mesh.e_halfedge(he.0))
-            }
-        };
-        for (i, he) in halfedges.iter().enumerate() {
-            if visisted[i] {
-                continue;
-            }
-            visisted[i] = true;
-            let mut outline = vec![he.clone()];
-            loop {
-                let vb = end_vertex(outline.last().unwrap());
-                let next_hid = *vert_out_edge_map.get(&vb).unwrap();
-                if visisted[next_hid] {
-                    break;
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back(faces[0]);
+        face_marks[faces[0]] = false;
+        let mut outline_group = vec![Vec::from_iter(self.mesh.face(faces[0]).halfedges().map(
+            |hid| {
+                if self.mesh.he_same_dir(hid) {
+                    (self.mesh.he_edge(hid), false)
+                } else {
+                    (self.mesh.he_edge(hid), true)
                 }
-                visisted[next_hid] = true;
-                outline.push(halfedges[next_hid]);
+            },
+        ))];
+
+        let he_in_outlines = |outline_group: &[Vec<(EdgeId, bool)>],
+                              face_halfedges: &[HalfedgeId]|
+         -> Option<(usize, usize, usize)> {
+            for (i, &hid) in face_halfedges.iter().enumerate() {
+                for (j, outline) in outline_group.iter().enumerate() {
+                    if let Some(pos) = outline.iter().position(|h| h.0 == self.mesh.he_edge(hid)) {
+                        return Some((i, j, pos));
+                    }
+                }
             }
-            outlines.push(self.merge_colinear_edges(
-                outline,
-                edge_groups,
-                edge_in_group,
-                edge_face_groups,
-                axis,
-                bump,
-            ));
+            None
+        };
+
+        let position =
+            |source: &[HalfedgeId], target: &[(EdgeId, bool)], src_cur: usize, tar_cur: usize| {
+                let (mut src_start, mut tar_end) = (src_cur, tar_cur);
+                loop {
+                    src_start = (src_start + source.len() - 1) % source.len();
+                    tar_end = (tar_end + 1) % target.len();
+                    if self.mesh.he_edge(source[src_start]) != target[tar_end].0 {
+                        break;
+                    }
+                }
+                let (mut src_end, mut tar_start) = (src_cur, tar_cur);
+                loop {
+                    src_end = (src_end + 1) % source.len();
+                    tar_start = (tar_start + target.len() - 1) % target.len();
+                    if self.mesh.he_edge(source[src_end]) != target[tar_start].0 {
+                        break;
+                    }
+                }
+
+                src_start = (src_start + 1) % source.len();
+                tar_start = (tar_start + 1) % target.len();
+
+                std::mem::swap(&mut src_start, &mut src_end);
+                if src_start == source.len() {
+                    src_start = 0;
+                }
+                if src_end == 0 {
+                    src_end = source.len();
+                }
+                if tar_end == 0 {
+                    tar_end = target.len();
+                }
+                (src_start, src_end, tar_start, tar_end)
+            };
+
+        while !queue.is_empty() {
+            let cur = queue.pop_back().unwrap();
+            for hid in self.mesh.face(cur).halfedges() {
+                let eid = self.mesh.he_edge(hid);
+                for &fid in &edge_faces[eid] {
+                    if !face_marks[fid] {
+                        continue;
+                    }
+                    face_marks[fid] = false;
+                    let face_halfedges = Vec::from_iter(self.mesh.face(fid).halfedges());
+                    if let Some((he_pos, loop_idx, pos_in_loop)) =
+                        he_in_outlines(&outline_group, &face_halfedges)
+                    {
+                        let (src_start, src_end, tar_start, tar_end) = position(
+                            &face_halfedges,
+                            &outline_group[loop_idx],
+                            he_pos,
+                            pos_in_loop,
+                        );
+
+                        let to_insert_halfedges =
+                            if src_start < src_end {
+                                Vec::from_iter(face_halfedges[src_start..src_end].iter().map(
+                                    |&hid| (self.mesh.he_edge(hid), self.mesh.he_same_dir(hid)),
+                                ))
+                            } else {
+                                Vec::from_iter(
+                                    face_halfedges[src_start..]
+                                        .iter()
+                                        .chain(&face_halfedges[..src_end])
+                                        .map(|&hid| {
+                                            (self.mesh.he_edge(hid), self.mesh.he_same_dir(hid))
+                                        }),
+                                )
+                            };
+                        if tar_start < tar_end {
+                            outline_group[loop_idx].splice(tar_start..tar_end, to_insert_halfedges);
+                        } else {
+                            unsafe { outline_group[loop_idx].set_len(tar_start) };
+                            outline_group[loop_idx].splice(..tar_end, to_insert_halfedges);
+                        }
+                    }
+                }
+            }
         }
-        outlines
+        outline_group
     }
 
     fn merge_colinear_edges<A: Allocator + Copy>(
