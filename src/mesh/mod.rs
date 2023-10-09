@@ -84,8 +84,14 @@ pub trait Mesh: Sized {
     fn f_halfedge(&self, fid: FaceId) -> HalfedgeId;
 
     #[inline(always)]
-    fn eh_same_dir(&self, eid: EdgeId, hid: HalfedgeId) -> bool {
+    fn he_same_dir(&self, hid: HalfedgeId) -> bool {
+        let eid = self.he_edge(hid);
         self.he_vertex(hid) == self.he_vertex(self.e_halfedge(eid))
+    }
+
+    #[inline(always)]
+    fn hes_same_dir(&self, ha: HalfedgeId, hb: HalfedgeId) -> bool {
+        self.he_vertex(ha) == self.he_vertex(hb)
     }
 
     fn use_implicit_twin(&self) -> bool;

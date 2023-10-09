@@ -626,7 +626,6 @@ impl BSPComplex {
         }
 
         let mut kept_faces = vec![0; self.face_data.len()];
-        let mut kept_faces1 = Vec::new();
         for fid in self.mesh.faces() {
             let [c1, mut c2] = self.face_data[fid].cells;
             if c2 == INVALID_IND {
@@ -639,39 +638,8 @@ impl BSPComplex {
                 } else {
                     kept_faces[fid] = 1;
                 }
-
-                let verts = if cell_kept[c1] {
-                    let mut verts = Vec::from_iter(
-                        self.mesh
-                            .face(fid)
-                            .halfedges()
-                            .map(|hid| self.mesh.he_vertex(hid).0),
-                    );
-                    verts.reverse();
-                    verts
-                } else {
-                    Vec::from_iter(
-                        self.mesh
-                            .face(fid)
-                            .halfedges()
-                            .map(|hid| self.mesh.he_vertex(hid).0),
-                    )
-                };
-                kept_faces1.push(verts);
             }
         }
-        let mut txt = "".to_owned();
-        for p in explicit_points.chunks(3) {
-            txt.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
-        }
-        for face in &kept_faces1 {
-            txt.push('f');
-            for &vid in face {
-                txt.push_str(&format!(" {}", vid + 1));
-            }
-            txt.push('\n');
-        }
-        std::fs::write("125.obj", txt).unwrap();
 
         fn project_point(p: &[f64], axis: usize) -> [f64; 2] {
             if axis == 0 {
@@ -779,15 +747,8 @@ impl BSPComplex {
             groups
         }));
 
-        let mut face_group1 = Vec::from_iter(group_map.into_values());
-        face_group1.sort_unstable_by_key(|group| {
-            let mut v = Vec::from_iter(group.iter().map(|idx| f_new_to_old[*idx].0));
-            v.sort_unstable();
-            v
-        });
-
         let mut face_marks = vec![false; self.mesh.n_faces()];
-        Vec::from_iter(face_group1.into_iter().map(|indices| {
+        Vec::from_iter(group_map.into_values().map(|indices| {
             bump.reset();
             let mut tid = INVALID_IND;
             let mut base_fid = FaceId::new();
@@ -802,7 +763,8 @@ impl BSPComplex {
                 fid
             }));
 
-            let outline_groups = self.extract_faces_outlines(&faces, &mut face_marks, &edge_faces);
+            let outline_groups =
+                self.extract_faces_outlines(&faces, &kept_faces, &mut face_marks, &edge_faces);
             let axis = if tid != INVALID_IND {
                 self.tri_orientations[tid]
             } else {
@@ -831,6 +793,7 @@ impl BSPComplex {
     fn extract_faces_outlines(
         &self,
         faces: &[FaceId],
+        face_signs: &[i32],
         face_marks: &mut [bool],
         edge_faces: &[Vec<FaceId>],
     ) -> Vec<Vec<(EdgeId, bool)>> {
@@ -838,18 +801,26 @@ impl BSPComplex {
             face_marks[fid] = true;
         }
 
+        let get_face_halfedges = |fid| -> Vec<HalfedgeId> {
+            if face_signs[fid] > 0 {
+                Vec::from_iter(self.mesh.face(fid).halfedges())
+            } else {
+                let hes = Vec::from_iter(self.mesh.face(fid).halfedges());
+                hes.into_iter()
+                    .rev()
+                    .map(|hid| self.mesh.he_twin(hid))
+                    .collect()
+            }
+        };
+
         let mut queue = std::collections::VecDeque::new();
         queue.push_back(faces[0]);
         face_marks[faces[0]] = false;
-        let mut outline_group = vec![Vec::from_iter(self.mesh.face(faces[0]).halfedges().map(
-            |hid| {
-                if self.mesh.he_same_dir(hid) {
-                    (self.mesh.he_edge(hid), false)
-                } else {
-                    (self.mesh.he_edge(hid), true)
-                }
-            },
-        ))];
+        let mut outline_group = vec![Vec::from_iter(
+            get_face_halfedges(faces[0])
+                .into_iter()
+                .map(|hid| (self.mesh.he_edge(hid), !self.mesh.he_same_dir(hid))),
+        )];
 
         let he_in_outlines = |outline_group: &[Vec<(EdgeId, bool)>],
                               face_halfedges: &[HalfedgeId]|
@@ -899,7 +870,6 @@ impl BSPComplex {
                 (src_start, src_end, tar_start, tar_end)
             };
 
-
         while !queue.is_empty() {
             let cur = queue.pop_back().unwrap();
             for hid in self.mesh.face(cur).halfedges() {
@@ -909,7 +879,7 @@ impl BSPComplex {
                         continue;
                     }
                     face_marks[fid] = false;
-                    let face_halfedges = Vec::from_iter(self.mesh.face(fid).halfedges());
+                    let face_halfedges = get_face_halfedges(fid);
                     if let Some((he_pos, loop_idx, pos_in_loop)) =
                         he_in_outlines(&outline_group, &face_halfedges)
                     {
@@ -919,11 +889,10 @@ impl BSPComplex {
                             he_pos,
                             pos_in_loop,
                         );
-
                         let to_insert_halfedges =
                             if src_start < src_end {
                                 Vec::from_iter(face_halfedges[src_start..src_end].iter().map(
-                                    |&hid| (self.mesh.he_edge(hid), self.mesh.he_same_dir(hid)),
+                                    |&hid| (self.mesh.he_edge(hid), !self.mesh.he_same_dir(hid)),
                                 ))
                             } else {
                                 Vec::from_iter(
@@ -931,7 +900,7 @@ impl BSPComplex {
                                         .iter()
                                         .chain(&face_halfedges[..src_end])
                                         .map(|&hid| {
-                                            (self.mesh.he_edge(hid), self.mesh.he_same_dir(hid))
+                                            (self.mesh.he_edge(hid), !self.mesh.he_same_dir(hid))
                                         }),
                                 )
                             };
@@ -946,17 +915,7 @@ impl BSPComplex {
                 }
             }
         }
-        for i in 0..face_marks.len() {
-            if face_marks[i] {
-                let fid = i.into();
-                let mut adj_faces: Vec<FaceId> = Vec::new();
-                for hid in self.mesh.face(fid).halfedges() {
-                    let eid = self.mesh.he_edge(hid);
-                    adj_faces.extend(&edge_faces[eid]);
-                }
-                println!("herer");
-            }
-        }
+
         outline_group
     }
 
@@ -980,9 +939,6 @@ impl BSPComplex {
                 self.mesh.he_tip_vertex(self.mesh.e_halfedge(he.0))
             }
         };
-
-        let vertices = Vec::from_iter(outline.iter().map(end_vertex).map(|vid| vid.0));
-        println!("{:?}", vertices);
 
         let colinear = |ha: &(EdgeId, bool), hb: &(EdgeId, bool)| {
             let ea = ha.0;
@@ -1043,9 +999,6 @@ impl BSPComplex {
                 }
             }
             if !cur_group.is_empty() {
-                if halfedges.is_empty() {
-                    println!("here");
-                }
                 if let Edge::Edges(first_group) = &halfedges[0] {
                     if colinear(cur_group.last().unwrap(), &first_group[0]) {
                         cur_group.extend(first_group);
