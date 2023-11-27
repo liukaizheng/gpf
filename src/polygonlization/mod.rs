@@ -4,7 +4,7 @@ mod conforming_mesh;
 use bumpalo::Bump;
 
 use crate::{
-    predicates::get_exponent,
+    predicates::{get_exponent, mis_alignment},
     triangle::{tetrahedralize, triangulate_polygon_soup},
 };
 
@@ -122,12 +122,21 @@ pub fn make_mesh_for_triangles(
     let (points, pmap) = remove_duplicates(points, 1e-6);
     let mut reserved_triangles = Vec::new();
     let mut reserved_tri_in_shells = Vec::new();
+    let bump = Bump::new();
     for (idx, tri) in triangles.chunks(3).enumerate() {
         let tri = [pmap[tri[0]], pmap[tri[1]], pmap[tri[2]]];
-        if tri[0] != tri[1] && tri[1] != tri[2] && tri[2] != tri[0] {
-            reserved_triangles.extend(tri);
-            reserved_tri_in_shells.push(tri_in_shells[idx]);
+        if tri[0] == tri[1] || tri[1] == tri[2] || tri[2] == tri[0] {
+            continue;
         }
+        let pa = point(&points, tri[0]);
+        let pb = point(&points, tri[1]);
+        let pc = point(&points, tri[2]);
+        if !mis_alignment(pa, pb, pc, &bump) {
+            continue;
+        }
+
+        reserved_triangles.extend(tri);
+        reserved_tri_in_shells.push(tri_in_shells[idx]);
     }
     make_mesh_for_proper_triangles(&points, reserved_triangles, &reserved_tri_in_shells)
 }

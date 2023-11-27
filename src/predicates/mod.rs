@@ -405,7 +405,7 @@ pub fn same_half_plane<A: Allocator + Copy>(
 }
 
 #[inline]
-fn mis_alignment<A: Allocator + Copy>(p: &[f64], q: &[f64], r: &[f64], allocator: A) -> bool {
+pub fn mis_alignment<A: Allocator + Copy>(p: &[f64], q: &[f64], r: &[f64], allocator: A) -> bool {
     // Projection on (x,y)-plane
     if predicates::orient2d(p, q, r, allocator) != 0.0 {
         return true;
