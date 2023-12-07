@@ -1,6 +1,7 @@
 use core::f64;
 use std::ops::{Add, Mul, Sub};
-use std::simd::{f64x2, u64x2, SimdFloat, ToBitMask};
+use std::simd::num::SimdFloat;
+use std::simd::{f64x2, u64x2};
 
 const SIGN_LOW_MASK: u64x2 = u64x2::from_array([0_u64, (1_u64 << 63)]);
 const SIGN_HIGH_MASK: u64x2 = u64x2::from_array([(1_u64 << 63), 0u64]);
@@ -115,7 +116,7 @@ fn mul(a: &IntervalNumber, b: &IntervalNumber) -> IntervalNumber {
 
         6 => {
             let mut bi = b.data.to_bits();
-             bi ^= SIGN_LOW_MASK;
+            bi ^= SIGN_LOW_MASK;
             a.data * f64x2::from_bits(bi).reverse()
         }
 
