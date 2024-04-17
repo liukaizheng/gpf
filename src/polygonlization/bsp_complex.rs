@@ -284,8 +284,8 @@ impl BSPComplex {
         }
 
         let n_cell_faces = self.cell_data[cid].faces.len();
-        let mut pos_faces = Vec::new();
-        let mut neg_faces = Vec::new();
+        let mut pos_faces = Vec::new(); // cell pos faces
+        let mut neg_faces = Vec::new(); // cell neg faces
         let mut zero_ori_halfedges = Vec::new_in(bump);
         for i in 0..n_cell_faces {
             let fid = self.cell_data[cid].faces[i];
@@ -448,10 +448,6 @@ impl BSPComplex {
             self.cell_data
                 .push(BSPCellData::new(pos_faces, pos_inner_triangles));
         }
-
-        // if let Err(err) = crate::mesh::validate_mesh_connectivity(&self.mesh) {
-        //     panic!("the err is {}", err);
-        // }
     }
 
     pub fn complex_partition(&mut self, tri_in_shell: &[usize]) -> (Vec<f64>, Vec<usize>) {
@@ -1590,6 +1586,114 @@ fn make_loop<A: Allocator + Copy>(
         curr = next;
     }
     result
+}
+
+/***
+ * point orientation wrt a triangle
+ */
+enum PTOrientation {
+    Positive,
+    Negative,
+    Inside,
+    Outside,
+}
+
+fn triangle_intersects_cell<A: Allocator + Copy>(
+    mesh: &SurfaceMesh,
+    tid: usize,
+    cid: usize,
+    cell_verts: &[VertexId],
+    cell_edges: &[EdgeId],
+    cell: &[FaceId],
+    points: &[Point3D],
+    vertex_data: &[BSPVertexData],
+    vert_orientations: &mut HashMap<VertexId, Orientation>,
+    bump: A,
+) -> bool {
+    let tri = triangle(tid, &mesh.triangles);
+    let pa = &points[tri[0]];
+    let pb = &points[tri[1]];
+    let pc = &points[tri[2]];
+    verts_orient_wrt_plane(pa, pb, pc, &[vid], points, vertex_data, vert_orientations, bump);
+
+    let orientations = Vec::from_iter(cell_verts.iter().map(|v| *vert_orientations.get(v).unwrap()));
+    // all orientations are the same
+    {
+        let mut first_ori = Orientation::Undefined;
+        for &ori in &orientations {
+            match ori {
+                Orientation::Positive | Orientation::Negative => {
+                    if first_ori == Orientation::Undefined {
+                        first_ori = ori;
+                    } else if first_ori != ori {
+                        first_ori = Orientation::Zero;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if first_ori != Orientation::Zero {
+            return true;
+        }
+    }
+
+    let mut vert_pt_orientation: HashMap<VertexId, PTOrientation> = HashMap::new();
+
+    for &fid in cell {
+        for hid in mesh.face(fid).halfedge() {
+            let eid = mesh.he_edge(hid);
+            let e_vertices = mesh.e_vertices(eid);
+            let e_vert_oris: [PTOrientation; 2] = e_vertices.iter().map(|vid| {
+                if vert_pt_orientation.contains_key(vid) {
+                    return *vert_pt_orientation.get(vid).unwrap();
+                }
+                match vert_orientations.get(vid).unwrap() {
+                    Orientation::Positive => {
+                        vert_pt_orientation.insert(*vid, PTOrientation::Positive);
+                        PTOrientation::Positive
+                    }
+                    Orientation::Negative => {
+                        vert_pt_orientation.insert(*vid, PTOrientation::Negative);
+                        PTOrientation::Negative
+                    }
+                    Orientation::Zero => {
+                        let p = &points[*vid];
+                        let ori = orient3d(pa, pb, pc, p, bump);
+                        if ori == Orientation::Positive {
+                            vert_pt_orientation.insert(*vid, PTOrientation::Positive);
+                            PTOrientation::Positive
+                        } else if ori == Orientation::Negative {
+                            vert_pt_orientation.insert(*vid, PTOrientation::Negative);
+                            PTOrientation::Negative
+                        } else {
+                            vert_pt_orientation.insert(*vid, PTOrientation::Inside);
+                            PTOrientation::Inside
+                        }
+                    }
+                    _ => PTOrientation::Outside,
+                }
+            }).collect();
+        }
+    }
+
+    /*let tri = triangle(tid, &mesh.triangles);
+    let pa = &points[tri[0]];
+    let pb = &points[tri[1]];
+    let pc = &points[tri[2]];
+    for &fid in cell {
+        let mut orientations = Vec::new_in(bump);
+        for hid in mesh.face(fid).halfedges() {
+            let vid = mesh.he_vertex(hid);
+            verts_orient_wrt_plane(pa, pb, pc, &[vid], points, vertex_data, vert_orientations, bump);
+            orientations.push(*vert_orientations.get(&vid).unwrap());
+        }
+        if vert_in_tri(&orientations) {
+            return true;
+        }
+    }*/
+    false
 }
 
 #[inline(always)]
