@@ -50,7 +50,12 @@ impl Constraints {
             }
         }
         let mut bump = Bump::new();
-        for (_, halfedges) in edge_map {
+        let mut edges = edge_map.values().map(|v| v.clone()).collect::<Vec<_>>();
+        for edge in &mut edges {
+            edge.sort();
+        }
+        edges.sort();
+        for halfedges in edges {
             bump.reset();
             self.add_virtual_constraint(tet_mesh, halfedges, &bump);
         }
@@ -140,6 +145,9 @@ impl Constraints {
         let mut bump = Bump::new();
         for (i, triangle) in self.triangles.chunks(3).enumerate() {
             bump.reset();
+            if i == 1297 {
+                println!("1297");
+            }
             let tet_face = triangle_at_tet(mesh, triangle, &bump);
             if tet_face.tet != INVALID_IND {
                 tet_marks[tet_face.ver & 3][tet_face.tet].push(i);

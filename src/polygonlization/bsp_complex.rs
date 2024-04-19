@@ -242,6 +242,16 @@ impl BSPComplex {
     }
 
     pub(crate) fn split_cell<A: Allocator + Copy>(&mut self, cid: usize, bump: A) {
+        {
+            let cid = 553;
+            let (cell_verts, cell_edges) = self.cell_verts_and_edges(cid, bump);
+            for &inner_tid in self.cell_data[cid].inner_triangles.iter() {
+                if !triangle_intersects_cell(cid, triangle(inner_tid, &self.constraints), &cell_verts, &self.cell_data[cid].faces, &self.points, &self.vertex_data, &self.face_data, &mut self.vert_orientations[inner_tid], bump) {
+                    println!("cid: {}, tid: {}", cid, inner_tid);
+                    self.print_cid(cid, "large_cid.obj");
+                }
+            }
+        }
         let tid = *self.cell_data[cid].inner_triangles.last().unwrap();
         let tri = self.triangle(tid).to_vec_in(bump);
         self.cell_data[cid].inner_triangles.pop();
@@ -276,6 +286,20 @@ impl BSPComplex {
         }
         if pos_verts.len() == 0 || neg_verts.len() == 0 {
             panic!("don't find plane to split cell");
+        }
+
+        let mut face_planes = Vec::new();
+        let mut face_cells: Vec<[usize; 2]> = Vec::new();
+        for &fid in &self.cell_data[cid].faces {
+            face_planes.push(self.face_data[fid].plane);
+            face_cells.push(self.face_data[fid].cells);
+        }
+
+        for &inner_tid in self.cell_data[cid].inner_triangles.iter() {
+            if !triangle_intersects_cell(cid, triangle(inner_tid, &self.constraints), &cell_verts, &self.cell_data[cid].faces, &self.points, &self.vertex_data, &self.face_data, &mut self.vert_orientations[inner_tid], bump) {
+                println!("cid: {}, tid: {}", cid, inner_tid);
+                self.print_cid(cid, "large_cid.obj");
+            }
         }
 
 
@@ -466,17 +490,73 @@ impl BSPComplex {
 
             for &inner_tid in &self.cell_data[cid].inner_triangles {
                 let inner_tri = triangle(inner_tid, &self.constraints);
+                let mut not_a = false;
+                let mut not_b = false;
                 if triangle_intersects_cell(new_cid, inner_tri, &pos_verts, &self.cell_data[new_cid].faces, &self.points, &self.vertex_data, &self.face_data, &mut self.vert_orientations[inner_tid], bump) {
                     pos_inner_triangles.push(inner_tid);
+                } else {
+                    not_a = true;
                 }
 
                 if triangle_intersects_cell(cid, inner_tri, &neg_verts, &self.cell_data[cid].faces, &self.points, &self.vertex_data, &self.face_data, &mut self.vert_orientations[inner_tid], bump) {
                     neg_inner_triangles.push(inner_tid);
+                } else {
+                    not_b = true;
+                }
+                if not_a && not_b {
+                    println!("cid: {}, tid: {}", cid, inner_tid);
+                    self.print_cid(cid, "cid.obj");
+                    self.print_cid(new_cid, "new_cid.obj");
+                    self.print_triangle(inner_tid, "ct.obj");
+                    let ori = triangle_intersects_cell1(cid, inner_tri, &cell_verts, &face_planes, &face_cells, &self.points, &self.vertex_data, &mut self.vert_orientations[inner_tid], bump);
+                    println!("ori: {:?}", ori);
                 }
             }
             self.cell_data[new_cid].inner_triangles = pos_inner_triangles;
             self.cell_data[cid].inner_triangles = neg_inner_triangles;
         }
+    }
+
+    fn print_cid(&self, cid: usize, name: &str) {
+        let mut explicit_points = vec![0.0; self.points.len() * 3];
+        for (p, data) in self.points.iter().zip(explicit_points.chunks_mut(3)) {
+            match p {
+                Point3D::Explicit(p) => {
+                    data[0] = p.data[0];
+                    data[1] = p.data[1];
+                    data[2] = p.data[2];
+                }
+                Point3D::LPI(p) => {
+                    p.to_explicit(data);
+                }
+                Point3D::TPI(p) => {
+                    p.to_explicit(data);
+                }
+            }
+        }
+        let mut txt = "".to_owned();
+        for p in explicit_points.chunks(3) {
+            txt.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
+        }
+        for &fid in &self.cell_data[cid].faces {
+            txt.push_str(&format!("f"));
+            for vid in self.mesh.face(fid).halfedges().map(|hid| self.mesh.he_vertex(hid)) {
+                txt.push_str(&format!(" {}", vid.0 + 1));
+            }
+            txt.push_str("\n");
+        }
+        std::io::Write::write_all(&mut std::fs::File::create(name).unwrap(), txt.as_bytes()).unwrap();
+    }
+
+    fn print_triangle(&self, tid: usize, name: &str) {
+        let tri_verts = triangle(tid, &self.constraints);
+        let tri_points = Vec::from_iter(tri_verts.iter().map(|&vid| self.points[vid].explicit().unwrap().data));
+        let mut txt = "".to_owned();
+        for p in tri_points {
+            txt.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
+        }
+        txt.push_str(&format!("f 1 2 3\n"));
+        std::io::Write::write_all(&mut std::fs::File::create(name).unwrap(), txt.as_bytes()).unwrap();
     }
 
     pub fn complex_partition(&mut self, tri_in_shell: &[usize]) -> (Vec<f64>, Vec<usize>) {
@@ -1651,6 +1731,62 @@ fn triangle_intersects_cell<A: Allocator + Copy>(
             return false; // intersect, but not intersect properly
         }
         let base_ori = if data.cells[0] == cid {
+            Orientation::Positive
+        } else {
+            Orientation::Negative
+        };
+        if tri_pt_oris.into_iter().filter(|&ori| ori != Orientation::Zero).all(|ori| ori != base_ori) {
+            return false; // all points are on the same side of the face
+        }
+    }
+    return true;
+}
+
+fn triangle_intersects_cell1<A: Allocator + Copy>(
+    cid: usize,
+    tri: &[VertexId],
+    cell_verts: &[VertexId],
+    plane_verts: &[[VertexId; 3]],
+    face_cells: &[[usize; 2]],
+    points: &[Point3D],
+    vertex_data: &[BSPVertexData],
+    vert_orientations: &mut HashMap<VertexId, Orientation>,
+    bump: A,
+) -> bool {
+    let tri_points = [&points[tri[0]], &points[tri[1]], &points[tri[2]]];
+    verts_orient_wrt_plane(tri_points[0], tri_points[1], tri_points[2], cell_verts, points, vertex_data, vert_orientations, bump);
+    // all orientations are the same
+    {
+        let mut first_ori = Orientation::Undefined;
+        for vid in cell_verts {
+            let ori = vert_orientations[vid];
+            match ori {
+                Orientation::Positive | Orientation::Negative => {
+                    if first_ori == Orientation::Undefined {
+                        first_ori = ori;
+                    } else if first_ori != ori {
+                        first_ori = Orientation::Zero;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if first_ori != Orientation::Zero {
+            return false; // all verts are on the same side of the triangle, not intersect property
+        }
+    }
+
+    for i in 0..plane_verts.len() {
+        let plane_verts = &plane_verts[i];
+        let plane_points: [&[f64]; 3] = plane_verts.map(|vid| points[vid].explicit().unwrap().deref());
+        let tri_pt_oris = tri_points
+            .map(|p| double_to_sign(-crate::predicates::orient3d(plane_points[0], plane_points[1], plane_points[2], p.explicit().unwrap().deref(), bump)));
+        if tri_pt_oris.iter().all(|&ori| ori == Orientation::Zero) {
+            return false; // intersect, but not intersect properly
+        }
+        let base_ori = if face_cells[i][0] == cid {
             Orientation::Positive
         } else {
             Orientation::Negative
