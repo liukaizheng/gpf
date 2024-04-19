@@ -77,7 +77,8 @@ fn test_make_polyhedra_mesh() {
     ];
 
     let poly_in_shell = vec![0, 0, 0, 0, 0];
-    make_polyhedral_mesh(&points, &axis, &poly_in_shell, &edges, 1e-6);
+    let (points, triangles) = make_polyhedral_mesh(&points, &axis, &poly_in_shell, &edges, 1e-6);
+    write_obj(&points, &triangles, "124.obj");
 }
 
 fn read_obj(name: &str) -> (Vec<f64>, Vec<usize>) {
@@ -119,5 +120,5 @@ fn test_cube_and_sphere() {
     );
     let (new_points, new_triangles) =
         make_mesh_for_triangles(&points, &triangles, &tri_in_shells);
-    write_obj(&new_points, &new_triangles, "123.obj");
+    write_obj(&new_points, &new_triangles, "125.obj");
 }

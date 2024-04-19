@@ -1,3 +1,4 @@
+use core::panic;
 use std::{alloc::Allocator, ops::Deref};
 
 use bumpalo::Bump;
@@ -66,17 +67,15 @@ struct BSPFaceData {
     // coplanar triangles
     triangles: Vec<usize>,
     plane: [VertexId; 3],
-    ori: usize,
     id: usize,
 }
 
 impl BSPFaceData {
-    fn new(c1: usize, c2: usize, triangles: Vec<usize>, plane: [VertexId; 3], ori: usize, id: usize) -> Self {
+    fn new(c1: usize, c2: usize, triangles: Vec<usize>, plane: [VertexId; 3], id: usize) -> Self {
         Self {
             cells: [c1, c2],
             triangles,
             plane,
-            ori,
             id,
         }
     }
@@ -151,12 +150,18 @@ impl BSPComplex {
                 if tet_face_is_new(tid, nei.tet, adj_cell_idx) {
                     let tri = [tet_mesh.org(nei), tet_mesh.apex(nei), tet_mesh.dest(nei)];
                     let tri_points =tri.map(|vid| point(tet_mesh.points, vid));
+                    let oppo_vid = tet_mesh.oppo(nei);
+                    if oppo_vid < tet_mesh.n_points {
+                        let _ori = double_to_sign(crate::predicates::orient3d(tri_points[0], tri_points[1], tri_points[2], point(tet_mesh.points, oppo_vid), &bump));
+                        if _ori != Orientation::Positive {
+                            panic!("tetrahedron is not positive oriented");
+                        }
+                    }
                     let mut face = BSPFaceData::new(
                         cell_idx,
                         adj_cell_idx,
                         Vec::new(),
                         tri.map(|vid| vid.into()),
-                        max_comp_in_tri_normal(tri_points[0], tri_points[1], tri_points[2], &bump),
                         face_data.len(),
                     );
                     faces.push(tri.to_vec());
@@ -256,30 +261,29 @@ impl BSPComplex {
             bump,
         );
 
-        let (mut n_over, mut n_under) = (0, 0);
+        let mut pos_verts = Vec::new();
+        let mut neg_verts = Vec::new();
         for vid in &cell_verts {
             match self.vert_orientations[tid].get(vid).unwrap() {
                 Orientation::Positive => {
-                    n_over += 1;
+                    pos_verts.push(*vid);
                 }
                 Orientation::Negative => {
-                    n_under += 1;
+                    neg_verts.push(*vid);
                 }
                 _ => {}
             }
         }
-        if n_over == 0 || n_under == 0 {
-            // panic!("don't find plane to split cell");
-            return;
+        if pos_verts.len() == 0 || neg_verts.len() == 0 {
+            panic!("don't find plane to split cell");
         }
+
 
         for &eid in &cell_edges {
             let eid = eid.into();
             let e_verts = self.mesh.e_vertices(eid);
-            if sign_reversed(
-                *self.vert_orientations[tid].get(&e_verts[0]).unwrap(),
-                *self.vert_orientations[tid].get(&e_verts[1]).unwrap(),
-            ) {
+            let e_vert_oris = e_verts.map(|vid| *self.vert_orientations[tid].get(&vid).unwrap());
+            if sign_reversed( e_vert_oris[0], e_vert_oris[1]) {
                 let new_vid = self.split_edge(eid, &tri, &bump);
                 self.vertex_data.push(BSPVertexData { parent: e_verts });
                 self.vert_orientations[tid].insert(new_vid, Orientation::Zero);
@@ -379,7 +383,6 @@ impl BSPComplex {
                         cells: old_face_data.cells,
                         triangles: new_face_triangles,
                         plane: old_face_data.plane,
-                        ori: old_face_data.ori,
                         id: old_face_data.id,
                     });
                     self.edge_visits.push(false);
@@ -425,21 +428,20 @@ impl BSPComplex {
         {
             let face_halfedges = make_loop(&self.mesh, zero_ori_halfedges);
             let new_fid = self.mesh.add_face_by_halfedges(&face_halfedges, bump);
+            for vid in self.mesh.face(new_fid).halfedges().map(|hid| self.mesh.he_vertex(hid)) {
+                pos_verts.push(vid);
+                neg_verts.push(vid);
+            }
+
+
             let new_cid = self.cell_data.len();
             self.face_data.push(BSPFaceData::new(
                 new_cid,
                 cid,
                 coplanar_triangles,
                 [tri[0], tri[1], tri[2]],
-                self.tri_orientations[tid],
                 new_fid.0,
             ));
-
-            neg_faces.push(new_fid);
-            let [pos_inner_triangles, neg_inner_triangles] =
-                self.separate_cell_triangles(cid, tid, bump);
-            self.cell_data[cid].faces = neg_faces;
-            self.cell_data[cid].inner_triangles = neg_inner_triangles;
 
             for &fid in &pos_faces {
                 for f_cid in &mut self.face_data[fid].cells {
@@ -450,8 +452,30 @@ impl BSPComplex {
             }
 
             pos_faces.push(new_fid);
+            neg_faces.push(new_fid);
+            // let [pos_inner_triangles, neg_inner_triangles] =
+            //    self.separate_cell_triangles(cid, tid, bump);
+            self.cell_data[cid].faces = neg_faces;
+
             self.cell_data
-                .push(BSPCellData::new(pos_faces, pos_inner_triangles));
+                .push(BSPCellData::new(pos_faces, Vec::new()));
+
+            let mut pos_inner_triangles = Vec::new();
+            let mut neg_inner_triangles = Vec::new();
+
+
+            for &inner_tid in &self.cell_data[cid].inner_triangles {
+                let inner_tri = triangle(inner_tid, &self.constraints);
+                if triangle_intersects_cell(new_cid, inner_tri, &pos_verts, &self.cell_data[new_cid].faces, &self.points, &self.vertex_data, &self.face_data, &mut self.vert_orientations[inner_tid], bump) {
+                    pos_inner_triangles.push(inner_tid);
+                }
+
+                if triangle_intersects_cell(cid, inner_tri, &neg_verts, &self.cell_data[cid].faces, &self.points, &self.vertex_data, &self.face_data, &mut self.vert_orientations[inner_tid], bump) {
+                    neg_inner_triangles.push(inner_tid);
+                }
+            }
+            self.cell_data[new_cid].inner_triangles = pos_inner_triangles;
+            self.cell_data[cid].inner_triangles = neg_inner_triangles;
         }
     }
 
@@ -519,18 +543,6 @@ impl BSPComplex {
                 &bump,
             )];
 
-            let face_ori = {
-                let tri = &face_data.plane;
-                // vert must be not coplanar with tri
-                orient3d(
-                    &self.points[tri[0]],
-                    &self.points[tri[1]],
-                    &self.points[tri[2]],
-                    &self.points[vert[0]],
-                    &bump,
-                )
-            };
-
             let center_in_face = self.point_in_face(
                 fid,
                 &face_centers[fid],
@@ -574,7 +586,7 @@ impl BSPComplex {
                         &bump,
                     );
                     let ori = *self.vert_orientations[tid].get(&vert[0]).unwrap();
-                    if ori == face_ori {
+                    if ori == Orientation::Positive { // triangle is with the same orientation as the face
                         cell_costs_internal[shell_id][face_data.cells[0]] += face_areas[fid];
                         let second_cid = face_data.cells[1];
                         if second_cid != INVALID_IND {
@@ -1593,24 +1605,10 @@ fn make_loop<A: Allocator + Copy>(
     result
 }
 
-/***
- * point orientation wrt a triangle
- */
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PTOrientation {
-    Positive,
-    Negative,
-    Inside,
-    Outside,
-}
-
 fn triangle_intersects_cell<A: Allocator + Copy>(
-    mesh: &SurfaceMesh,
-    tid: usize,
     cid: usize,
-    tri: &[usize],
+    tri: &[VertexId],
     cell_verts: &[VertexId],
-    cell_edges: &[EdgeId],
     cell: &[FaceId],
     points: &[Point3D],
     vertex_data: &[BSPVertexData],
@@ -1648,10 +1646,20 @@ fn triangle_intersects_cell<A: Allocator + Copy>(
         let plane_verts = data.plane;
         let plane_points: [&[f64]; 3] = plane_verts.map(|vid| points[vid].explicit().unwrap().deref());
         let tri_pt_oris = tri_points
-            .map(|p| double_to_sign(crate::predicates::orient3d(plane_points[0], plane_points[1], plane_points[2], p.explicit().unwrap().deref(), bump)));
+            .map(|p| double_to_sign(-crate::predicates::orient3d(plane_points[0], plane_points[1], plane_points[2], p.explicit().unwrap().deref(), bump)));
+        if tri_pt_oris.iter().all(|&ori| ori == Orientation::Zero) {
+            return false; // intersect, but not intersect properly
+        }
+        let base_ori = if data.cells[0] == cid {
+            Orientation::Positive
+        } else {
+            Orientation::Negative
+        };
+        if tri_pt_oris.into_iter().filter(|&ori| ori != Orientation::Zero).all(|ori| ori != base_ori) {
+            return false; // all points are on the same side of the face
+        }
     }
-
-    false
+    return true;
 }
 
 #[inline(always)]
