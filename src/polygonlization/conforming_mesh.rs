@@ -145,8 +145,8 @@ impl Constraints {
         let mut bump = Bump::new();
         for (i, triangle) in self.triangles.chunks(3).enumerate() {
             bump.reset();
-            if i == 1297 {
-                println!("1297");
+            if i == 723 {
+                println!("1286");
             }
             let tet_face = triangle_at_tet(mesh, triangle, &bump);
             if tet_face.tet != INVALID_IND {
@@ -162,14 +162,146 @@ impl Constraints {
             constraint_sides_intersections(mesh, triangle, &mut intersect_info);
             set_improper_intersections(mesh, i, triangle, &mut tet_marks, &mut intersect_info);
             interior_intersections(mesh, i, triangle, &mut tet_marks, &mut intersect_info);
+            /*for &tid in &intersect_info.intersected {
+                let intersect = is_tri_intersect_tet_improper(triangle, tid, mesh, &bump);
+                let ret = tet_marks[4][tid].iter().find(|&&tri_id| tri_id == i);
+                if intersect ^ ret.is_some() {
+                    // write obj
+                    let mut txt = "".to_owned();
+
+                    for p in mesh.points.chunks(3) {
+                        txt.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
+                    }
+
+                    let data = mesh.tets[tid].data;
+                    txt.push_str(&format!(
+                        "f {} {} {}\n",
+                        data[0] + 1,
+                        data[1] + 1,
+                        data[2] + 1
+                    ));
+                    txt.push_str(&format!(
+                        "f {} {} {}\n",
+                        data[1] + 1,
+                        data[3] + 1,
+                        data[2] + 1
+                    ));
+                    txt.push_str(&format!(
+                        "f {} {} {}\n",
+                        data[0] + 1,
+                        data[2] + 1,
+                        data[3] + 1
+                    ));
+                    txt.push_str(&format!(
+                        "f {} {} {}\n",
+                        data[0] + 1,
+                        data[3] + 1,
+                        data[1] + 1
+                    ));
+                    std::fs::write("tet.obj", txt).unwrap();
+
+                    // write triangle
+                    let mut txt = "".to_owned();
+                    let tri_points =
+                        Vec::from_iter(triangle.into_iter().map(|&vid| mesh.point(vid)));
+                    for p in tri_points {
+                        txt.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
+                    }
+                    txt.push_str(&format!("f 1 2 3\n"));
+
+                    std::fs::write("triangle.obj", txt).unwrap();
+
+                    println!("error");
+                }
+            }*/
         }
         tet_marks
     }
 }
 
+fn is_tri_intersect_tet_improper<A: Allocator + Copy>(
+    tri: &[usize],
+    tid: usize,
+    mesh: &TetMesh,
+    bump: A,
+) -> bool {
+    let data = mesh.tets[tid].data;
+    let tet_faces = [
+        [data[0], data[1], data[2]],
+        [data[1], data[3], data[2]],
+        [data[0], data[2], data[3]],
+        [data[0], data[3], data[1]],
+    ];
+    let tri_pts = Vec::from_iter(tri.into_iter().map(|&i| crate::point(mesh.points, i)));
+    let vert_orientations = data.map(|vid| {
+        let pt = crate::point(mesh.points, vid);
+        double_to_sign(crate::predicates::orient3d(
+            tri_pts[0], tri_pts[1], tri_pts[2], pt, bump,
+        ))
+    });
+    {
+        let mut first_ori = Orientation::Undefined;
+        for ori in vert_orientations {
+            match ori {
+                Orientation::Positive | Orientation::Negative => {
+                    if first_ori == Orientation::Undefined {
+                        first_ori = ori;
+                    } else if first_ori != ori {
+                        first_ori = Orientation::Zero;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if first_ori != Orientation::Zero {
+            return false; // all verts are on the same side of the triangle, not intersect property
+        }
+    }
+
+    for face in tet_faces {
+        let pts = face.map(|i| crate::point(mesh.points, i));
+        let tri_oris = Vec::from_iter(tri_pts.iter().map(|&p| {
+            double_to_sign(-crate::predicates::orient3d(
+                pts[0], pts[1], pts[2], p, bump,
+            ))
+        }));
+
+        let base_ori = Orientation::Positive;
+
+        if tri_oris
+            .into_iter()
+            .filter(|&ori| ori != Orientation::Zero)
+            .all(|ori| ori != base_ori)
+        {
+            return false; // all points are on the same side of the face
+        }
+    }
+    return true;
+}
+
 struct IntersectInfo<A: Allocator + Copy> {
     intersected: Vec<usize, A>,
     visited: Vec<bool, A>,
+}
+
+#[inline(always)]
+fn vert_inner_segment_cross<A: Allocator + Copy>(
+    mesh: &TetMesh,
+    u1: usize,
+    u2: usize,
+    v1: usize,
+    v2: usize,
+    allocator: A,
+) -> bool {
+    inner_segments_cross(
+        mesh.point(u1),
+        mesh.point(u2),
+        mesh.point(v1),
+        mesh.point(v2),
+        allocator,
+    )
 }
 
 #[inline(always)]
@@ -697,7 +829,9 @@ fn set_improper_intersections<A: Allocator + Copy>(
                 }
             }
             _ => {
-                tet_marks[4][tid].push(cid);
+                if constraint_intersect_empty(mesh, triangle, tid, &neg, &pos, bump) {
+                    tet_marks[4][tid].push(cid);
+                }
             }
         }
     }
@@ -863,6 +997,53 @@ fn constraint_intersect_vertex<A: Allocator + Copy>(
     return false;
 }
 
+fn constraint_intersect_empty<A: Allocator + Copy>(
+    mesh: &TetMesh,
+    c: &[usize],
+    tid: usize,
+    neg_vs: &[usize],
+    pos_vs: &[usize],
+    bump: A,
+) -> bool {
+    let mut all_cross = true;
+    for &nv in neg_vs {
+        if !all_cross {
+            break;
+        }
+        for &pv in pos_vs {
+            if !c
+                .iter()
+                .circular_tuple_windows()
+                .any(|(&va, &vb)| vert_inner_segment_cross(mesh, nv, pv, va, vb, bump))
+            {
+                all_cross = false;
+                break;
+            }
+        }
+    }
+
+    if all_cross {
+        return true;
+    }
+
+    for &nv in neg_vs {
+        for &pv in pos_vs {
+            if vert_inner_segment_cross_inner_triangle(mesh, nv, pv, c[0], c[1], c[2], bump) {
+                return true;
+            }
+        }
+    }
+
+    for (&v1, &v2) in c.iter().circular_tuple_windows() {
+        for (&va, &vb, &vc) in mesh.tets[tid].data.iter().circular_tuple_windows() {
+            if vert_inner_segment_cross_inner_triangle(mesh, v1, v2, va, vb, vc, bump) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 fn interior_intersections<A: Allocator + Copy>(
     mesh: &TetMesh,
     cid: usize,
@@ -902,7 +1083,8 @@ fn constraint_intersect_tet_type<A: Allocator + Copy>(
     let mut in_tris = [false; 4];
     for i in 0..4 {
         oris[i] = double_to_sign(mesh.orient3d(verts[i], c[0], c[1], c[2], bump));
-        in_tris[i] = oris[i] == Orientation::Zero && vert_point_in_inner_triangle(mesh, verts[i], c, bump);
+        in_tris[i] =
+            oris[i] == Orientation::Zero && vert_point_in_inner_triangle(mesh, verts[i], c, bump);
     }
 
     let mut indices = [0, 1, 2, 3];

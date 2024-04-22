@@ -242,16 +242,6 @@ impl BSPComplex {
     }
 
     pub(crate) fn split_cell<A: Allocator + Copy>(&mut self, cid: usize, bump: A) {
-        {
-            let cid = 553;
-            let (cell_verts, cell_edges) = self.cell_verts_and_edges(cid, bump);
-            for &inner_tid in self.cell_data[cid].inner_triangles.iter() {
-                if !triangle_intersects_cell(cid, triangle(inner_tid, &self.constraints), &cell_verts, &self.cell_data[cid].faces, &self.points, &self.vertex_data, &self.face_data, &mut self.vert_orientations[inner_tid], bump) {
-                    println!("cid: {}, tid: {}", cid, inner_tid);
-                    self.print_cid(cid, "large_cid.obj");
-                }
-            }
-        }
         let tid = *self.cell_data[cid].inner_triangles.last().unwrap();
         let tri = self.triangle(tid).to_vec_in(bump);
         self.cell_data[cid].inner_triangles.pop();
@@ -294,14 +284,6 @@ impl BSPComplex {
             face_planes.push(self.face_data[fid].plane);
             face_cells.push(self.face_data[fid].cells);
         }
-
-        for &inner_tid in self.cell_data[cid].inner_triangles.iter() {
-            if !triangle_intersects_cell(cid, triangle(inner_tid, &self.constraints), &cell_verts, &self.cell_data[cid].faces, &self.points, &self.vertex_data, &self.face_data, &mut self.vert_orientations[inner_tid], bump) {
-                println!("cid: {}, tid: {}", cid, inner_tid);
-                self.print_cid(cid, "large_cid.obj");
-            }
-        }
-
 
         for &eid in &cell_edges {
             let eid = eid.into();
@@ -503,14 +485,14 @@ impl BSPComplex {
                 } else {
                     not_b = true;
                 }
-                if not_a && not_b {
+                /*if not_a && not_b {
                     println!("cid: {}, tid: {}", cid, inner_tid);
                     self.print_cid(cid, "cid.obj");
                     self.print_cid(new_cid, "new_cid.obj");
                     self.print_triangle(inner_tid, "ct.obj");
                     let ori = triangle_intersects_cell1(cid, inner_tri, &cell_verts, &face_planes, &face_cells, &self.points, &self.vertex_data, &mut self.vert_orientations[inner_tid], bump);
                     println!("ori: {:?}", ori);
-                }
+                }*/
             }
             self.cell_data[new_cid].inner_triangles = pos_inner_triangles;
             self.cell_data[cid].inner_triangles = neg_inner_triangles;
