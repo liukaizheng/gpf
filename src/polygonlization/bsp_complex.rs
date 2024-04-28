@@ -316,7 +316,7 @@ impl BSPComplex {
 
         let mut pos_faces = Vec::new(); // cell pos faces
         let mut neg_faces = Vec::new(); // cell neg faces
-        let zero_outlines = make_loop1(
+        let zero_outlines = make_loop(
             &self.mesh,
             self.cell_data[cid]
                 .faces
@@ -324,7 +324,7 @@ impl BSPComplex {
                 .map(|&fid| {
                     (
                         fid,
-                        split_face_verts1(
+                        split_face_verts(
                             &self.mesh,
                             fid,
                             &self.vert_orientations[tid],
@@ -1629,7 +1629,7 @@ impl SplitFaceResult {
     }
 }
 
-fn split_face_verts1(
+fn split_face_verts(
     mesh: &SurfaceMesh,
     fid: FaceId,
     vert_orientations: &HashMap<VertexId, Orientation>,
@@ -1734,7 +1734,7 @@ fn split_face_verts1(
     }
 }
 
-fn make_loop1(
+fn make_loop(
     mesh: &SurfaceMesh,
     halfedges: Vec<SplitFaceResult>,
     ef_clip_pt_map: &HashMap<EdgeId, usize>,
