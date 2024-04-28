@@ -7,7 +7,7 @@ mod predicates;
 mod less_than;
 
 use std::{
-    alloc::Allocator, arch::x86_64, ops::{Add, Mul, Sub}
+    alloc::Allocator, ops::{Add, Mul, Sub}
 };
 
 pub use expansion_number::*;

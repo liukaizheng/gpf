@@ -31,6 +31,21 @@ fn write_obj(points: &[f64], triangles: &[usize], name: &str) {
     std::fs::write(name, txt).unwrap();
 }
 
+fn read_obj(name: &str) -> (Vec<f64>, Vec<usize>) {
+    let (models, _) =
+        tobj::load_obj(name, &tobj::LoadOptions::default()).expect("Failed to load obj file");
+    let model = &models[0];
+    let points = model
+        .mesh
+        .positions
+        .iter()
+        .map(|x| *x as f64)
+        .collect::<Vec<_>>();
+    let triangles = Vec::from_iter(model.mesh.indices.iter().map(|x| *x as usize));
+    (points, triangles)
+}
+
+
 #[test]
 fn two_models() {
     let f = std::fs::File::open("tests/data/solidFix.json").expect("read file");
@@ -81,20 +96,6 @@ fn test_make_polyhedra_mesh() {
     write_obj(&points, &triangles, "124.obj");
 }
 
-fn read_obj(name: &str) -> (Vec<f64>, Vec<usize>) {
-    let (models, _) =
-        tobj::load_obj(name, &tobj::LoadOptions::default()).expect("Failed to load obj file");
-    let model = &models[0];
-    let points = model
-        .mesh
-        .positions
-        .iter()
-        .map(|x| *x as f64)
-        .collect::<Vec<_>>();
-    let triangles = Vec::from_iter(model.mesh.indices.iter().map(|x| *x as usize));
-    (points, triangles)
-}
-
 #[test]
 fn test_cube_and_sphere() {
     // read cube and sphere
@@ -121,4 +122,14 @@ fn test_cube_and_sphere() {
     let (new_points, new_triangles) =
         make_mesh_for_triangles(&points, &triangles, &tri_in_shells);
     write_obj(&new_points, &new_triangles, "125.obj");
+}
+
+#[test]
+fn test_pig_model() {
+    let (points, triangles) = read_obj("tests/data/boarwindmeter.obj");
+    let tri_in_shells = vec![0; triangles.len() / 3];
+    let (new_points, new_triangles) =
+        make_mesh_for_triangles(&points, &triangles, &tri_in_shells);
+    write_obj(&new_points, &new_triangles, "126.obj");
+
 }

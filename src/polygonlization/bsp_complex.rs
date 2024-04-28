@@ -1,9 +1,9 @@
 use core::panic;
-use std::{alloc::Allocator, array::from_fn, cell, fs, ops::Deref};
+use std::{alloc::Allocator, array::from_fn, ops::Deref};
 
 use bumpalo::Bump;
-use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     disjoint_set::DisjointSet,
@@ -12,8 +12,8 @@ use crate::{
     mesh::{EdgeId, ElementId, Face, FaceId, Halfedge, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
         double_to_sign, max_comp_in_tri_normal, orient2d, orient2d_by_axis, orient3d::orient3d,
-        sign_reverse, sign_reversed, ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
-        Orientation, Point3D,
+        sign_reverse, sign_reversed, ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI,
+        ImplicitPointTPI, Orientation, Point3D,
     },
     triangle::{triangulate, TetMesh},
     INVALID_IND,
@@ -205,10 +205,20 @@ impl BSPComplex {
         }));
 
         let tri_orientations = Vec::from_iter(
-            constraints_data.triangles.chunks(3).enumerate().map(|(i, tri)| {
-                let tri_points = from_fn::<_, 3, _>(|i| point(tet_mesh.points, tri[i]));
-                orient2d_by_axis(tri_points[0], tri_points[1], tri_points[2], tri_axes[i], &bump)
-            }),
+            constraints_data
+                .triangles
+                .chunks(3)
+                .enumerate()
+                .map(|(i, tri)| {
+                    let tri_points = from_fn::<_, 3, _>(|i| point(tet_mesh.points, tri[i]));
+                    orient2d_by_axis(
+                        tri_points[0],
+                        tri_points[1],
+                        tri_points[2],
+                        tri_axes[i],
+                        &bump,
+                    )
+                }),
         );
 
         Self {
@@ -225,7 +235,7 @@ impl BSPComplex {
             vert_visits,
 
             tri_axes,
-            tri_orientations
+            tri_orientations,
         }
     }
 
@@ -314,7 +324,12 @@ impl BSPComplex {
                 .map(|&fid| {
                     (
                         fid,
-                        split_face_verts1(&self.mesh, fid, &self.vert_orientations[tid], self.face_data[fid].cells[0] == cid),
+                        split_face_verts1(
+                            &self.mesh,
+                            fid,
+                            &self.vert_orientations[tid],
+                            self.face_data[fid].cells[0] == cid,
+                        ),
                     )
                 })
                 .filter_map(|(fid, split)| match split {
@@ -349,7 +364,13 @@ impl BSPComplex {
             coplanar_triangles.retain(|&coplanar_tid| {
                 let coplanar_tri = triangle(coplanar_tid, &self.constraints);
                 let coplanar_pts = from_fn::<_, 3, _>(|i| &self.points[coplanar_tri[i]]);
-                is_triangle_intersects_poly(&coplanar_pts, &intersect_poly, self.tri_axes[tid], bump)
+                is_triangle_intersects_poly(
+                    &coplanar_pts,
+                    &intersect_poly,
+                    self.tri_orientations[coplanar_tid],
+                    self.tri_axes[coplanar_tid],
+                    bump,
+                )
             });
             if coplanar_triangles.is_empty() {
                 return;
@@ -367,10 +388,13 @@ impl BSPComplex {
 
             self.vert_visits.push(false);
             self.vert_orientations[tid].insert(vid, Orientation::Zero);
-            self.vertex_data.push(BSPVertexData{ parent: e_verts });
+            self.vertex_data.push(BSPVertexData { parent: e_verts });
 
             self.edge_visits.push(false);
-            self.edge_data.push(BSPEdgeData::new(self.edge_data[eid].parents.clone(), self.edge_data.len()));
+            self.edge_data.push(BSPEdgeData::new(
+                self.edge_data[eid].parents.clone(),
+                self.edge_data.len(),
+            ));
 
             new_vertices.push(vid);
         }
@@ -382,11 +406,9 @@ impl BSPComplex {
             match split {
                 SplitFaceResult::TwoVerts(two_verts) => {
                     let fid = self.mesh.he_face(two_verts[0].unwrap_halfedge());
-                    let [va, vb] = two_verts.map(|v| {
-                        match v.id(&self.mesh, &ef_clip_pt_map) {
-                            GeneralVertexId::Vertex(vid) => vid,
-                            GeneralVertexId::Index(idx) => new_vertices[idx],
-                        }
+                    let [va, vb] = two_verts.map(|v| match v.id(&self.mesh, &ef_clip_pt_map) {
+                        GeneralVertexId::Vertex(vid) => vid,
+                        GeneralVertexId::Index(idx) => new_vertices[idx],
                     });
                     let new_hid = self.mesh.split_face(fid, va, vb, bump);
                     let new_fid = self.mesh.he_face(new_hid);
@@ -396,7 +418,9 @@ impl BSPComplex {
                         zero_ori_halfedges.push(self.mesh.he_sibling(new_hid));
                     }
 
-                    let new_is_pos = orientation[&self.mesh.he_tip_vertex(self.mesh.he_next(new_hid))] == Orientation::Positive;
+                    let new_is_pos = orientation
+                        [&self.mesh.he_tip_vertex(self.mesh.he_next(new_hid))]
+                        == Orientation::Positive;
                     if new_is_pos {
                         pos_faces.push(new_fid);
                         neg_faces.push(fid);
@@ -406,7 +430,8 @@ impl BSPComplex {
                     }
 
                     self.edge_visits.push(false);
-                    let parent = Vec::from_iter(tri.iter().chain(&self.face_data[fid].plane).map(|id| *id));
+                    let parent =
+                        Vec::from_iter(tri.iter().chain(&self.face_data[fid].plane).map(|id| *id));
                     self.edge_data
                         .push(BSPEdgeData::new(parent, self.edge_data.len()));
 
@@ -547,87 +572,7 @@ impl BSPComplex {
             }
             self.cell_data[new_cid].inner_triangles = pos_inner_triangles;
             self.cell_data[cid].inner_triangles = neg_inner_triangles;
-            if !self.validate_cell(new_cid) || !self.validate_cell(cid) {
-                println!("split cell invalid");
-            }
         }
-    }
-
-    fn validate_cell(&mut self, cid: usize) -> bool {
-        let mut map = HashMap::new();
-        for &fid in &self.cell_data[cid].faces {
-            let mut set = std::collections::HashSet::new();
-            let mut count = 0;
-            for hid in self.mesh.face(fid).halfedges() {
-                count += 1;
-                let eid = self.mesh.he_edge(hid);
-                let e_hid = self.mesh.e_halfedge(eid);
-                set.insert(self.mesh.he_vertex(hid));
-                let val = if (self.mesh.he_vertex(hid) == self.mesh.he_vertex(e_hid)) == (self.face_data[fid].cells[0] == cid)  {
-                    map.get(&eid).unwrap_or(&0) + 1
-                } else {
-                    map.get(&eid).unwrap_or(&0) - 1
-                };
-                map.insert(eid, val);
-            }
-            if set.len() != count {
-                return false;
-            }
-        }
-        map.values().all(|&val| val == 0)
-    }
-
-    fn print_cid(&self, cid: usize, name: &str) {
-        let mut explicit_points = vec![0.0; self.points.len() * 3];
-        for (p, data) in self.points.iter().zip(explicit_points.chunks_mut(3)) {
-            match p {
-                Point3D::Explicit(p) => {
-                    data[0] = p.data[0];
-                    data[1] = p.data[1];
-                    data[2] = p.data[2];
-                }
-                Point3D::LPI(p) => {
-                    p.to_explicit(data);
-                }
-                Point3D::TPI(p) => {
-                    p.to_explicit(data);
-                }
-            }
-        }
-        let mut txt = "".to_owned();
-        for p in explicit_points.chunks(3) {
-            txt.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
-        }
-        for &fid in &self.cell_data[cid].faces {
-            txt.push_str(&format!("f"));
-            for vid in self
-                .mesh
-                .face(fid)
-                .halfedges()
-                .map(|hid| self.mesh.he_vertex(hid))
-            {
-                txt.push_str(&format!(" {}", vid.0 + 1));
-            }
-            txt.push_str("\n");
-        }
-        std::io::Write::write_all(&mut std::fs::File::create(name).unwrap(), txt.as_bytes())
-            .unwrap();
-    }
-
-    fn print_triangle(&self, tid: usize, name: &str) {
-        let tri_verts = triangle(tid, &self.constraints);
-        let tri_points = Vec::from_iter(
-            tri_verts
-                .iter()
-                .map(|&vid| self.points[vid].explicit().unwrap().data),
-        );
-        let mut txt = "".to_owned();
-        for p in tri_points {
-            txt.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
-        }
-        txt.push_str(&format!("f 1 2 3\n"));
-        std::io::Write::write_all(&mut std::fs::File::create(name).unwrap(), txt.as_bytes())
-            .unwrap();
     }
 
     pub fn complex_partition(&mut self, tri_in_shell: &[usize]) -> (Vec<f64>, Vec<usize>) {
@@ -1011,7 +956,8 @@ impl BSPComplex {
             Group(Vec<usize>),
         }
 
-        let mut vert_out_edge_map = hashbrown::HashMap::<VertexId, HalfedgeGroup, _, _>::new_in(bump);
+        let mut vert_out_edge_map =
+            hashbrown::HashMap::<VertexId, HalfedgeGroup, _, _>::new_in(bump);
         let mut multi_out_verts = HashSet::new();
         for (i, &(eid, reversed)) in halfedges.iter().enumerate() {
             let [ea, eb] = self.mesh.e_vertices(eid);
@@ -1255,9 +1201,7 @@ impl BSPComplex {
     ) -> Vec<usize> {
         let pivot_tid = *self.cell_data[cid].inner_triangles.last().unwrap();
         let pivot_tri = self.triangle(pivot_tid);
-        let plane_pts = from_fn::<_, 3, _>(
-            |i| &self.points[pivot_tri[i]]
-        );
+        let plane_pts = from_fn::<_, 3, _>(|i| &self.points[pivot_tri[i]]);
 
         let mut coplanar_triangles = Vec::new();
         self.cell_data[cid].inner_triangles.retain(|&tid| {
@@ -1315,42 +1259,6 @@ impl BSPComplex {
             self.edge_visits[eid] = false;
         }
         (verts, edges)
-    }
-
-    #[inline]
-    fn split_edge<A: Allocator + Copy>(
-        &mut self,
-        eid: EdgeId,
-        tri: &[VertexId],
-        bump: A,
-    ) -> VertexId {
-        let vid = self.mesh.split_edge(eid, bump);
-        self.edge_visits.push(false);
-        let p0 = self.points[tri[0]].explicit().unwrap().clone();
-        let p1 = self.points[tri[1]].explicit().unwrap().clone();
-        let p2 = self.points[tri[2]].explicit().unwrap().clone();
-        let ori_edge_parents = self.edge_data[eid].parents.clone();
-        if ori_edge_parents.len() > 2 {
-            self.points.push(three_planes_intersection(
-                [&ori_edge_parents[..3], &ori_edge_parents[3..], tri],
-                &self.points,
-                bump,
-            ));
-        } else {
-            self.points.push(Point3D::LPI(ImplicitPointLPI::new(
-                self.points[ori_edge_parents[0]].explicit().unwrap().clone(),
-                self.points[ori_edge_parents[1]].explicit().unwrap().clone(),
-                p0,
-                p1,
-                p2,
-            )));
-        }
-        self.vert_visits.push(false);
-
-        self.edge_visits.push(false);
-        self.edge_data
-            .push(BSPEdgeData::new(ori_edge_parents, self.edge_data.len()));
-        vid
     }
 
     fn get_ef_clip_pt<A: Allocator + Copy>(
@@ -1681,7 +1589,7 @@ impl ZeroVert {
     fn id(&self, mesh: &SurfaceMesh, ef_clip_pt_map: &HashMap<EdgeId, usize>) -> GeneralVertexId {
         match self {
             ZeroVert::Intersection((_, eid)) => GeneralVertexId::Index(ef_clip_pt_map[eid]),
-            ZeroVert::Start(he) => GeneralVertexId::Vertex(mesh.he_vertex(*he))
+            ZeroVert::Start(he) => GeneralVertexId::Vertex(mesh.he_vertex(*he)),
         }
     }
 }
@@ -1695,7 +1603,11 @@ enum SplitFaceResult {
 
 impl SplitFaceResult {
     #[inline]
-    fn start(&self, mesh: &SurfaceMesh, ef_clip_pt_map: &HashMap<EdgeId, usize>) -> GeneralVertexId {
+    fn start(
+        &self,
+        mesh: &SurfaceMesh,
+        ef_clip_pt_map: &HashMap<EdgeId, usize>,
+    ) -> GeneralVertexId {
         match self {
             SplitFaceResult::TwoVerts([va, _]) => va.id(mesh, ef_clip_pt_map),
             SplitFaceResult::ZeroHalfedges(halfedges) => {
@@ -1764,7 +1676,8 @@ fn split_face_verts1(
     //all halfedges round counterclockwise
     let sort_two_verts = |mut verts: [ZeroVert; 2]| -> SplitFaceResult {
         if (vert_orientations[&mesh.he_tip_vertex(verts[1].unwrap_halfedge())]
-            == Orientation::Positive) == face_ori_correct
+            == Orientation::Positive)
+            == face_ori_correct
         {
             verts.swap(0, 1);
         }
@@ -1821,75 +1734,6 @@ fn split_face_verts1(
     }
 }
 
-fn split_face_verts<A: Allocator + Copy>(
-    mesh: &SurfaceMesh,
-    fid: FaceId,
-    vert_orientations: &HashMap<VertexId, Orientation>,
-    bump: A,
-) -> Result<[VertexId; 2], Result<Vec<HalfedgeId, A>, bool>> {
-    let (mut first, mut second) = (None, None);
-    let (mut has_pos, mut has_neg) = (false, false);
-    let mut zero_ori_candidates = Vec::new_in(bump);
-    for hid in mesh.face(fid).halfedges() {
-        let vid = mesh.he_vertex(hid);
-        match vert_orientations.get(&vid).unwrap() {
-            Orientation::Positive => {
-                has_pos = true;
-                if has_neg
-                    && let Some(first) = first
-                    && let Some(second) = second
-                {
-                    return Ok([first, second]);
-                }
-            }
-            Orientation::Negative => {
-                has_neg = true;
-                if has_pos
-                    && let Some(first) = first
-                    && let Some(second) = second
-                {
-                    return Ok([first, second]);
-                }
-            }
-            Orientation::Zero => {
-                zero_ori_candidates.push(hid);
-                if first.is_none() {
-                    first = Some(vid);
-                } else if second.is_none() {
-                    if has_pos && has_neg {
-                        return Ok([first.unwrap(), vid]);
-                    } else {
-                        second = Some(vid);
-                    }
-                }
-            }
-            Orientation::Undefined => {}
-        }
-    }
-
-    zero_ori_candidates.retain(|&hid| {
-        vert_orientations.get(&mesh.he_tip_vertex(hid)).unwrap() == &Orientation::Zero
-    });
-
-    if zero_ori_candidates.is_empty() {
-        return Err(Err(has_pos));
-    } else {
-        if zero_ori_candidates.len() == 1 {
-            return Err(Ok(zero_ori_candidates));
-        } else {
-            // find break point
-            let pos = (0..zero_ori_candidates.len() - 1).find(|i| {
-                mesh.he_tip_vertex(zero_ori_candidates[*i])
-                    != mesh.he_vertex(zero_ori_candidates[*i + 1])
-            });
-            if let Some(pos) = pos {
-                zero_ori_candidates.rotate_left(pos + 1);
-            }
-            return Err(Ok(zero_ori_candidates));
-        }
-    }
-}
-
 fn make_loop1(
     mesh: &SurfaceMesh,
     halfedges: Vec<SplitFaceResult>,
@@ -1924,29 +1768,6 @@ fn make_loop1(
         curr = next;
     }
     result.into_iter().map(|i| halfedges[i].clone()).collect()
-}
-
-fn make_loop<A: Allocator + Copy>(
-    mesh: &SurfaceMesh,
-    halfedges: Vec<HalfedgeId, A>,
-) -> Vec<HalfedgeId, A> {
-    let bump = *halfedges.allocator();
-    let mut map = HashMap::new();
-    map.extend(halfedges.iter().map(|&hid| (mesh.he_vertex(hid), hid)));
-
-    let first = halfedges[0];
-    let mut result = Vec::new_in(bump);
-    result.push(first);
-    let mut curr = first;
-    loop {
-        let next = *map.get(&mesh.he_tip_vertex(curr)).unwrap();
-        if next == first {
-            break;
-        }
-        result.push(next);
-        curr = next;
-    }
-    result
 }
 
 fn is_triangle_intersects_cell<A: Allocator + Copy>(
@@ -2030,11 +1851,10 @@ fn is_triangle_intersects_cell<A: Allocator + Copy>(
 fn is_triangle_intersects_poly<A: Allocator + Copy>(
     tri: &[&Point3D],
     poly: &[&Point3D],
+    base_ori: Orientation,
     axis: usize,
     alloc: A,
 ) -> bool {
-    // print_tri_and_poly(tri, poly);
-    let base_ori = orient2d::orient2d_by_axis(tri[0], tri[1], tri[2], axis, alloc);
     {
         let mut all_poly_verts_inside = [true; 3];
         for (i, (&pa, &pb)) in tri.iter().circular_tuple_windows().enumerate() {
@@ -2077,42 +1897,6 @@ fn is_triangle_intersects_poly<A: Allocator + Copy>(
         }
     }
     true
-}
-
-fn print_tri_and_poly(tri: &[&Point3D], poly: &[&Point3D]) {
-    let mut txt = String::new();
-    for p in tri {
-        let p = p.explicit().unwrap();
-        txt.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
-    }
-    txt.push_str("f 1 2 3\n");
-    std::fs::write("tri.obj", txt).unwrap();
-
-    let mut txt = String::new();
-
-    for p in poly {
-        match *p {
-            Point3D::Explicit(p) => {
-                txt.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
-            }
-            Point3D::LPI(p) => {
-                let mut data: [f64; 3] = [0.0, 0.0, 0.0];
-                p.to_explicit(&mut data);
-                txt.push_str(&format!("v {} {} {}\n", data[0], data[1], data[2]));
-            }
-            Point3D::TPI(p) => {
-                let mut data: [f64; 3] = [0.0, 0.0, 0.0];
-                p.to_explicit(&mut data);
-                txt.push_str(&format!("v {} {} {}\n", data[0], data[1], data[2]));
-            }
-        }
-    }
-    txt.push_str("f");
-    for i in 0..poly.len() {
-        txt.push_str(&format!(" {}", i + 1));
-    }
-    txt.push_str("\n");
-    std::fs::write("tri_poly.obj", txt).unwrap();
 }
 
 #[inline(always)]
