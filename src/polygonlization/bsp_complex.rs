@@ -1,5 +1,5 @@
 use core::panic;
-use std::{alloc::Allocator, fs, ops::Deref};
+use std::{alloc::Allocator, array::from_fn, cell, fs, ops::Deref};
 
 use bumpalo::Bump;
 use std::collections::{HashMap, HashSet};
@@ -12,7 +12,7 @@ use crate::{
     mesh::{EdgeId, ElementId, Face, FaceId, Halfedge, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
         double_to_sign, max_comp_in_tri_normal, orient2d, orient2d_by_axis, orient3d::orient3d,
-        sign_reversed, ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
+        sign_reverse, sign_reversed, ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
         Orientation, Point3D,
     },
     triangle::{triangulate, TetMesh},
@@ -113,7 +113,8 @@ pub(crate) struct BSPComplex {
 
     edge_visits: Vec<bool>,
 
-    tri_orientations: Vec<usize>,
+    tri_axes: Vec<usize>,
+    tri_orientations: Vec<Orientation>,
 }
 
 #[inline(always)]
@@ -197,11 +198,18 @@ impl BSPComplex {
         );
 
         let constraints = Vec::from_iter(constraints_data.triangles.iter().map(|&idx| idx.into()));
-        let tri_orientations = Vec::from_iter(constraints_data.triangles.chunks(3).map(|tri| {
+        let tri_axes = Vec::from_iter(constraints_data.triangles.chunks(3).map(|tri| {
             bump.reset();
-            let tri_points = Vec::from_iter(tri.iter().map(|&vid| point(tet_mesh.points, vid)));
+            let tri_points = from_fn::<_, 3, _>(|i| point(tet_mesh.points, tri[i]));
             max_comp_in_tri_normal(tri_points[0], tri_points[1], tri_points[2], &bump)
         }));
+
+        let tri_orientations = Vec::from_iter(
+            constraints_data.triangles.chunks(3).enumerate().map(|(i, tri)| {
+                let tri_points = from_fn::<_, 3, _>(|i| point(tet_mesh.points, tri[i]));
+                orient2d_by_axis(tri_points[0], tri_points[1], tri_points[2], tri_axes[i], &bump)
+            }),
+        );
 
         Self {
             points,
@@ -216,7 +224,8 @@ impl BSPComplex {
             vert_orientations,
             vert_visits,
 
-            tri_orientations,
+            tri_axes,
+            tri_orientations
         }
     }
 
@@ -231,13 +240,9 @@ impl BSPComplex {
     }
 
     pub(crate) fn split_cell<A: Allocator + Copy>(&mut self, cid: usize, bump: A) {
-        let tid = *self.cell_data[cid].inner_triangles.last().unwrap();
-        let tri = self.triangle(tid).to_vec_in(bump);
-        self.cell_data[cid].inner_triangles.pop();
-        let mut coplanar_triangles = self.separate_out_coplanar_triangles(tid, cid, bump);
-        if !self.is_virtual(tid) {
-            coplanar_triangles.push(tid);
-        }
+        let mut coplanar_triangles = self.separate_out_coplanar_triangles(cid, bump);
+        let tid = *coplanar_triangles.last().unwrap();
+        let tri = self.triangle(tid).to_vec();
         let (cell_verts, cell_edges) = self.cell_verts_and_edges(cid, bump);
         verts_orient_wrt_plane(
             &self.points[tri[0]],
@@ -249,6 +254,23 @@ impl BSPComplex {
             &mut self.vert_orientations[tid],
             bump,
         );
+
+        // save the orientation of the triangle for other coplanar triangles
+        if coplanar_triangles.len() > 1 {
+            let base_tri_ori = self.tri_orientations[tid];
+            for &vid in &cell_verts {
+                let ori = *self.vert_orientations[tid].get(&vid).unwrap();
+                for i in 0..coplanar_triangles.len() - 1 {
+                    let coplanar_tid = coplanar_triangles[i];
+                    let coplanar_ori = self.tri_orientations[coplanar_tid];
+                    if base_tri_ori == coplanar_ori {
+                        self.vert_orientations[coplanar_tid].insert(vid, ori);
+                    } else {
+                        self.vert_orientations[coplanar_tid].insert(vid, sign_reverse(ori));
+                    }
+                }
+            }
+        }
 
         let mut pos_verts = Vec::new();
         let mut neg_verts = Vec::new();
@@ -323,15 +345,16 @@ impl BSPComplex {
                     GeneralVertexId::Index(idx) => &new_pts[idx],
                 })
                 .collect_vec();
-            let tri_pts = tri.iter().map(|&vid| &self.points[vid]).collect_vec();
-            if !is_triangle_intersects_poly(
-                &tri_pts,
-                &intersect_poly,
-                self.tri_orientations[tid],
-                bump,
-            ) {
+
+            coplanar_triangles.retain(|&coplanar_tid| {
+                let coplanar_tri = triangle(coplanar_tid, &self.constraints);
+                let coplanar_pts = from_fn::<_, 3, _>(|i| &self.points[coplanar_tri[i]]);
+                is_triangle_intersects_poly(&coplanar_pts, &intersect_poly, self.tri_axes[tid], bump)
+            });
+            if coplanar_triangles.is_empty() {
                 return;
             }
+            coplanar_triangles.retain(|&coplanar_tid| !self.is_virtual(coplanar_tid))
         }
 
         // split edges
@@ -533,15 +556,22 @@ impl BSPComplex {
     fn validate_cell(&mut self, cid: usize) -> bool {
         let mut map = HashMap::new();
         for &fid in &self.cell_data[cid].faces {
+            let mut set = std::collections::HashSet::new();
+            let mut count = 0;
             for hid in self.mesh.face(fid).halfedges() {
+                count += 1;
                 let eid = self.mesh.he_edge(hid);
                 let e_hid = self.mesh.e_halfedge(eid);
+                set.insert(self.mesh.he_vertex(hid));
                 let val = if (self.mesh.he_vertex(hid) == self.mesh.he_vertex(e_hid)) == (self.face_data[fid].cells[0] == cid)  {
                     map.get(&eid).unwrap_or(&0) + 1
                 } else {
                     map.get(&eid).unwrap_or(&0) - 1
                 };
                 map.insert(eid, val);
+            }
+            if set.len() != count {
+                return false;
             }
         }
         map.values().all(|&val| val == 0)
@@ -598,45 +628,6 @@ impl BSPComplex {
         txt.push_str(&format!("f 1 2 3\n"));
         std::io::Write::write_all(&mut std::fs::File::create(name).unwrap(), txt.as_bytes())
             .unwrap();
-    }
-
-    pub fn println_all_cell(&mut self) {
-        let mut explicit_points = vec![0.0; self.points.len() * 3];
-        for (p, data) in self.points.iter().zip(explicit_points.chunks_mut(3)) {
-            match p {
-                Point3D::Explicit(p) => {
-                    data[0] = p.data[0];
-                    data[1] = p.data[1];
-                    data[2] = p.data[2];
-                }
-                Point3D::LPI(p) => {
-                    p.to_explicit(data);
-                }
-                Point3D::TPI(p) => {
-                    p.to_explicit(data);
-                }
-            }
-        }
-        let mut txt = "".to_owned();
-        for p in explicit_points.chunks(3) {
-            txt.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
-        }
-
-        for fid in self.mesh.faces() {
-            txt.push_str(&format!("f"));
-            for vid in self
-                .mesh
-                .face(fid)
-                .halfedges()
-                .map(|hid| self.mesh.he_vertex(hid))
-            {
-                txt.push_str(&format!(" {}", vid.0 + 1));
-            }
-            txt.push_str("\n");
-
-        }
-        std::io::Write::write_all(&mut std::fs::File::create("cell.obj").unwrap(), txt.as_bytes()).unwrap();
-
     }
 
     pub fn complex_partition(&mut self, tri_in_shell: &[usize]) -> (Vec<f64>, Vec<usize>) {
@@ -706,7 +697,7 @@ impl BSPComplex {
             let center_in_face = self.point_in_face(
                 fid,
                 &face_centers[fid],
-                self.tri_orientations[face_triangles[0]],
+                self.tri_axes[face_triangles[0]],
                 &bump,
             );
 
@@ -720,7 +711,7 @@ impl BSPComplex {
                 let pb = point(&explicit_points, *tri[1]);
                 let pc = point(&explicit_points, *tri[2]);
 
-                let axis = self.tri_orientations[tid];
+                let axis = self.tri_axes[tid];
 
                 let face_intersects_tri = if center_in_face {
                     let center = face_centers[fid].explicit().unwrap();
@@ -798,8 +789,6 @@ impl BSPComplex {
             }
         }
 
-        println!("the number of kept cells: {}", cell_kept.iter().filter(|&&b| b).count() - 1);
-
         let mut kept_faces = vec![0; self.face_data.len()];
         for fid in self.mesh.faces() {
             let [c1, mut c2] = self.face_data[fid].cells;
@@ -832,13 +821,6 @@ impl BSPComplex {
 
         for (face_verts, axis) in self.merge_faces(kept_faces) {
             bump.reset();
-            for verts in &face_verts {
-                let vert_set = verts.iter().map(|&v| v).collect::<HashSet<_>>();
-                if vert_set.len() != verts.len() {
-                    println!("duplicate vertices in face");
-                    continue;
-                }
-            }
             let n_faces_verts = face_verts.iter().flatten().count();
             let mut points_2d = Vec::with_capacity_in(n_faces_verts << 1, &bump);
             let mut face_new_verts = Vec::with_capacity_in(n_faces_verts, &bump);
@@ -968,7 +950,7 @@ impl BSPComplex {
             let outline_groups = self.extract_faces_outlines(&faces, &kept_faces, &bump);
 
             let axis = if tid != INVALID_IND {
-                self.tri_orientations[tid]
+                self.tri_axes[tid]
             } else {
                 let [pa, pb, pc] = self.face_data[base_fid]
                     .plane
@@ -1268,16 +1250,15 @@ impl BSPComplex {
 
     fn separate_out_coplanar_triangles<A: Allocator + Copy>(
         &mut self,
-        pivot_tid: usize,
         cid: usize,
         bump: A,
     ) -> Vec<usize> {
-        let mut plane_pts = Vec::with_capacity_in(3, bump);
-        plane_pts.extend(
-            self.triangle(pivot_tid)
-                .iter()
-                .map(|&vid| &self.points[vid]),
+        let pivot_tid = *self.cell_data[cid].inner_triangles.last().unwrap();
+        let pivot_tri = self.triangle(pivot_tid);
+        let plane_pts = from_fn::<_, 3, _>(
+            |i| &self.points[pivot_tri[i]]
         );
+
         let mut coplanar_triangles = Vec::new();
         self.cell_data[cid].inner_triangles.retain(|&tid| {
             let start = tid * 3;
@@ -1296,7 +1277,7 @@ impl BSPComplex {
             let coplanar = *ori.get(&tri[0]).unwrap() == Orientation::Zero
                 && *ori.get(&tri[1]).unwrap() == Orientation::Zero
                 && *ori.get(&tri[2]).unwrap() == Orientation::Zero;
-            if coplanar && tid < self.n_ori_triangles {
+            if coplanar {
                 coplanar_triangles.push(tid);
             }
             !coplanar

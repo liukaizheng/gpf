@@ -610,5 +610,5 @@ pub fn orient2d_by_axis<A: Allocator + Copy>(
     } else {
         orient2d(pa, pb, pc, bump)
     };
-    double_to_sign(-ori)
+    double_to_sign(ori)
 }
