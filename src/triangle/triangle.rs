@@ -873,6 +873,7 @@ enum Direction {
 
 fn find_direction<A: Allocator + Copy>(
     m: &Mesh<A>,
+    ghost: &[bool],
     search_tri: &mut HEdge,
     search_point: usize,
     bump: A,
@@ -889,7 +890,7 @@ fn find_direction<A: Allocator + Copy>(
     let mut check_tri = HEdge::default();
     if left_flag && right_flag {
         onext(&m.triangles, search_tri, &mut check_tri);
-        if check_tri.tri == INVALID_IND {
+        if ghost[check_tri.tri] {
             left_flag = false;
         } else {
             right_flag = false;
@@ -949,12 +950,13 @@ fn set_mark(triangles: &mut [Triangle], he: &HEdge, mark: usize, reverse: bool) 
 
 fn scout_segment<A: Allocator + Copy>(
     m: &mut Mesh<A>,
+    ghost: &[bool],
     search_tri: &mut HEdge,
     endpoint2: usize,
     mark: usize,
     bump: A,
 ) -> bool {
-    let collinear = find_direction(m, search_tri, endpoint2, bump);
+    let collinear = find_direction(m, ghost, search_tri, endpoint2, bump);
     let right_vertex = dest(&m.triangles, search_tri);
     let left_vertex = apex(&m.triangles, search_tri);
     if left_vertex == endpoint2 {
@@ -972,11 +974,11 @@ fn scout_segment<A: Allocator + Copy>(
         Direction::WITHIN => false,
         Direction::LEFTCOLLINEAR => {
             prev_self(search_tri);
-            scout_segment(m, search_tri, endpoint2, twin(mark), bump)
+            scout_segment(m, ghost, search_tri, endpoint2, twin(mark), bump)
         }
         Direction::RIGHTCOLLINEAR => {
             next_self(search_tri);
-            scout_segment(m, search_tri, endpoint2, mark, bump)
+            scout_segment(m, ghost, search_tri, endpoint2, mark, bump)
         }
     }
 }
@@ -1154,7 +1156,7 @@ fn constrained_edge<A: Allocator + Copy>(
         }
     }
     if collision {
-        if !scout_segment(m, &mut fixup_tri, endpoint2, mark, bump) {
+        if !scout_segment(m, ghost,&mut fixup_tri, endpoint2, mark, bump) {
             constrained_edge(m, ghost, &mut fixup_tri, endpoint2, mark, vertex_map, bump);
         }
     } else {
@@ -1178,7 +1180,7 @@ fn insert_segment<A: Allocator + Copy>(
     bump: A,
 ) {
     let mut searchtri1 = vertex_map[start].clone();
-    if scout_segment(m, &mut searchtri1, end, mark, bump) {
+    if scout_segment(m, ghost, &mut searchtri1, end, mark, bump) {
         return;
     }
 
@@ -1187,7 +1189,7 @@ fn insert_segment<A: Allocator + Copy>(
     start = org(&m.triangles, &searchtri1);
 
     let mut searchtri2 = vertex_map[end].clone();
-    if scout_segment(m, &mut searchtri2, start, twin(mark), bump) {
+    if scout_segment(m, ghost, &mut searchtri2, start, twin(mark), bump) {
         return;
     }
     end = org(&m.triangles, &searchtri2);
