@@ -4,10 +4,10 @@ mod interval_number;
 pub mod orient2d;
 pub mod orient3d;
 mod predicates;
+mod less_than;
 
 use std::{
-    alloc::Allocator,
-    ops::{Add, Mul, Sub},
+    alloc::Allocator, ops::{Add, Mul, Sub}
 };
 
 pub use expansion_number::*;
@@ -15,6 +15,8 @@ pub use generic_point::*;
 pub use interval_number::*;
 pub use orient2d::*;
 pub use predicates::*;
+pub use less_than::*;
+
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
 pub enum Orientation {
@@ -191,7 +193,7 @@ pub fn max_comp_in_tri_normal<A: Allocator + Copy>(
     let max_comp = max_comp_in_tri_normal_filter(
         ov1[0], ov1[1], ov1[2], ov2[0], ov2[1], ov2[2], ov3[0], ov3[1], ov3[2],
     );
-    if max_comp < 4 {
+    if max_comp < 3 {
         max_comp
     } else {
         max_comp_in_tri_normal_exact(
@@ -511,6 +513,54 @@ pub fn point_in_segment<A: Allocator + Copy>(
     return same_point(p, v1) || same_point(p, v2) || point_in_inner_segment(p, v1, v2, allocator);
 }
 
+/// is the point p in the segment v1v2?
+/// assuming that p, v1, v2 are collinear
+#[inline(always)]
+pub fn point_in_segment_general<A: Allocator + Copy>(
+    p: &Point3D,
+    v1: &Point3D,
+    v2: &Point3D,
+    allocator: A
+) -> bool {
+    let comp1 = less_than_on_x(v1, p, allocator);
+    let comp2 = less_than_on_x(p, v2, allocator);
+    if comp1 != comp2 {
+        if comp1 == Orientation::Zero || comp2 == Orientation::Zero {
+            return true;
+        } else {
+            return false;
+        }
+    } else if comp1 != Orientation::Zero {
+        return true;
+    }
+
+    let comp1 = less_than_on_y(v1, p, allocator);
+    let comp2 = less_than_on_y(p, v2, allocator);
+
+    if comp1 != comp2 {
+        if comp1 == Orientation::Zero || comp2 == Orientation::Zero {
+            return true;
+        } else {
+            return false;
+        }
+    } else if comp1 != Orientation::Zero {
+        return true;
+    }
+
+    let comp1 = less_than_on_z(v1, p, allocator);
+    let comp2 = less_than_on_z(p, v2, allocator);
+    if comp1 != comp2 {
+        if comp1 == Orientation::Zero || comp2 == Orientation::Zero {
+            return true;
+        } else {
+            return false;
+        }
+    } else {
+        // the segment is a point
+        return true;
+    }
+}
+
 #[inline(always)]
 pub fn inner_segment_cross_triangle<A: Allocator + Copy>(
     u1: &[f64],
@@ -560,5 +610,5 @@ pub fn orient2d_by_axis<A: Allocator + Copy>(
     } else {
         orient2d(pa, pb, pc, bump)
     };
-    double_to_sign(-ori)
+    double_to_sign(ori)
 }

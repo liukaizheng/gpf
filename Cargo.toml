@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 bumpalo = {version = "3.13.0", features = ["collections", "allocator_api"]}
-hashbrown = { version = "0.14.0", default-features = false, features = ["ahash", "nightly"] }
+hashbrown = { version = "0.14.3", default-features = false, features = ["ahash", "nightly"] }
 itertools = "0.10.5"
 rand = {version = "0.8.5", features = ["small_rng"]}
 

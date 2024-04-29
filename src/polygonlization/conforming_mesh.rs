@@ -10,7 +10,7 @@ use crate::{
     predicates::{
         self, double_to_sign, inner_segment_cross_inner_triangle, inner_segment_cross_triangle,
         inner_segments_cross, max_comp_in_tri_normal, point_in_inner_segment, point_in_triangle,
-        same_half_plane,
+        same_half_plane, Orientation,
     },
     triangle::{TetMesh, TriFace, VPIVOT},
     INVALID_IND,
@@ -50,7 +50,7 @@ impl Constraints {
             }
         }
         let mut bump = Bump::new();
-        for (_, halfedges) in edge_map {
+        for halfedges in edge_map.into_values() {
             bump.reset();
             self.add_virtual_constraint(tet_mesh, halfedges, &bump);
         }
@@ -162,6 +162,24 @@ impl Constraints {
 struct IntersectInfo<A: Allocator + Copy> {
     intersected: Vec<usize, A>,
     visited: Vec<bool, A>,
+}
+
+#[inline(always)]
+fn vert_inner_segment_cross<A: Allocator + Copy>(
+    mesh: &TetMesh,
+    u1: usize,
+    u2: usize,
+    v1: usize,
+    v2: usize,
+    allocator: A,
+) -> bool {
+    inner_segments_cross(
+        mesh.point(u1),
+        mesh.point(u2),
+        mesh.point(v1),
+        mesh.point(v2),
+        allocator,
+    )
 }
 
 #[inline(always)]
@@ -689,7 +707,9 @@ fn set_improper_intersections<A: Allocator + Copy>(
                 }
             }
             _ => {
-                tet_marks[4][tid].push(cid);
+                if constraint_intersect_empty(mesh, triangle, tid, &neg, &pos, bump) {
+                    tet_marks[4][tid].push(cid);
+                }
             }
         }
     }
@@ -825,22 +845,17 @@ fn constraint_intersect_vertex<A: Allocator + Copy>(
     let vert_on_segments = vert_point_in_segment(mesh, tv, c[0], c[1], bump)
         || vert_point_in_segment(mesh, tv, c[1], c[2], bump)
         || vert_point_in_segment(mesh, tv, c[2], c[0], bump);
-    // tv isn't on triangle, but intersection exist, sot it's improper
+    // tv isn't on triangle, but intersection exist, so it's improper
     if !vert_on_segments {
         return true;
     }
     // now tv is on a boundary of triangle
     if vert_inner_segment_cross_triangle(mesh, over_v, under_vs[0], c, bump)
-        || vert_inner_segment_cross_triangle(mesh, over_v, under_vs[1], c, bump)
+        && vert_inner_segment_cross_triangle(mesh, over_v, under_vs[1], c, bump)
     {
         return true;
     }
     for (&ca, &cb) in c.iter().circular_tuple_windows() {
-        for &v in under_vs {
-            if vert_inner_segment_cross_inner_triangle(mesh, ca, cb, tv, over_v, v, bump) {
-                return true;
-            }
-        }
         if vert_inner_segment_cross_inner_triangle(mesh, ca, cb, tv, over_v, under_vs[0], bump)
             || vert_inner_segment_cross_inner_triangle(mesh, ca, cb, tv, over_v, under_vs[1], bump)
             || vert_inner_segment_cross_inner_triangle(
@@ -857,6 +872,53 @@ fn constraint_intersect_vertex<A: Allocator + Copy>(
         }
     }
     // otherwise... proper intersection
+    return false;
+}
+
+fn constraint_intersect_empty<A: Allocator + Copy>(
+    mesh: &TetMesh,
+    c: &[usize],
+    tid: usize,
+    neg_vs: &[usize],
+    pos_vs: &[usize],
+    bump: A,
+) -> bool {
+    let mut all_cross = true;
+    for &nv in neg_vs {
+        if !all_cross {
+            break;
+        }
+        for &pv in pos_vs {
+            if !c
+                .iter()
+                .circular_tuple_windows()
+                .any(|(&va, &vb)| vert_inner_segment_cross(mesh, nv, pv, va, vb, bump))
+            {
+                all_cross = false;
+                break;
+            }
+        }
+    }
+
+    if all_cross {
+        return true;
+    }
+
+    for &nv in neg_vs {
+        for &pv in pos_vs {
+            if vert_inner_segment_cross_inner_triangle(mesh, nv, pv, c[0], c[1], c[2], bump) {
+                return true;
+            }
+        }
+    }
+
+    for (&v1, &v2) in c.iter().circular_tuple_windows() {
+        for (&va, &vb, &vc) in mesh.tets[tid].data.iter().circular_tuple_windows() {
+            if vert_inner_segment_cross_inner_triangle(mesh, v1, v2, va, vb, vc, bump) {
+                return true;
+            }
+        }
+    }
     return false;
 }
 
@@ -891,19 +953,17 @@ fn constraint_intersect_tet_type<A: Allocator + Copy>(
     tid: usize,
     bump: A,
 ) -> usize {
-    let verts = &mesh.tets[tid].data;
-    let mut oris = [f64::NAN; 4];
-    let mut in_tris = [false; 4];
-    for i in 0..3 {
-        oris[i] = mesh.orient3d(verts[i], c[0], c[1], c[2], bump);
-        in_tris[i] = oris[i] == 0.0 && vert_point_in_inner_triangle(mesh, verts[i], c, bump);
-    }
-
     if mesh.is_hull_tet(tid) {
         return 5;
     }
-    oris[3] = mesh.orient3d(verts[3], c[0], c[1], c[2], bump);
-    in_tris[3] = oris[3] == 0.0 && vert_point_in_inner_triangle(mesh, verts[3], c, bump);
+    let verts = &mesh.tets[tid].data;
+    let mut oris = [Orientation::Undefined; 4];
+    let mut in_tris = [false; 4];
+    for i in 0..4 {
+        oris[i] = double_to_sign(mesh.orient3d(verts[i], c[0], c[1], c[2], bump));
+        in_tris[i] =
+            oris[i] == Orientation::Zero && vert_point_in_inner_triangle(mesh, verts[i], c, bump);
+    }
 
     let mut indices = [0, 1, 2, 3];
     let mid = indices.iter_mut().partition_in_place(|&i| in_tris[i]); // indices[..mid]: in triangle.
@@ -913,20 +973,20 @@ fn constraint_intersect_tet_type<A: Allocator + Copy>(
             return verts_out_c[0];
         }
         2 => {
-            if double_to_sign(oris[verts_out_c[0]]) == double_to_sign(oris[verts_out_c[1]]) {
+            if oris[verts_out_c[0]] == oris[verts_out_c[1]] {
                 return 5;
             } else {
                 return 4;
             }
         }
         1 => {
-            let ori1 = double_to_sign(oris[verts_out_c[0]]);
-            let ori2 = double_to_sign(oris[verts_out_c[1]]);
-            let ori3 = double_to_sign(oris[verts_out_c[2]]);
+            let ori1 = oris[verts_out_c[0]];
+            let ori2 = oris[verts_out_c[1]];
+            let ori3 = oris[verts_out_c[2]];
             if ori1 == ori2 && ori1 == ori3 {
-                return 4;
-            } else {
                 return 5;
+            } else {
+                return 4;
             }
         }
         _ => {
