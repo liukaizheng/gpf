@@ -9,7 +9,7 @@ use crate::{
     disjoint_set::DisjointSet,
     graphcut::GraphCut,
     math::{cross, norm, sub},
-    mesh::{EdgeId, ElementId, Face, FaceId, Halfedge, HalfedgeId, Mesh, SurfaceMesh, VertexId},
+    mesh::{EdgeId, ElementId, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
         double_to_sign, max_comp_in_tri_normal, orient2d, orient2d_by_axis, orient3d::orient3d,
         sign_reverse, sign_reversed, ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI,
@@ -184,17 +184,17 @@ impl BSPComplex {
             cell_data.push(BSPCellData::new(cell_faces, tet_mark[4][tid].clone()));
         }
 
-        let mesh = SurfaceMesh::from(faces);
+        let mesh = SurfaceMesh::new(faces);
 
         let vert_orientations = vec![HashMap::new(); constraints_data.triangles.len() / 3];
         let vert_visits = vec![false; points.len()];
-        let vertex_data = Vec::from_iter(mesh.vertices().map(|vid| BSPVertexData::new(vid)));
+        let vertex_data = Vec::from_iter(mesh.vertices().map(|v| BSPVertexData::new(*v)));
 
         let edge_visits = vec![false; mesh.n_edges()];
         let edge_data = Vec::from_iter(
             mesh.edges()
                 .enumerate()
-                .map(|(i, eid)| BSPEdgeData::new(Vec::from_iter(mesh.e_vertices(eid)), i)),
+                .map(|(i, e)| BSPEdgeData::new(Vec::from_iter(mesh.e_vertices(*e)), i)),
         );
 
         let constraints = Vec::from_iter(constraints_data.triangles.iter().map(|&idx| idx.into()));
@@ -508,7 +508,7 @@ impl BSPComplex {
                 .mesh
                 .face(new_fid)
                 .halfedges()
-                .map(|hid| self.mesh.he_vertex(hid))
+                .map(|he| self.mesh.he_vertex(*he))
             {
                 pos_verts.push(vid);
                 neg_verts.push(vid);
@@ -596,15 +596,10 @@ impl BSPComplex {
         let (face_areas, face_centers) = {
             let mut areas = Vec::with_capacity(self.face_data.len());
             let mut face_centers = Vec::with_capacity(self.face_data.len());
-            for fid in self.mesh.faces() {
+            for face in self.mesh.faces() {
                 bump.reset();
                 let mut face_verts = Vec::new_in(&bump);
-                face_verts.extend(
-                    self.mesh
-                        .face(fid)
-                        .halfedges()
-                        .map(|hid| self.mesh.he_vertex(hid)),
-                );
+                face_verts.extend(face.halfedges().map(|he| *he.from()));
                 areas.push(face_area(&explicit_points, &face_verts, &bump));
                 face_centers.push(face_center(&explicit_points, &face_verts));
             }
@@ -619,7 +614,8 @@ impl BSPComplex {
         let mut cell_costs_external = vec![vec![0.0; self.cell_data.len() + 1]; n_shells];
         let mut cell_costs_internal = vec![vec![0.0; self.cell_data.len() + 1]; n_shells];
         let mut is_black = vec![vec![false; self.mesh.n_faces()]; n_shells];
-        for fid in self.mesh.faces() {
+        for face in self.mesh.faces() {
+            let fid = *face;
             let face_data = &self.face_data[fid];
             let face_triangles = &face_data.triangles;
             if face_triangles.is_empty() {
@@ -711,7 +707,8 @@ impl BSPComplex {
                 }),
         );
 
-        for fid in self.mesh.faces() {
+        for face in self.mesh.faces() {
+            let fid = *face;
             let [c1, mut c2] = self.face_data[fid].cells;
             if c2 == INVALID_IND {
                 c2 = self.cell_data.len();
@@ -735,7 +732,8 @@ impl BSPComplex {
         }
 
         let mut kept_faces = vec![0; self.face_data.len()];
-        for fid in self.mesh.faces() {
+        for face in self.mesh.faces() {
+            let fid = *face;
             let [c1, mut c2] = self.face_data[fid].cells;
             if c2 == INVALID_IND {
                 c2 = self.cell_data.len();
@@ -839,10 +837,11 @@ impl BSPComplex {
         let mut edge_faces = vec![Vec::new(); self.edge_data.len()];
         let mut f_old_to_new = vec![INVALID_IND; self.face_data.len()];
         let mut f_new_to_old = Vec::new();
-        for fid in self.mesh.faces() {
+        for face in self.mesh.faces() {
+            let fid = *face;
             if kept_faces[fid] != 0 {
-                for hid in self.mesh.face(fid).halfedges() {
-                    edge_faces[self.mesh.he_edge(hid)].push(fid);
+                for he in face.halfedges() {
+                    edge_faces[*he.edge()].push(fid);
                 }
                 f_old_to_new[fid] = f_new_to_old.len();
                 f_new_to_old.push(fid);
@@ -850,8 +849,8 @@ impl BSPComplex {
         }
 
         let mut ds = DisjointSet::new(f_new_to_old.len());
-        for eid in self.mesh.edges() {
-            let faces = &mut edge_faces[eid];
+        for edge in self.mesh.edges() {
+            let faces = &mut edge_faces[*edge];
             if faces.len() == 2 {
                 if self.on_the_same_plane(faces[0], faces[1]) {
                     ds.merge(f_old_to_new[faces[0]], f_old_to_new[faces[1]]);
@@ -880,7 +879,7 @@ impl BSPComplex {
         Vec::from_iter(group_map.into_values().map(|indices| {
             bump.reset();
             let mut tid = INVALID_IND;
-            let mut base_fid = FaceId::new();
+            let mut base_fid = FaceId::default();
             let faces = Vec::from_iter(indices.into_iter().map(|idx| {
                 let fid = f_new_to_old[idx];
                 if !base_fid.valid() {
@@ -927,10 +926,11 @@ impl BSPComplex {
     ) -> Vec<Vec<(EdgeId, bool)>> {
         let mut edge_map = HashMap::new();
         for &fid in faces {
-            for hid in self.mesh.face(fid).halfedges() {
-                let eid = self.mesh.he_edge(hid);
+            let face = self.mesh.face(fid);
+            for he in face.halfedges() {
+                let eid = *he.edge();
                 *edge_map.entry(eid).or_insert(0) +=
-                    if self.mesh.he_same_dir(hid) ^ (face_signs[fid] > 0) {
+                    if self.mesh.he_same_dir(*he) ^ (face_signs[fid] > 0) {
                         -1
                     } else {
                         1
@@ -981,17 +981,15 @@ impl BSPComplex {
         let mut he_next_map = HashMap::new();
         if !multi_out_verts.is_empty() {
             for &fid in faces {
-                for hid in self.mesh.face(fid).halfedges() {
-                    let v = self.mesh.he_tip_vertex(hid);
+                let face = self.mesh.face(fid);
+                for he in face.halfedges() {
+                    let v = *he.to();
                     if multi_out_verts.contains(&v) {
-                        let (mut ha, mut hb) = (
-                            self.mesh.he_edge(hid),
-                            self.mesh.he_edge(self.mesh.he_next(hid)),
-                        );
+                        let (mut ha, mut hb) = (he.edge(), he.next().edge());
                         if face_signs[fid] < 0 {
                             std::mem::swap(&mut ha, &mut hb);
                         }
-                        he_next_map.insert(ha, hb);
+                        he_next_map.insert(*ha, *hb);
                     }
                 }
             }
@@ -1239,13 +1237,14 @@ impl BSPComplex {
         let mut verts = Vec::new_in(bump);
         let mut edges = Vec::new_in(bump);
         for &fid in &self.cell_data[cid].faces {
-            for hid in mesh.face(fid.into()).halfedges() {
-                let vid = mesh.he_vertex(hid);
+            let face = self.mesh.face(fid);
+            for he in face.halfedges() {
+                let vid = *he.from();
                 if !self.vert_visits[vid] {
                     self.vert_visits[vid] = true;
                     verts.push(vid);
                 }
-                let eid = mesh.he_edge(hid);
+                let eid = *he.edge();
                 if !self.edge_visits[eid] {
                     self.edge_visits[eid] = true;
                     edges.push(eid);
@@ -1296,12 +1295,7 @@ impl BSPComplex {
         bump: A,
     ) -> bool {
         let mut verts = Vec::new_in(bump);
-        verts.extend(
-            self.mesh
-                .face(fid)
-                .halfedges()
-                .map(|hid| self.mesh.he_vertex(hid)),
-        );
+        verts.extend(self.mesh.face(fid).halfedges().map(|he| *he.from()));
         let mut orientations = Vec::with_capacity_in(verts.len(), bump);
 
         for &vid in verts.iter() {
@@ -1357,7 +1351,7 @@ impl BSPComplex {
             self.mesh
                 .face(fid)
                 .halfedges()
-                .map(|hid| self.mesh.he_vertex(hid))
+                .map(|he| *he.from())
                 .map(|vid| &self.points[vid]),
         );
 
@@ -1636,7 +1630,7 @@ fn split_face_verts(
     face_ori_correct: bool,
 ) -> SplitFaceResult {
     let mut ori_start = *vert_orientations
-        .get(&*mesh.face(fid).halfedge().vertex())
+        .get(&*mesh.face(fid).halfedge().from())
         .unwrap();
     let mut base_ori = if ori_start != Orientation::Zero {
         ori_start
@@ -1644,8 +1638,9 @@ fn split_face_verts(
         Orientation::Undefined
     };
     let mut zero_candidates = Vec::new();
-    for hid in mesh.face(fid).halfedges() {
-        let vid = mesh.he_tip_vertex(hid);
+    for he in mesh.face(fid).halfedges() {
+        let hid = *he;
+        let vid = *he.to();
         let ori_end = *vert_orientations.get(&vid).unwrap();
         if ori_start == Orientation::Zero {
             zero_candidates.push(ZeroVert::Start(hid));
@@ -1913,7 +1908,7 @@ fn find_uncoplanar_verts<A: Allocator + Copy>(
     let pb = &points[tri[1]];
     let pc = &points[tri[2]];
     for &fid in faces {
-        for vid in mesh.face(fid).halfedges().map(|hid| mesh.he_vertex(hid)) {
+        for vid in mesh.face(fid).halfedges().map(|he| *he.from()) {
             verts_orient_wrt_plane(pa, pb, pc, &[vid], &points, vertex_data, orientations, bump);
             if *orientations.get(&vid).unwrap() != Orientation::Zero {
                 return vid;

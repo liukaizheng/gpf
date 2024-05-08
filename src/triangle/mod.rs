@@ -1,5 +1,5 @@
-mod triangle;
 mod tetrahedron;
+mod triangle;
 
-pub use triangle::*;
 pub use tetrahedron::*;
+pub use triangle::*;

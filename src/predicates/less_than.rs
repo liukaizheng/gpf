@@ -409,13 +409,30 @@ fn less_than_ii<
     static_filter_func: F,
     bump: A,
 ) -> Orientation {
-    if let Some(pa_static) = pa.static_filter() && let Some(pb_static) = pb.static_filter(){
+    if let Some(pa_static) = pa.static_filter()
+        && let Some(pb_static) = pb.static_filter()
+    {
         let det = if AXIS == 0 {
-            less_than_ii_impl(&pa_static.0.x, &pa_static.0.d, &pb_static.0.x, &pb_static.0.d)
+            less_than_ii_impl(
+                &pa_static.0.x,
+                &pa_static.0.d,
+                &pb_static.0.x,
+                &pb_static.0.d,
+            )
         } else if AXIS == 1 {
-            less_than_ii_impl(&pa_static.0.y, &pa_static.0.d, &pb_static.0.y, &pb_static.0.d)
+            less_than_ii_impl(
+                &pa_static.0.y,
+                &pa_static.0.d,
+                &pb_static.0.y,
+                &pb_static.0.d,
+            )
         } else {
-            less_than_ii_impl(&pa_static.0.z, &pa_static.0.d, &pb_static.0.z, &pb_static.0.d)
+            less_than_ii_impl(
+                &pa_static.0.z,
+                &pa_static.0.d,
+                &pb_static.0.z,
+                &pb_static.0.d,
+            )
         };
         let max_var = pa_static.1.max(pb_static.1);
         let epsilon = static_filter_func(max_var);
@@ -426,7 +443,9 @@ fn less_than_ii<
         }
     }
 
-    if let Some(pa_dynamic) = pa.dynamic_filter() && let Some(pb_dynamic) = pb.dynamic_filter(){
+    if let Some(pa_dynamic) = pa.dynamic_filter()
+        && let Some(pb_dynamic) = pb.dynamic_filter()
+    {
         let det = if AXIS == 0 {
             less_than_ii_impl(&pa_dynamic.x, &pa_dynamic.d, &pb_dynamic.x, &pb_dynamic.d)
         } else if AXIS == 1 {
@@ -444,28 +463,15 @@ fn less_than_ii<
         }
     }
 
-    if let Some(pa_exact) = pa.exact(bump) && let Some(pb_exact) = pb.exact(bump) {
+    if let Some(pa_exact) = pa.exact(bump)
+        && let Some(pb_exact) = pb.exact(bump)
+    {
         let det = if AXIS == 0 {
-            less_than_ii_impl(
-                &pa_exact.x,
-                &pa_exact.d,
-                &pb_exact.x,
-                &pb_exact.d,
-            )
+            less_than_ii_impl(&pa_exact.x, &pa_exact.d, &pb_exact.x, &pb_exact.d)
         } else if AXIS == 1 {
-            less_than_ii_impl(
-                &pa_exact.y,
-                &pa_exact.d,
-                &pb_exact.y,
-                &pb_exact.d,
-            )
+            less_than_ii_impl(&pa_exact.y, &pa_exact.d, &pb_exact.y, &pb_exact.d)
         } else {
-            less_than_ii_impl(
-                &pa_exact.z,
-                &pa_exact.d,
-                &pb_exact.z,
-                &pb_exact.d,
-            )
+            less_than_ii_impl(&pa_exact.z, &pa_exact.d, &pb_exact.z, &pb_exact.d)
         };
         return double_to_sign(*det.last().unwrap());
     }

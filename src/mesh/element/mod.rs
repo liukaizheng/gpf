@@ -4,9 +4,6 @@ mod face;
 mod halfedge;
 mod vertex;
 
-#[macro_use]
-mod macros;
-
 use std::alloc::Allocator;
 
 pub use boundary_loop::*;
@@ -15,18 +12,23 @@ pub use face::*;
 pub use halfedge::*;
 pub use vertex::*;
 
-use super::Mesh;
+use crate::INVALID_IND;
 
-pub trait ElementId: From<usize> {
-    fn new() -> Self;
-    fn valid(&self) -> bool;
+#[macro_use]
+mod macros;
+
+pub trait ElementIndex {
+    fn index(&self) -> usize;
 }
-
+pub trait ElementId: From<usize> + ElementIndex {
+    #[inline(always)]
+    fn valid(&self) -> bool {
+        self.index() != INVALID_IND
+    }
+}
 pub trait Element {
-    type Id: ElementId;
-    type M: Mesh;
-    fn id(&self) -> Self::Id;
-    fn mesh(&self) -> &Self::M;
+    type Item;
+    fn item(&self) -> Self::Item;
     fn valid(&self) -> bool;
     fn next(&mut self);
     fn is_end(&self) -> bool;
@@ -43,16 +45,16 @@ pub fn ele_ranges<E: ElementId, A: Allocator + Copy>(
     result
 }
 
-fn iter_next<E: Element>(ele: &mut E) -> Option<<E as Element>::Id> {
+fn iter_next<E: Element>(ele: &mut E) -> Option<<E as Element>::Item> {
     if ele.is_end() {
         return None;
     }
-    let id = ele.id();
+    let item = ele.item();
     loop {
         ele.next();
         if ele.is_end() || ele.valid() {
             break;
         }
     }
-    Some(id)
+    Some(item)
 }

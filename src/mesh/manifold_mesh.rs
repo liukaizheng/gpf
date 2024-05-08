@@ -1,8 +1,6 @@
 use std::{cell::RefCell, rc::Weak};
 
-use crate::build_connect_info;
-
-use super::{
+/*use super::{
     BoundaryLoopId, BoundaryLoopIter, EdgeData, EdgeId, EdgeIter, ElementId, FaceData, FaceId,
     FaceIter, FaceOrBoundaryLoopId, HalfedgeData, HalfedgeId, HalfedgeIter, Mesh, MeshData,
     VertexData, VertexId, VertexIter,
@@ -118,4 +116,4 @@ impl Mesh for ManifoldMesh {
     fn e_halfedge(&self, eid: EdgeId) -> HalfedgeId {
         (*eid << 1).into()
     }
-}
+}*/

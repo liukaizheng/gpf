@@ -8,6 +8,13 @@ macro_rules! element_id {
             }
         }
 
+        impl Default for $name {
+            #[inline(always)]
+            fn default() -> Self {
+                Self(INVALID_IND)
+            }
+        }
+
         impl<T> Index<$name> for Vec<T> {
             type Output = T;
             #[inline(always)]
@@ -52,16 +59,13 @@ macro_rules! element_id {
             }
         }
 
-        impl ElementId for $name {
+        impl ElementIndex for $name {
             #[inline(always)]
-            fn new() -> Self {
-                Self(INVALID_IND)
-            }
-            #[inline(always)]
-            fn valid(&self) -> bool {
-                self.0 != INVALID_IND
+            fn index(&self) -> usize {
+                self.0
             }
         }
+        impl ElementId for $name {}
 
         impl Deref for $name {
             type Target = usize;
@@ -74,68 +78,6 @@ macro_rules! element_id {
             fn deref_mut(&mut self) -> &mut Self::Target {
                 &mut self.0
             }
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! element_iterator {
-    (struct $name: ident -> $item: ty, {$($id: tt)*}, {$($valid: tt)*}, {$($next: tt)*}, {$($is_end: tt)*}) => {
-        impl<'a, M: Mesh> Element for $name<'a, M> {
-            type Id = $item;
-            type M = M;
-            #[inline(always)]
-            $($id)*
-
-            #[inline(always)]
-            fn mesh(&self) -> &M {
-                self.mesh
-            }
-
-            #[inline(always)]
-            $($valid)*
-
-            #[inline]
-            $($next)*
-
-            #[inline(always)]
-            $($is_end)*
-        }
-        impl<'a, M: Mesh> Iterator for $name<'a, M> {
-            type Item = $item;
-
-            #[inline(always)]
-            fn next(&mut self) -> Option<Self::Item> {
-                iter_next(self)
-            }
-        }
-
-    }
-}
-
-#[macro_export]
-macro_rules! halfedges_iterator {
-    (struct $name:ident) => {
-        element_iterator! {
-            struct $name -> HalfedgeId, {
-                fn id(&self) -> Self::Id {
-                    self.curr_he
-                }
-            }, {
-                fn valid(&self) -> bool {
-                    true
-                }
-            }, {
-                fn next(&mut self) {
-                    self.just_start = false;
-                    self.next();
-                }
-            }, {
-                fn is_end(&self) -> bool {
-                    !self.just_start && self.curr_he == self.first_he
-                }
-            }
-
         }
     };
 }

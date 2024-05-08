@@ -1,4 +1,4 @@
-use gpf::polygonlization::{make_polyhedral_mesh, make_mesh_for_triangles};
+use gpf::polygonlization::{make_mesh_for_triangles, make_polyhedral_mesh};
 use serde::Deserialize;
 
 #[allow(non_snake_case)]
@@ -44,7 +44,6 @@ fn read_obj(name: &str) -> (Vec<f64>, Vec<usize>) {
     let triangles = Vec::from_iter(model.mesh.indices.iter().map(|x| *x as usize));
     (points, triangles)
 }
-
 
 #[test]
 fn two_models() {
@@ -119,8 +118,7 @@ fn test_cube_and_sphere() {
             .into_iter()
             .chain(sphere_tris.into_iter().map(|idx| idx + n_cube_points)),
     );
-    let (new_points, new_triangles) =
-        make_mesh_for_triangles(&points, &triangles, &tri_in_shells);
+    let (new_points, new_triangles) = make_mesh_for_triangles(&points, &triangles, &tri_in_shells);
     write_obj(&new_points, &new_triangles, "125.obj");
 }
 
@@ -128,8 +126,6 @@ fn test_cube_and_sphere() {
 fn test_pig_model() {
     let (points, triangles) = read_obj("tests/data/boarwindmeter.obj");
     let tri_in_shells = vec![0; triangles.len() / 3];
-    let (new_points, new_triangles) =
-        make_mesh_for_triangles(&points, &triangles, &tri_in_shells);
+    let (new_points, new_triangles) = make_mesh_for_triangles(&points, &triangles, &tri_in_shells);
     write_obj(&new_points, &new_triangles, "126.obj");
-
 }

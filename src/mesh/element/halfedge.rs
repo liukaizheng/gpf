@@ -1,38 +1,57 @@
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 
-use super::{iter_next, EdgeIter, Element, ElementId, FaceIter, VertexIter};
-use crate::{
-    element_id,
-    mesh::{FaceOrBoundaryLoopId, Mesh},
-    INVALID_IND,
-};
+use super::{iter_next, Edge, Element, ElementId, ElementIndex, Vertex};
+use crate::{element_id, mesh::Mesh, INVALID_IND};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct HalfedgeId(pub usize);
 
-element_id! {struct HalfedgeId}
+element_id!(struct HalfedgeId);
 
-pub struct HalfedgeIter<'a, M: Mesh> {
-    id: HalfedgeId,
+pub struct Halfedge<'a, M: Mesh> {
     mesh: &'a M,
+    id: HalfedgeId,
 }
 
-impl<'a, M: Mesh> HalfedgeIter<'a, M> {
-    pub fn new(id: HalfedgeId, mesh: &'a M) -> Self {
-        Self { id, mesh }
+impl<'a, M: Mesh> Halfedge<'a, M> {
+    pub fn new(mesh: &'a M, id: HalfedgeId) -> Self {
+        Self { mesh, id }
     }
 
-    #[allow(dead_code)]
-    fn len(&self) -> usize {
-        self.mesh.n_halfedges()
+    pub fn from(&self) -> Vertex<'a, M> {
+        Vertex::new(self.mesh, self.mesh.he_vertex(self.id))
     }
 
-    fn capacity(&self) -> usize {
-        self.mesh.n_halfedges_capacity()
+    pub fn to(&self) -> Vertex<'a, M> {
+        Vertex::new(self.mesh, self.mesh.he_tip_vertex(self.id))
+    }
+
+    pub fn vertices(&self) -> [Vertex<'a, M>; 2] {
+        [self.from(), self.to()]
+    }
+
+    pub fn prev(&self) -> Halfedge<'a, M> {
+        Halfedge::new(self.mesh, self.mesh.he_prev(self.id))
+    }
+
+    pub fn next(&self) -> Halfedge<'a, M> {
+        Halfedge::new(self.mesh, self.mesh.he_next(self.id))
+    }
+
+    pub fn twin(&self) -> Halfedge<'a, M> {
+        Halfedge::new(self.mesh, self.mesh.he_twin(self.id))
+    }
+
+    pub fn sibling(&self) -> Halfedge<'a, M> {
+        Halfedge::new(self.mesh, self.mesh.he_sibling(self.id))
+    }
+
+    pub fn edge(&self) -> Edge<'a, M> {
+        Edge::new(self.mesh, self.mesh.he_edge(self.id))
     }
 }
 
-impl<'a, M: Mesh> Deref for HalfedgeIter<'a, M> {
+impl<'a, M: Mesh> Deref for Halfedge<'a, M> {
     type Target = HalfedgeId;
 
     fn deref(&self) -> &Self::Target {
@@ -40,80 +59,53 @@ impl<'a, M: Mesh> Deref for HalfedgeIter<'a, M> {
     }
 }
 
+pub struct HalfedgeIter<'a, M: Mesh> {
+    mesh: &'a M,
+    id: HalfedgeId,
+}
+
+impl<'a, M: Mesh> HalfedgeIter<'a, M> {
+    pub fn new(mesh: &'a M) -> Self {
+        let mut iter = Self {
+            mesh,
+            id: HalfedgeId(0),
+        };
+        while !iter.is_end() && !iter.valid() {
+            <Self as Element>::next(&mut iter);
+        }
+        iter
+    }
+}
+
 impl<'a, M: Mesh> Element for HalfedgeIter<'a, M> {
-    type Id = HalfedgeId;
-    type M = M;
+    type Item = Halfedge<'a, M>;
 
-    fn id(&self) -> HalfedgeId {
-        self.id
+    #[inline(always)]
+    fn item(&self) -> Self::Item {
+        Self::Item {
+            mesh: self.mesh,
+            id: self.id,
+        }
     }
 
-    fn mesh(&self) -> &M {
-        self.mesh
-    }
-
+    #[inline(always)]
     fn valid(&self) -> bool {
         self.mesh.halfedge_is_valid(self.id)
     }
 
+    #[inline(always)]
     fn next(&mut self) {
         *self.id += 1;
     }
 
+    #[inline(always)]
     fn is_end(&self) -> bool {
-        *self.id == self.capacity()
-    }
-}
-
-pub trait Halfedge: Element {
-    fn vertex(&self) -> VertexIter<Self::M>;
-    fn tip_vertex(&self) -> VertexIter<Self::M>;
-    fn edge(&self) -> EdgeIter<Self::M>;
-    fn next(&mut self) -> &Self;
-    fn prev(&mut self) -> &Self;
-    fn sibling(&mut self) -> &Self;
-    fn face(&self) -> Option<FaceIter<Self::M>>;
-}
-
-impl<'a, M: Mesh> Halfedge for HalfedgeIter<'a, M> {
-    #[inline(always)]
-    fn vertex(&self) -> VertexIter<Self::M> {
-        VertexIter::new(self.mesh.he_vertex(self.id), self.mesh)
-    }
-    #[inline(always)]
-    fn tip_vertex(&self) -> VertexIter<Self::M> {
-        VertexIter::new(self.mesh.he_tip_vertex(self.id), self.mesh)
-    }
-    #[inline(always)]
-    fn edge(&self) -> EdgeIter<Self::M> {
-        EdgeIter::new(self.mesh.he_edge(self.id), self.mesh)
-    }
-    #[inline(always)]
-    fn next(&mut self) -> &Self {
-        self.id = self.mesh.he_next(self.id);
-        self
-    }
-    #[inline(always)]
-    fn prev(&mut self) -> &Self {
-        self.id = self.mesh.he_prev(self.id);
-        self
-    }
-    #[inline(always)]
-    fn sibling(&mut self) -> &Self {
-        self.id = self.mesh.he_sibling(self.id);
-        self
-    }
-    #[inline(always)]
-    fn face(&self) -> Option<FaceIter<Self::M>> {
-        match self.mesh.he_face_or_boundary_loop(self.id) {
-            FaceOrBoundaryLoopId::Face(fid) => Some(FaceIter::new(fid, self.mesh)),
-            _ => None,
-        }
+        *self.id == self.mesh.n_halfedges_capacity()
     }
 }
 
 impl<'a, M: Mesh> Iterator for HalfedgeIter<'a, M> {
-    type Item = HalfedgeId;
+    type Item = Halfedge<'a, M>;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {

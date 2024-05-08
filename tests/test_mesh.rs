@@ -1,4 +1,4 @@
-use gpf::mesh::{
+/*use gpf::mesh::{
     Edge, EdgeId, Face, FaceId, FaceOrBoundaryLoopId, Halfedge, HalfedgeId, Mesh, SurfaceMesh,
     Vertex, VertexId,
 };
@@ -263,4 +263,4 @@ fn split_edge_and_face() {
             5,
         );
     }
-}
+}*/

@@ -1,22 +1,22 @@
 mod expansion_number;
 mod generic_point;
 mod interval_number;
+mod less_than;
 pub mod orient2d;
 pub mod orient3d;
 mod predicates;
-mod less_than;
 
 use std::{
-    alloc::Allocator, ops::{Add, Mul, Sub}
+    alloc::Allocator,
+    ops::{Add, Mul, Sub},
 };
 
 pub use expansion_number::*;
 pub use generic_point::*;
 pub use interval_number::*;
+pub use less_than::*;
 pub use orient2d::*;
 pub use predicates::*;
-pub use less_than::*;
-
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
 pub enum Orientation {
@@ -520,7 +520,7 @@ pub fn point_in_segment_general<A: Allocator + Copy>(
     p: &Point3D,
     v1: &Point3D,
     v2: &Point3D,
-    allocator: A
+    allocator: A,
 ) -> bool {
     let comp1 = less_than_on_x(v1, p, allocator);
     let comp2 = less_than_on_x(p, v2, allocator);

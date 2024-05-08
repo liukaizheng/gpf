@@ -1,34 +1,37 @@
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 
-use super::{iter_next, Element, ElementId, HalfedgeId, HalfedgeIter};
-use crate::{element_id, element_iterator, halfedges_iterator, mesh::Mesh, INVALID_IND};
+use super::{iter_next, Element, ElementId, ElementIndex, Halfedge, HalfedgeId, Vertex};
+use crate::{element_id, mesh::Mesh, INVALID_IND};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FaceId(pub usize);
 
-element_id! {struct FaceId}
+element_id!(struct FaceId);
 
-pub struct FaceIter<'a, M: Mesh> {
-    id: FaceId,
+pub struct Face<'a, M: Mesh> {
     mesh: &'a M,
+    id: FaceId,
 }
 
-impl<'a, M: Mesh> FaceIter<'a, M> {
-    pub fn new(id: FaceId, mesh: &'a M) -> Self {
-        Self { id, mesh }
+impl<'a, M: Mesh> Face<'a, M> {
+    pub fn new(mesh: &'a M, id: FaceId) -> Self {
+        Self { mesh, id }
     }
 
-    #[allow(dead_code)]
-    fn len(&self) -> usize {
-        self.mesh.n_faces()
+    pub fn halfedge(&self) -> Halfedge<'a, M> {
+        Halfedge::new(self.mesh, self.mesh.f_halfedge(self.id))
     }
 
-    fn capacity(&self) -> usize {
-        self.mesh.n_faces_capacity()
+    pub fn halfedges(&self) -> FHIter<'a, M> {
+        FHIter::new(self.mesh, self.id)
+    }
+
+    pub fn vertices(&self) -> FVIter<'a, M> {
+        FVIter::new(self.mesh, self.id)
     }
 }
 
-impl<'a, M: Mesh> Deref for FaceIter<'a, M> {
+impl<'a, M: Mesh> Deref for Face<'a, M> {
     type Target = FaceId;
 
     fn deref(&self) -> &Self::Target {
@@ -36,72 +39,162 @@ impl<'a, M: Mesh> Deref for FaceIter<'a, M> {
     }
 }
 
+pub struct FaceIter<'a, M: Mesh> {
+    mesh: &'a M,
+    id: FaceId,
+}
+
+impl<'a, M: Mesh> FaceIter<'a, M> {
+    pub fn new(mesh: &'a M) -> Self {
+        let mut iter = Self {
+            mesh,
+            id: FaceId(0),
+        };
+        while !iter.is_end() && !iter.valid() {
+            <Self as Element>::next(&mut iter);
+        }
+        iter
+    }
+}
+
 impl<'a, M: Mesh> Element for FaceIter<'a, M> {
-    type Id = FaceId;
-    type M = M;
+    type Item = Face<'a, M>;
 
-    fn id(&self) -> FaceId {
-        self.id
+    #[inline(always)]
+    fn item(&self) -> Self::Item {
+        Self::Item {
+            mesh: self.mesh,
+            id: self.id,
+        }
     }
 
-    fn mesh(&self) -> &M {
-        self.mesh
-    }
-
+    #[inline(always)]
     fn valid(&self) -> bool {
         self.mesh.face_is_valid(self.id)
     }
 
+    #[inline(always)]
     fn next(&mut self) {
-        self.id.0 += 1;
+        *self.id += 1;
     }
 
+    #[inline(always)]
     fn is_end(&self) -> bool {
-        *self.id == self.capacity()
+        *self.id == self.mesh.n_faces_capacity()
     }
 }
 
 impl<'a, M: Mesh> Iterator for FaceIter<'a, M> {
-    type Item = FaceId;
+    type Item = Face<'a, M>;
 
+    #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         iter_next(self)
     }
 }
-pub trait Face: Element {
-    fn halfedge(&self) -> HalfedgeIter<Self::M>;
-    fn halfedges(&self) -> FHalfedgesIter<Self::M>;
-}
 
-impl<'a, M: Mesh> Face for FaceIter<'a, M> {
-    fn halfedge(&self) -> HalfedgeIter<Self::M> {
-        HalfedgeIter::new(self.mesh.f_halfedge(self.id), self.mesh)
-    }
-    fn halfedges(&self) -> FHalfedgesIter<Self::M> {
-        FHalfedgesIter::new(self.mesh.f_halfedge(self.id), self.mesh)
-    }
-}
-
-pub struct FHalfedgesIter<'a, M: Mesh> {
+pub struct FHIter<'a, M: Mesh> {
     mesh: &'a M,
+    first: HalfedgeId,
+    current: HalfedgeId,
     just_start: bool,
-    first_he: HalfedgeId,
-    curr_he: HalfedgeId,
 }
 
-impl<'a, M: Mesh> FHalfedgesIter<'a, M> {
-    pub fn new(he: HalfedgeId, mesh: &'a M) -> Self {
+impl<'a, M: Mesh> FHIter<'a, M> {
+    pub fn new(mesh: &'a M, fid: FaceId) -> Self {
+        let first = mesh.f_halfedge(fid);
         Self {
             mesh,
+            first,
+            current: first,
             just_start: true,
-            first_he: he,
-            curr_he: he,
         }
-    }
-
-    fn next(&mut self) {
-        self.curr_he = self.mesh.he_next(self.curr_he);
     }
 }
 
-halfedges_iterator! {struct FHalfedgesIter}
+impl<'a, M: Mesh> Element for FHIter<'a, M> {
+    type Item = Halfedge<'a, M>;
+
+    #[inline(always)]
+    fn item(&self) -> Self::Item {
+        Halfedge::new(self.mesh, self.current)
+    }
+
+    #[inline(always)]
+    fn valid(&self) -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn next(&mut self) {
+        self.current = self.mesh.he_next(self.current);
+        self.just_start = false;
+    }
+
+    #[inline(always)]
+    fn is_end(&self) -> bool {
+        self.current == self.first && !self.just_start
+    }
+}
+
+impl<'a, M: Mesh> Iterator for FHIter<'a, M> {
+    type Item = Halfedge<'a, M>;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        iter_next(self)
+    }
+}
+
+pub struct FVIter<'a, M: Mesh> {
+    mesh: &'a M,
+    he: HalfedgeId,
+    start: HalfedgeId,
+    just_start: bool,
+}
+
+impl<'a, M: Mesh> FVIter<'a, M> {
+    pub fn new(mesh: &'a M, fid: FaceId) -> Self {
+        let he = mesh.f_halfedge(fid);
+        Self {
+            mesh,
+            he,
+            start: he,
+            just_start: true,
+        }
+    }
+}
+
+impl<'a, M: Mesh> Element for FVIter<'a, M> {
+    type Item = Vertex<'a, M>;
+
+    #[inline(always)]
+    fn item(&self) -> Self::Item {
+        Vertex::new(self.mesh, self.mesh.he_vertex(self.he))
+    }
+
+    #[inline(always)]
+    fn valid(&self) -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn next(&mut self) {
+        self.he = self.mesh.he_next(self.he);
+        self.just_start = false;
+    }
+
+    #[inline(always)]
+    fn is_end(&self) -> bool {
+        self.he == self.start && !self.just_start
+    }
+}
+
+impl<'a, M: Mesh> Iterator for FVIter<'a, M> {
+    type Item = Vertex<'a, M>;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        iter_next(self)
+    }
+}

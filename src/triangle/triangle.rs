@@ -1156,7 +1156,7 @@ fn constrained_edge<A: Allocator + Copy>(
         }
     }
     if collision {
-        if !scout_segment(m, ghost,&mut fixup_tri, endpoint2, mark, bump) {
+        if !scout_segment(m, ghost, &mut fixup_tri, endpoint2, mark, bump) {
             constrained_edge(m, ghost, &mut fixup_tri, endpoint2, mark, vertex_map, bump);
         }
     } else {
