@@ -1,9 +1,9 @@
-/*use gpf::mesh::{
-    Edge, EdgeId, Face, FaceId, FaceOrBoundaryLoopId, Halfedge, HalfedgeId, Mesh, SurfaceMesh,
+use gpf::mesh::{
+    Edge, EdgeId, Face, FaceId, Halfedge, HalfedgeId, Mesh, SurfaceMesh,
     Vertex, VertexId,
 };
 
-fn validate_mesh_connectivity(mesh: &SurfaceMesh) -> Result<(), String> {
+/*fn validate_mesh_connectivity(mesh: &SurfaceMesh) -> Result<(), String> {
     let validate_vertex = |vid: VertexId, msg: &str| {
         if vid.0 > mesh.n_vertices_capacity() || !mesh.vertex_is_valid(vid) {
             Err(format!("{} bad vertex reference: {}", msg, vid.0))
@@ -170,12 +170,12 @@ fn validate_mesh_connectivity(mesh: &SurfaceMesh) -> Result<(), String> {
     }
 
     Ok(())
-}
+}*/
 
 #[test]
 fn build_nomanifold_mesh() {
     let bump = bumpalo::Bump::new();
-    let mesh = SurfaceMesh::from(vec![
+    let mesh = SurfaceMesh::new(vec![
         vec![0, 1, 2],
         vec![0, 2, 3],
         vec![0, 3, 1],
@@ -189,8 +189,8 @@ fn build_nomanifold_mesh() {
     // vertices of incoming halfedges
     let mut incoming_vertices = mesh
         .vertex(0.into())
-        .incoming_halfedge()
-        .map(|hid| *mesh.he_vertex(hid))
+        .incoming_halfedges()
+        .map(|hid| *mesh.he_vertex(*hid))
         .collect::<Vec<_>>();
     incoming_vertices.sort();
     assert_eq!(base_vertices, incoming_vertices);
@@ -198,8 +198,8 @@ fn build_nomanifold_mesh() {
     // vertices of outgoing halfedges
     let mut outgoing_vertices = mesh
         .vertex(0.into())
-        .outgoing_halfedge()
-        .map(|hid| *mesh.he_tip_vertex(hid))
+        .outgoing_halfedges()
+        .map(|hid| *mesh.he_tip_vertex(*hid))
         .collect::<Vec<_>>();
     outgoing_vertices.sort();
     assert_eq!(outgoing_vertices, base_vertices);
@@ -207,14 +207,14 @@ fn build_nomanifold_mesh() {
     // adjacent vertices
     let mut adjacent_vertices = mesh
         .vertex(0.into())
-        .adjacent_vertices()
-        .map(|vid| *vid)
+        .vertices()
+        .map(|vid| **vid)
         .collect::<Vec<_>>();
     adjacent_vertices.sort();
     assert_eq!(adjacent_vertices, base_vertices);
 }
 
-#[test]
+/*#[test]
 fn split_edge_and_face() {
     use bumpalo::collections::Vec;
     let bump = bumpalo::Bump::new();

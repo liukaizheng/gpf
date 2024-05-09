@@ -294,6 +294,7 @@ impl<'a, M: Mesh> Element for VIHIter<'a, M> {
 
     #[inline(always)]
     fn next(&mut self) {
+        self.just_start = false;
         self.curr = self.mesh.he_next_incoming_neighbor(self.curr);
     }
 
@@ -346,6 +347,7 @@ impl<'a, M: Mesh> Element for VOHIter<'a, M> {
 
     #[inline(always)]
     fn next(&mut self) {
+        self.just_start = false;
         self.curr = self.mesh.he_next_outgoing_neighbor(self.curr);
     }
 
