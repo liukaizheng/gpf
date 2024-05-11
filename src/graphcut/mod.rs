@@ -1,5 +1,9 @@
 use crate::INVALID_IND;
 
+mod push_relabel_fifo;
+
+pub use push_relabel_fifo::*;
+
 #[derive(Clone)]
 struct Arc {
     head: usize,
@@ -511,5 +515,36 @@ impl GraphCut {
             }
         }
         return self.flow;
+    }
+}
+
+pub trait MaxFlow {
+    fn find_max_flow(&mut self);
+    fn is_sink(&self, i: usize) -> bool;
+}
+pub struct ArcBuilder<T> {
+    pub arcs: Vec<(usize, usize, T)>,
+}
+
+impl<T: Copy> ArcBuilder<T> {
+    pub fn new<U: AsRef<[T]>>(source_caps: U, sink_caps: U) -> Self {
+        let sink = source_caps.as_ref().len() + 1;
+        let mut arcs = Vec::new();
+        for (i, &cap) in source_caps.as_ref().iter().enumerate() {
+            arcs.push((0, i + 1, cap));
+        }
+        for (i, &cap) in sink_caps.as_ref().iter().enumerate() {
+            arcs.push((i + 1, sink, cap));
+        }
+        Self { arcs }
+    }
+
+    pub fn add_arc(&mut self, mut from: usize, mut to: usize, cap: T, rev: bool) {
+        from += 1;
+        to += 1;
+        self.arcs.push((from, to, cap));
+        if rev {
+            self.arcs.push((to, from, cap));
+        }
     }
 }

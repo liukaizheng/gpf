@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     disjoint_set::DisjointSet,
-    graphcut::GraphCut,
+    graphcut::{ArcBuilder, MaxFlow, PushRelabelFifo},
     math::{cross, norm, sub},
     mesh::{EdgeId, ElementId, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
@@ -678,18 +678,21 @@ impl BSPComplex {
                         &bump,
                     );
                     let ori = *self.vert_orientations[tid].get(&vert[0]).unwrap();
+                    let lambda = 0.5;
                     if ori == Orientation::Positive {
                         // triangle is with the same orientation as the face
-                        cell_costs_internal[shell_id][face_data.cells[0]] += face_areas[fid];
+                        cell_costs_internal[shell_id][face_data.cells[0]] +=
+                            lambda * face_areas[fid];
                         let second_cid = face_data.cells[1];
                         if second_cid != INVALID_IND {
-                            cell_costs_external[shell_id][second_cid] += face_areas[fid];
+                            cell_costs_external[shell_id][second_cid] += lambda * face_areas[fid];
                         }
                     } else {
-                        cell_costs_external[shell_id][face_data.cells[0]] += face_areas[fid];
+                        cell_costs_external[shell_id][face_data.cells[0]] +=
+                            lambda * face_areas[fid];
                         let second_cid = face_data.cells[1];
                         if second_cid != INVALID_IND {
-                            cell_costs_internal[shell_id][second_cid] += face_areas[fid];
+                            cell_costs_internal[shell_id][second_cid] += lambda * face_areas[fid];
                         }
                     }
                     is_black[shell_id][fid] = true;
@@ -697,7 +700,17 @@ impl BSPComplex {
             }
         }
 
-        let mut graphs = Vec::from_iter(
+        let mut arc_builders = Vec::from_iter(
+            cell_costs_external
+                .into_iter()
+                .zip(cell_costs_internal)
+                .map(|(external, mut internal)| {
+                    internal[self.cell_data.len()] = 1.0;
+                    ArcBuilder::new(external, internal)
+                }),
+        );
+
+        /*let mut graphs = Vec::from_iter(
             cell_costs_external
                 .into_iter()
                 .zip(cell_costs_internal)
@@ -705,7 +718,7 @@ impl BSPComplex {
                     internal[self.cell_data.len()] = 1.0;
                     GraphCut::new(&external, &internal)
                 }),
-        );
+        );*/
 
         for face in self.mesh.faces() {
             let fid = *face;
@@ -716,20 +729,30 @@ impl BSPComplex {
 
             for shell_id in 0..n_shells {
                 if !is_black[shell_id][fid] {
-                    graphs[shell_id].add_edge(c1, c2, face_areas[fid], face_areas[fid]);
+                    // graphs[shell_id].add_edge(c1, c2, face_areas[fid], face_areas[fid]);
+                    arc_builders[shell_id].add_arc(c1, c2, face_areas[fid], true);
                 }
             }
         }
 
         let mut cell_kept = vec![false; self.cell_data.len() + 1];
-        // let mut cell_kept = vec![true; self.cell_data.len() + 1];
-        // *cell_kept.last_mut().unwrap() = false;
-        for graph in &mut graphs {
+
+        for build in arc_builders {
+            // add 3 to the number of cells because there are two terminal and one outer cell node
+            let mut max_flow = PushRelabelFifo::from((build.arcs, self.n_cells() + 3));
+            max_flow.find_max_flow();
+            for cid in 0..self.cell_data.len() {
+                // add 1 to cid because the first node is the source
+                cell_kept[cid] |= !max_flow.is_sink(cid + 1);
+            }
+        }
+
+        /*for graph in &mut graphs {
             graph.max_flow();
             for cid in 0..self.cell_data.len() {
                 cell_kept[cid] |= !graph.is_sink[cid];
             }
-        }
+        }*/
 
         let mut kept_faces = vec![0; self.face_data.len()];
         for face in self.mesh.faces() {

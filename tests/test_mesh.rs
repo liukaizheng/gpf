@@ -1,6 +1,5 @@
 use gpf::mesh::{
-    Edge, EdgeId, Face, FaceId, Halfedge, HalfedgeId, Mesh, SurfaceMesh,
-    Vertex, VertexId,
+    Edge, EdgeId, Face, FaceId, Halfedge, HalfedgeId, Mesh, SurfaceMesh, Vertex, VertexId,
 };
 
 /*fn validate_mesh_connectivity(mesh: &SurfaceMesh) -> Result<(), String> {
