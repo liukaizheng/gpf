@@ -975,7 +975,7 @@ fn scout_segment<A: Allocator + Copy>(
         Direction::LEFTCOLLINEAR => {
             prev_self(search_tri);
             set_mark(&mut m.triangles, &search_tri, twin(mark), true);
-            scout_segment(m, ghost, search_tri, endpoint2, twin(mark), bump)
+            scout_segment(m, ghost, search_tri, endpoint2, mark, bump)
         }
         Direction::RIGHTCOLLINEAR => {
             set_mark(&mut m.triangles, search_tri, mark, true);
