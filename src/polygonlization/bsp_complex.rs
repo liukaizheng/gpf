@@ -710,16 +710,6 @@ impl BSPComplex {
                 }),
         );
 
-        /*let mut graphs = Vec::from_iter(
-            cell_costs_external
-                .into_iter()
-                .zip(cell_costs_internal)
-                .map(|(external, mut internal)| {
-                    internal[self.cell_data.len()] = 1.0;
-                    GraphCut::new(&external, &internal)
-                }),
-        );*/
-
         for face in self.mesh.faces() {
             let fid = *face;
             let [c1, mut c2] = self.face_data[fid].cells;
@@ -746,13 +736,6 @@ impl BSPComplex {
                 cell_kept[cid] |= !max_flow.is_sink(cid + 1);
             }
         }
-
-        /*for graph in &mut graphs {
-            graph.max_flow();
-            for cid in 0..self.cell_data.len() {
-                cell_kept[cid] |= !graph.is_sink[cid];
-            }
-        }*/
 
         let mut kept_faces = vec![0; self.face_data.len()];
         for face in self.mesh.faces() {
@@ -823,7 +806,7 @@ impl BSPComplex {
                 }
             }
 
-            if face_verts.len() == 3 {
+            if face_verts.len() == 1 && face_verts[0].len() == 3 {
                 triangles.extend(face_new_verts);
                 continue;
             }
