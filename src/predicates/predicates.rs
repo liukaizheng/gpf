@@ -327,7 +327,7 @@ pub fn fast_expansion_sum_zeroelim<A: Allocator>(
         // init
         let (qnew, h) = fast_two_sum(now, q);
         q = qnew;
-        let mut harr = Vec::with_capacity_in(earr.len() * farr.len(), allocator);
+        let mut harr = Vec::with_capacity_in(earr.len() + farr.len(), allocator);
         if h != 0.0 {
             harr.push(h);
         }
