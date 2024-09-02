@@ -16,6 +16,8 @@ pub mod mesh;
 pub mod polygonlization;
 pub mod predicates;
 pub mod triangle;
+pub mod geometry;
+pub mod boolean3d;
 
 const INVALID_IND: usize = usize::MAX;
 
