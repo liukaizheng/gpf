@@ -24,5 +24,5 @@ fn test1() {
 		let bbox = BBox::new(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
 		SimpleBody::new(vec![left, right, bottom, top, front, back], bbox)
 	};
-	boolean3d(&body1, &body2, BooleanType::Union);
+	boolean3d(&body1, &body2, BooleanType::Union, 1e-3);
 }

@@ -2,6 +2,7 @@ mod adaptive_subdivide;
 
 use std::{alloc::Allocator, collections::HashMap};
 
+use adaptive_subdivide::adaptive_subdivide;
 use itertools::Itertools;
 
 use crate::{
@@ -40,7 +41,7 @@ impl TetSet {
     }
 }
 
-pub fn boolean3d(first: &SimpleBody, second: &SimpleBody, t: BooleanType) {
+pub fn boolean3d(first: &SimpleBody, second: &SimpleBody, t: BooleanType, eps: f64) {
     let surfaces = first
         .surfaces
         .iter()
@@ -50,7 +51,8 @@ pub fn boolean3d(first: &SimpleBody, second: &SimpleBody, t: BooleanType) {
     bbox.merge(&first.bbox);
     bbox.merge(&second.bbox);
     bbox.scale(1.1);
-    let tets = init_mesh(bbox);
+    let mut tets = init_mesh(bbox);
+    adaptive_subdivide(&mut tets, surfaces, eps * eps);
 
     println!("mesh n  edges: {}", tets.mesh.n_edges());
 }
