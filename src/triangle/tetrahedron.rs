@@ -3,7 +3,7 @@ use std::alloc::Allocator;
 use hashbrown::HashMap;
 
 use crate::{
-    math::{cross, norm, sub},
+    math::{cross_in, norm, sub_in},
     predicates::{self, double_to_sign, sign_reverse, Orientation},
     INVALID_IND,
 };
@@ -1133,7 +1133,7 @@ pub fn tetrahedralize<'a>(points: &'a [f64]) -> TetMesh<'a> {
 
     let mut temp_vec3 = [0.0, 0.0, 0.0];
     let bbox_size1 = {
-        sub(&bbox[3..6], &bbox, &mut temp_vec3);
+        sub_in(&bbox[3..6], &bbox, &mut temp_vec3);
         norm(&temp_vec3)
     };
     let bbox_size2 = bbox_size1 * bbox_size1;
@@ -1143,7 +1143,7 @@ pub fn tetrahedralize<'a>(points: &'a [f64]) -> TetMesh<'a> {
         let p0 = point(points, sorted_pt_inds[0]);
         while i < mesh.n_points {
             let pi = point(points, sorted_pt_inds[i]);
-            sub(p0, pi, &mut temp_vec3);
+            sub_in(p0, pi, &mut temp_vec3);
             if norm(&temp_vec3) / bbox_size1 < EPS {
                 i += 1;
             } else {
@@ -1159,13 +1159,13 @@ pub fn tetrahedralize<'a>(points: &'a [f64]) -> TetMesh<'a> {
 
         i = 2;
         let p1 = point(points, sorted_pt_inds[1]);
-        sub(p1, p0, &mut temp_vec3);
+        sub_in(p1, p0, &mut temp_vec3);
         while i < mesh.n_points {
             let pi = point(points, sorted_pt_inds[i]);
             let mut v2 = [0.0; 3];
-            sub(pi, p0, &mut v2);
+            sub_in(pi, p0, &mut v2);
             let mut n = [0.0; 3];
-            cross(&temp_vec3, &v2, &mut n);
+            cross_in(&temp_vec3, &v2, &mut n);
             if norm(&n) / bbox_size2 < EPS {
                 i += 1;
             } else {

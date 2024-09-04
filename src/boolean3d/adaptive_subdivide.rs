@@ -3,11 +3,12 @@ use std::{
     collections::{BinaryHeap, HashMap},
 };
 
-use bumpalo::{collections::CollectIn, Bump};
+use bumpalo::Bump;
 use itertools::Itertools;
 
 use crate::{
     geometry::{Surf, Surface},
+    math::{cross, dot, sub_short},
     mesh::EdgeId,
     point,
 };
@@ -67,6 +68,7 @@ pub(super) fn adaptive_subdivide(tets: &mut TetSet, surfaces: Vec<&Surf>) {
         active_surfs,
         queue: BinaryHeap::new(),
     };
+
     for tid in 0..tets.tets.len() {
         push_longest_edge(tid, tets, &mut data, &bump);
     }
@@ -80,19 +82,54 @@ fn push_longest_edge<A: Allocator + Copy>(
 ) {
 }
 
-fn is_subdivided<A: Allocator + Copy>(
-    tid: usize,
-    tets: &mut TetSet,
-    data: &mut SubdivisionData,
-    alloc: A,
-) {
-    let verts = tets.vertices_in(tid, alloc);
-    let points = {
-        let mut points = Vec::with_capacity_in(4, alloc);
-        points.extend(verts.iter().map(|vid| point(&tets.points, vid.0)));
-        points
-    };
+fn subdividable(tid: usize, tets: &mut TetSet, data: &mut SubdivisionData, bump: &Bump) {
+    let verts = tets.vertices_in(tid, bump);
+    let points = bumpalo::collections::Vec::from_iter_in(
+        verts.iter().map(|vid| point(&tets.points, vid.0)),
+        bump,
+    );
+    let vmat = bumpalo::vec![in &bump;
+        sub_short::<3, _>(points[1], points[0]),
+        sub_short::<3, _>(points[2], points[0]),
+        sub_short::<3, _>(points[3], points[0]),
+        sub_short::<3, _>(points[2], points[1]),
+        sub_short::<3, _>(points[3], points[1]),
+        sub_short::<3, _>(points[3], points[2]),
+    ];
 
+    let adj_vmat = bumpalo::vec![in &bump;
+        cross(&vmat[1], &vmat[2]),
+        cross(&vmat[2], &vmat[0]),
+        cross(&vmat[0], &vmat[1]),
+    ];
+
+    let mut interpolant_vec = Vec::with_capacity_in(data.active_surfs.len(), bump);
     for &sid /*surface id*/ in &data.active_surfs[tid] {
+        let tet_vals_grads = bumpalo::collections::Vec::from_iter_in(
+            verts.iter().map(|&vid| data.vals_and_grads[sid].get(&vid.0).unwrap()), bump);
+        let mut vals = Vec::with_capacity_in(20, bump);
+        
+        vals.extend(tet_vals_grads.iter().map(|vals_grads| vals_grads[0]));
+        let v = tet_vals_grads[0][0];
+        let g = &tet_vals_grads[0][1..];
+            
+        vals.extend([v + dot(g, &vmat[0]), v + dot(g, &vmat[1]), v + dot(g, &vmat[2])]);
+        let v = tet_vals_grads[1][0];
+        let g = &tet_vals_grads[1][1..];
+        vals.extend([v + dot(g, &vmat[3]), v + dot(g, &vmat[4]), v - dot(g, &vmat[0])]);
+        
+        let v = tet_vals_grads[2][0];
+        let g = &tet_vals_grads[2][1..];
+        vals.extend([v + dot(g, &vmat[5]), v - dot(g, &vmat[1]), v - dot(g, &vmat[3])]);
+        
+        
+        let v = tet_vals_grads[3][0];
+        let g = &tet_vals_grads[3][1..];
+        vals.extend([v - dot(g, &vmat[2]), v - dot(g, &vmat[4]), v - dot(g, &vmat[5])]);
+        
+        interpolant_vec.push(vals);
     }
+}
+fn test_distance<const M: usize>(v: &[[f64; 3]], h: &[[f64; M]]) -> bool {
+    false
 }

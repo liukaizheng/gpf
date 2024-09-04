@@ -3,7 +3,7 @@ use std::alloc::Allocator;
 
 use bumpalo::Bump;
 
-use crate::math::{dot, sub};
+use crate::math::{dot, sub_in};
 use crate::{predicates, INVALID_IND};
 
 pub fn triangulate<A: Allocator + Copy>(
@@ -115,7 +115,7 @@ pub fn triangulate_polygon<A: Allocator + Copy>(
             .map(|&idx| {
                 let p = point3(points, idx);
                 let mut v = std::vec::from_elem_in(0.0, 3, bump);
-                sub(p, o, &mut v);
+                sub_in(p, o, &mut v);
                 [dot(&v, x), dot(&v, y)]
             })
             .flatten(),

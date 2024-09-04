@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     disjoint_set::DisjointSet,
     graphcut::{ArcBuilder, MaxFlow, PushRelabelFifo},
-    math::{cross, norm, sub},
+    math::{cross_in, norm, sub_in},
     mesh::{EdgeId, ElementId, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
         double_to_sign, max_comp_in_tri_normal, orient2d, orient2d_by_axis, orient3d::orient3d,
@@ -1936,10 +1936,10 @@ fn face_area<A: Allocator + Copy>(points: &[f64], verts: &[VertexId], bump: A) -
     let mut area = 0.0;
     for two_verts in verts[1..].windows(2) {
         let pb = point(points, two_verts[0].0);
-        sub(pb, pa, &mut v1);
+        sub_in(pb, pa, &mut v1);
         let pc = point(points, two_verts[1].0);
-        sub(pc, pa, &mut v2);
-        cross(&v1, &v2, &mut n);
+        sub_in(pc, pa, &mut v2);
+        cross_in(&v1, &v2, &mut n);
         area += norm(&n);
     }
     return area;
