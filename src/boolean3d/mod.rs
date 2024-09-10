@@ -1,14 +1,19 @@
 mod adaptive_subdivide;
+mod tet_set;
 
-use std::{alloc::Allocator, collections::HashMap};
+use std::{
+    alloc::Allocator,
+    collections::{HashMap, HashSet},
+};
 
 use adaptive_subdivide::adaptive_subdivide;
 use itertools::Itertools;
+use tet_set::TetSet;
 
 use crate::{
-    geometry::{BBox, Surf, Surface},
-    mesh::{FaceId, Mesh, SurfaceMesh, VertexId},
-    INVALID_IND,
+    geometry::{BBox, Surf},
+    mesh::{square_edge_length, EdgeId, FaceId, Mesh, SurfaceMesh, VertexId},
+    point, INVALID_IND,
 };
 
 pub struct SimpleBody {
@@ -26,19 +31,6 @@ pub enum BooleanType {
     Union,
     Intersection,
     Difference,
-}
-
-struct TetSet {
-    mesh: SurfaceMesh,
-    tets: Vec<([VertexId; 4], [(FaceId, bool); 4])>,
-    points: Vec<f64>,
-}
-
-impl TetSet {
-    #[inline]
-    fn vertices_in<A: Allocator + Copy>(&self, tid: usize, alloc: A) -> Vec<VertexId, A> {
-        self.tets[tid].0.to_vec_in(alloc)
-    }
 }
 
 pub fn boolean3d(first: &SimpleBody, second: &SimpleBody, t: BooleanType, eps: f64) {
@@ -70,8 +62,11 @@ fn init_mesh(bbox: BBox) -> TetSet {
         verts.sort();
         (verts[0] << 6) | (verts[1] << 3) | verts[2]
     };
-    let mut tets = Vec::with_capacity(6);
-    let mut face_map = HashMap::new();
+    let mut face_tets = vec![[INVALID_IND; 2]; 18];
+    let mut tet_vertices = Vec::with_capacity(6);
+    let mut tet_edges = Vec::with_capacity(6);
+    let mut tet_faces = Vec::with_capacity(6);
+    let mut face_map: HashMap<usize, FaceId> = HashMap::new();
     let mut triangles: Vec<[usize; 3]> = Vec::new();
     for t in TETS {
         let tet = [
@@ -83,17 +78,40 @@ fn init_mesh(bbox: BBox) -> TetSet {
         .map(|tri| {
             let key = hash_tri(tri);
             if let Some(&fid) = face_map.get(&key) {
-                (fid, true)
+                face_tets[fid.0][1] = tet_faces.len();
+                fid
             } else {
                 let fid: FaceId = triangles.len().into();
+                face_tets[fid.0][0] = tet_faces.len();
                 triangles.push(tri);
                 face_map.insert(key, fid);
-                (fid, false)
+                fid
             }
         });
-        tets.push((t.map(|vid| vid.into()), tet));
+        tet_vertices.push(t.map(|vid| vid.into()));
+        tet_faces.push(tet);
     }
+
     let mesh = SurfaceMesh::new(triangles);
+
+    tet_edges.extend(tet_faces.iter().map(|faces| {
+        let mut set = HashSet::with_capacity(6);
+        for &fid in faces {
+            for he in mesh.face(fid).halfedges() {
+                set.insert(*he.edge());
+            }
+        }
+        debug_assert_eq!(set.len(), 6);
+        let mut iter = set.into_iter();
+        let mut edges = [EdgeId::default(); 6];
+        edges[0] = iter.next().unwrap();
+        edges[1] = iter.next().unwrap();
+        edges[2] = iter.next().unwrap();
+        edges[3] = iter.next().unwrap();
+        edges[4] = iter.next().unwrap();
+        edges[5] = iter.next().unwrap();
+        edges
+    }));
     let points = vec![
         bbox.min[0],
         bbox.min[1],
@@ -120,5 +138,15 @@ fn init_mesh(bbox: BBox) -> TetSet {
         bbox.max[1],
         bbox.max[2],
     ];
-    TetSet { mesh, tets, points }
+    let square_edge_lengths =
+        Vec::from_iter(mesh.edges().map(|e| square_edge_length(&points, *e, &mesh)));
+    TetSet {
+        mesh,
+        tet_vertices,
+        tet_edges,
+        tet_faces,
+        face_tets,
+        points,
+        square_edge_lengths,
+    }
 }

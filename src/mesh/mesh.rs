@@ -149,6 +149,22 @@ pub trait Mesh: Sized {
         self.core_data().f_halfedge_arr[fid.index()]
     }
 
+    /// the halfedge in the face that starts from the vertex
+    fn fv_halfedge(&self, fid: FaceId, vid: VertexId) -> HalfedgeId {
+        let first_hid = self.f_halfedge(fid);
+        let mut hid = first_hid;
+        loop {
+            if self.he_vertex(hid) == vid {
+                return hid;
+            }
+            hid = self.he_next(hid);
+            if hid == first_hid {
+                break;
+            }
+        }
+        HalfedgeId::default()
+    }
+
     #[inline(always)]
     fn he_same_dir(&self, hid: HalfedgeId) -> bool {
         let eid = self.he_edge(hid);
