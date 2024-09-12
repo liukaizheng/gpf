@@ -100,6 +100,7 @@ pub(super) fn adaptive_subdivide(tets: &mut TetSet, surfaces: Vec<&Surf>, sq_eps
             push_longest_edge(tid, tets, &mut data, sq_eps, &check_bump);
         }
     }
+    println!("n tets: {}", tets.face_tets.len());
 }
 
 fn push_longest_edge(
@@ -173,7 +174,7 @@ fn subdividable(
         d * d
     };
 
-    let adj_vmat = bumpalo::vec![in bump;
+    let trans_adj_vmat = bumpalo::vec![in bump;
         cross(&vmat[1], &vmat[2]),
         cross(&vmat[2], &vmat[0]),
         cross(&vmat[0], &vmat[1]),
@@ -218,7 +219,7 @@ fn subdividable(
         }
 
         let val_diff = [v1 - v0, v2 - v0, v3 - v0];
-        if test_distance(&adj_vmat, &[val_diff], [&diffs], sq_det_vmat, sq_eps, bump) {
+        if test_distance(&trans_adj_vmat, &[val_diff], [&diffs], sq_det_vmat, sq_eps, bump) {
             let mut iter = active.iter();
             surfs.retain(|_| *iter.next().unwrap());
             return true;
@@ -259,7 +260,7 @@ fn subdividable(
             interpolant_diff_vec[i].as_slice(),
             interpolant_vec[j].as_slice(),
         ];
-        if test_distance(&adj_vmat, &h, b, sq_det_vmat, sq_eps, bump) {
+        if test_distance(&trans_adj_vmat, &h, b, sq_det_vmat, sq_eps, bump) {
             let mut iter = active.iter();
             surfs.retain(|_| *iter.next().unwrap());
             return true;
@@ -285,7 +286,7 @@ fn subdividable(
             interpolant_diff_vec[j].as_slice(),
             interpolant_diff_vec[k].as_slice(),
         ];
-        if test_distance(&adj_vmat, &h, b, sq_det_vmat, sq_eps, bump) {
+        if test_distance(&trans_adj_vmat, &h, b, sq_det_vmat, sq_eps, bump) {
             let mut iter = active.iter();
             surfs.retain(|_| *iter.next().unwrap());
             return true;
@@ -298,15 +299,15 @@ fn subdividable(
     false
 }
 
-fn adjacent_mat<'b, const N: usize>(
+fn transpose_adjacent_mat<'b, const N: usize>(
     mat: &[[f64; N]],
     bump: &'b Bump,
 ) -> bumpalo::collections::Vec<'b, [f64; N]> {
     let mut vec = bumpalo::vec![in bump; [0.0; N]; N];
     if N == 2 {
         vec[0][0] = mat[1][1];
-        vec[0][1] = -mat[1][0];
-        vec[1][0] = -mat[0][1];
+        vec[0][1] = -mat[0][1];
+        vec[1][0] = -mat[1][0];
         vec[1][1] = mat[0][0];
     } else if N == 3 {
         cross_in(&mat[1], &mat[2], &mut vec[0]);
@@ -333,24 +334,8 @@ fn det<const N: usize>(mat: &[[f64; N]]) -> f64 {
     }
 }
 
-fn matrix_multiply<'a, const N1: usize, const N2: usize>(
-    ma: &[[f64; N1]],
-    mb: &[[f64; N2]],
-    bump: &'a Bump,
-) -> bumpalo::collections::Vec<'a, [f64; N2]> {
-    let mut ret = bumpalo::vec![in bump; [0.0f64; N2]; ma.len()];
-    for i in 0..ma.len() {
-        for j in 0..N2 {
-            for k in 0..N1 {
-                ret[i][j] += ma[i][k] * mb[k][j];
-            }
-        }
-    }
-    ret
-}
-
 fn test_distance<const M: usize>(
-    adj_v: &[[f64; 3]],
+    trans_adj_v: &[[f64; 3]],
     h: &[[f64; 3]],
     b: [&[f64]; M],
     sq_det_v: f64,
@@ -358,7 +343,14 @@ fn test_distance<const M: usize>(
     bump: &Bump,
 ) -> bool {
     // w: (M, 3)
-    let w = matrix_multiply(h, adj_v, bump);
+    let mut w = bumpalo::vec![in bump; [0.0f64; 3]; M];
+    for i in 0..M {
+        for j in 0..3 {
+            w[i][j] = h[i][0] * trans_adj_v[j][0]
+                + h[i][1] * trans_adj_v[j][1]
+                + h[i][2] * trans_adj_v[j][2];
+        }
+    }
     if M == 1 {
         let w2 = square_norm(&w[0]);
         let max_b = b[0]
@@ -371,6 +363,7 @@ fn test_distance<const M: usize>(
     } else {
         // u = w * w^T with shape(M, M)
         let mut u = bumpalo::vec![in bump; [0.0; M]; M];
+
         for i in 0..M {
             for j in 0..M {
                 u[i][j] = w[i][0] * w[j][0] + w[i][1] * w[j][1] + w[i][2] * w[j][2];
@@ -378,13 +371,13 @@ fn test_distance<const M: usize>(
         }
 
         // adj_u: (M, M)
-        let adj_u = adjacent_mat(&u, bump);
+        let trans_adj_u = transpose_adjacent_mat(&u, bump);
         // wu = w^T x adj_u with shape (3, M)
         let mut wu = bumpalo::vec![in bump; [0.0; M]; 3];
         for i in 0..3 {
             for j in 0..M {
                 for k in 0..M {
-                    wu[i][j] += w[k][i] * adj_u[k][j];
+                    wu[i][j] += w[k][i] * trans_adj_u[j][k];
                 }
             }
         }
@@ -402,6 +395,7 @@ fn test_distance<const M: usize>(
             .unwrap();
         let det_u = det(&u);
         let sq_det_u = det_u * det_u;
+
         return r2 * sq_det_v > sq_det_u * sq_eps;
     }
 }
