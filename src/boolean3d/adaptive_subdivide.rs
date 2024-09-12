@@ -7,7 +7,7 @@ use itertools::Itertools;
 use crate::{
     geometry::{Surf, Surface},
     math::{cross, cross_in, dot, square_norm, sub_short},
-    mesh::EdgeId,
+    mesh::{EdgeId, Mesh, SurfaceMesh},
     point,
     predicates::{double_to_sign, orient2d, orient3d, Orientation},
 };
@@ -47,6 +47,21 @@ struct SubdivisionData<'a> {
     vals_and_grads: Vec<HashMap<usize, [f64; 4]>>,
     active_surfs: Vec<Vec<usize>>,
     queue: BinaryHeap<EdgeAndLen>,
+}
+
+fn write_obj(points: &[f64], mesh: &SurfaceMesh) {
+    let mut txt = String::new();
+    for p in points.chunks(3) {
+        txt.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
+    }
+    for face in mesh.faces() {
+        txt.push_str("f");
+        for v in face.vertices() {
+            txt.push_str(&format!(" {}", v.0 + 1));
+        }
+        txt.push('\n');
+    }
+    std::fs::write("output.obj", txt).unwrap();
 }
 
 pub(super) fn adaptive_subdivide(tets: &mut TetSet, surfaces: Vec<&Surf>, sq_eps: f64) {
@@ -100,7 +115,8 @@ pub(super) fn adaptive_subdivide(tets: &mut TetSet, surfaces: Vec<&Surf>, sq_eps
             push_longest_edge(tid, tets, &mut data, sq_eps, &check_bump);
         }
     }
-    println!("n tets: {}", tets.face_tets.len());
+    write_obj(&tets.points, &tets.mesh);
+    println!("n tets: {}", tets.tet_faces.len());
 }
 
 fn push_longest_edge(
@@ -191,20 +207,21 @@ fn subdividable(
         vals.extend(tet_vals_grads.iter().map(|vals_grads| vals_grads[0]));
         let v0 = tet_vals_grads[0][0];
         let g = &tet_vals_grads[0][1..];
-        vals.extend([v0 + dot(g, &vmat[0]), v0 + dot(g, &vmat[1]), v0 + dot(g, &vmat[2])]);
+        const S: f64 = 1.0 / 3.0;
+        vals.extend([v0 + S * dot(g, &vmat[0]), v0 + S * dot(g, &vmat[1]), v0 + S * dot(g, &vmat[2])]);
 
         let v1 = tet_vals_grads[1][0];
         let g = &tet_vals_grads[1][1..];
-        vals.extend([v1 + dot(g, &vmat[3]), v1 + dot(g, &vmat[4]), v1 - dot(g, &vmat[0])]);
+        vals.extend([v1 + S *dot(g, &vmat[3]), v1 + S * dot(g, &vmat[4]), v1 - S * dot(g, &vmat[0])]);
 
         let v2 = tet_vals_grads[2][0];
         let g = &tet_vals_grads[2][1..];
-        vals.extend([v2 + dot(g, &vmat[5]), v2 - dot(g, &vmat[1]), v2 - dot(g, &vmat[3])]);
+        vals.extend([v2 + S * dot(g, &vmat[5]), v2 - S * dot(g, &vmat[1]), v2 - S * dot(g, &vmat[3])]);
 
 
         let v3 = tet_vals_grads[3][0];
         let g = &tet_vals_grads[3][1..];
-        vals.extend([v3 - dot(g, &vmat[2]), v3 - dot(g, &vmat[4]), v3 - dot(g, &vmat[5])]);
+        vals.extend([v3 - S * dot(g, &vmat[2]), v3 - S * dot(g, &vmat[4]), v3 - S * dot(g, &vmat[5])]);
 
         vals.push(((vals[7] + vals[8] + vals[10] + vals[12] + vals[14] + vals[15]) * 1.5 - vals[1] - vals[2] - vals[3]) / 6.0);
         vals.push(((vals[5] + vals[6] + vals[10] + vals[11] + vals[13] + vals[15]) * 1.5 - vals[0] - vals[2] - vals[3]) / 6.0);
@@ -258,7 +275,7 @@ fn subdividable(
         let h = bumpalo::vec![in bump; val_diff_vec[i], val_diff_vec[j]];
         let b = [
             interpolant_diff_vec[i].as_slice(),
-            interpolant_vec[j].as_slice(),
+            interpolant_diff_vec[j].as_slice(),
         ];
         if test_distance(&trans_adj_vmat, &h, b, sq_det_vmat, sq_eps, bump) {
             let mut iter = active.iter();
