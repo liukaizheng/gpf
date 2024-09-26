@@ -225,8 +225,8 @@ fn subdividable(
             surfs.retain(|_| *iter.next().unwrap());
             return true;
         } else {
-            if *vals.iter().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap() < 0.0 ||
-                *vals.iter().min_by(|x, y| x.partial_cmp(y).unwrap()).unwrap() > 0.0 {
+            if *vals.iter().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap() <= 0.0 ||
+                *vals.iter().min_by(|x, y| x.partial_cmp(y).unwrap()).unwrap() >= 0.0 {
                     active[i] = false;
             }
         }
