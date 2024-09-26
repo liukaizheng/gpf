@@ -12,8 +12,11 @@ use crate::{
     predicates::{double_to_sign, orient2d, orient3d, Orientation},
 };
 
+type BVec<'a, T> = bumpalo::collections::Vec<'a, T>;
+
 use super::TetSet;
 
+#[derive(Debug, Clone)]
 struct EdgeAndLen {
     eid: EdgeId,
     len: f64,
@@ -47,21 +50,6 @@ struct SubdivisionData<'a> {
     vals_and_grads: Vec<HashMap<usize, [f64; 4]>>,
     active_surfs: Vec<Vec<usize>>,
     queue: BinaryHeap<EdgeAndLen>,
-}
-
-fn write_obj(points: &[f64], mesh: &SurfaceMesh) {
-    let mut txt = String::new();
-    for p in points.chunks(3) {
-        txt.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
-    }
-    for face in mesh.faces() {
-        txt.push_str("f");
-        for v in face.vertices() {
-            txt.push_str(&format!(" {}", v.0 + 1));
-        }
-        txt.push('\n');
-    }
-    std::fs::write("output.obj", txt).unwrap();
 }
 
 pub(super) fn adaptive_subdivide(tets: &mut TetSet, surfaces: Vec<&Surf>, sq_eps: f64) {
@@ -115,7 +103,6 @@ pub(super) fn adaptive_subdivide(tets: &mut TetSet, surfaces: Vec<&Surf>, sq_eps
             push_longest_edge(tid, tets, &mut data, sq_eps, &check_bump);
         }
     }
-    write_obj(&tets.points, &tets.mesh);
     println!("n tets: {}", tets.tet_faces.len());
 }
 
@@ -172,35 +159,32 @@ fn subdividable(
     let mut active = Vec::with_capacity_in(surfs.len(), bump);
     active.resize(surfs.len(), true);
     let verts = tets.vertices_in(tid, bump);
-    let points = bumpalo::collections::Vec::from_iter_in(
-        verts.iter().map(|vid| point(&tets.points, vid.0)),
-        bump,
-    );
-    let vmat = bumpalo::vec![in bump;
-        sub_short::<3, _>(points[1], points[0]),
-        sub_short::<3, _>(points[2], points[0]),
-        sub_short::<3, _>(points[3], points[0]),
-        sub_short::<3, _>(points[2], points[1]),
-        sub_short::<3, _>(points[3], points[1]),
-        sub_short::<3, _>(points[3], points[2]),
+    let tet_points = BVec::from_iter_in(verts.iter().map(|vid| point(&tets.points, vid.0)), bump);
+    let trans_vmat = bumpalo::vec![in bump;
+        sub_short::<3, _>(tet_points[1], tet_points[0]),
+        sub_short::<3, _>(tet_points[2], tet_points[0]),
+        sub_short::<3, _>(tet_points[3], tet_points[0]),
+        sub_short::<3, _>(tet_points[2], tet_points[1]),
+        sub_short::<3, _>(tet_points[3], tet_points[1]),
+        sub_short::<3, _>(tet_points[3], tet_points[2]),
     ];
 
     let sq_det_vmat = {
-        let d = det(&vmat);
+        let d = det(&trans_vmat);
         d * d
     };
 
-    let trans_adj_vmat = bumpalo::vec![in bump;
-        cross(&vmat[1], &vmat[2]),
-        cross(&vmat[2], &vmat[0]),
-        cross(&vmat[0], &vmat[1]),
+    let adj_vmat = bumpalo::vec![in bump;
+        cross(&trans_vmat[1], &trans_vmat[2]),
+        cross(&trans_vmat[2], &trans_vmat[0]),
+        cross(&trans_vmat[0], &trans_vmat[1]),
     ];
 
     let mut interpolant_vec = Vec::with_capacity_in(surfs.len(), bump);
     let mut interpolant_diff_vec = Vec::with_capacity_in(surfs.len(), bump);
     let mut val_diff_vec = Vec::with_capacity_in(surfs.len(), bump);
     for (i, &sid) /*surface id*/ in surfs.iter().enumerate() {
-        let tet_vals_grads = bumpalo::collections::Vec::from_iter_in(
+        let tet_vals_grads = BVec::from_iter_in(
             verts.iter().map(|&vid| data.vals_and_grads[sid].get(&vid.0).unwrap()), bump);
         let mut vals = Vec::with_capacity_in(20, bump);
 
@@ -208,20 +192,20 @@ fn subdividable(
         let v0 = tet_vals_grads[0][0];
         let g = &tet_vals_grads[0][1..];
         const S: f64 = 1.0 / 3.0;
-        vals.extend([v0 + S * dot(g, &vmat[0]), v0 + S * dot(g, &vmat[1]), v0 + S * dot(g, &vmat[2])]);
+        vals.extend([v0 + S * dot(g, &trans_vmat[0]), v0 + S * dot(g, &trans_vmat[1]), v0 + S * dot(g, &trans_vmat[2])]);
 
         let v1 = tet_vals_grads[1][0];
         let g = &tet_vals_grads[1][1..];
-        vals.extend([v1 + S *dot(g, &vmat[3]), v1 + S * dot(g, &vmat[4]), v1 - S * dot(g, &vmat[0])]);
+        vals.extend([v1 + S *dot(g, &trans_vmat[3]), v1 + S * dot(g, &trans_vmat[4]), v1 - S * dot(g, &trans_vmat[0])]);
 
         let v2 = tet_vals_grads[2][0];
         let g = &tet_vals_grads[2][1..];
-        vals.extend([v2 + S * dot(g, &vmat[5]), v2 - S * dot(g, &vmat[1]), v2 - S * dot(g, &vmat[3])]);
+        vals.extend([v2 + S * dot(g, &trans_vmat[5]), v2 - S * dot(g, &trans_vmat[1]), v2 - S * dot(g, &trans_vmat[3])]);
 
 
         let v3 = tet_vals_grads[3][0];
         let g = &tet_vals_grads[3][1..];
-        vals.extend([v3 - S * dot(g, &vmat[2]), v3 - S * dot(g, &vmat[4]), v3 - S * dot(g, &vmat[5])]);
+        vals.extend([v3 - S * dot(g, &trans_vmat[2]), v3 - S * dot(g, &trans_vmat[4]), v3 - S * dot(g, &trans_vmat[5])]);
 
         vals.push(((vals[7] + vals[8] + vals[10] + vals[12] + vals[14] + vals[15]) * 1.5 - vals[1] - vals[2] - vals[3]) / 6.0);
         vals.push(((vals[5] + vals[6] + vals[10] + vals[11] + vals[13] + vals[15]) * 1.5 - vals[0] - vals[2] - vals[3]) / 6.0);
@@ -236,7 +220,7 @@ fn subdividable(
         }
 
         let val_diff = [v1 - v0, v2 - v0, v3 - v0];
-        if test_distance(&trans_adj_vmat, &[val_diff], [&diffs], sq_det_vmat, sq_eps, bump) {
+        if test_distance_1(&adj_vmat, val_diff, &diffs, sq_det_vmat, sq_eps) {
             let mut iter = active.iter();
             surfs.retain(|_| *iter.next().unwrap());
             return true;
@@ -252,7 +236,7 @@ fn subdividable(
         val_diff_vec.push(val_diff);
     }
 
-    let activated = bumpalo::collections::Vec::from_iter_in(
+    let activated = BVec::from_iter_in(
         active
             .iter()
             .enumerate()
@@ -277,7 +261,7 @@ fn subdividable(
             interpolant_diff_vec[i].as_slice(),
             interpolant_diff_vec[j].as_slice(),
         ];
-        if test_distance(&trans_adj_vmat, &h, b, sq_det_vmat, sq_eps, bump) {
+        if test_distance_2(&adj_vmat, &h, b, sq_det_vmat, sq_eps, bump) {
             let mut iter = active.iter();
             surfs.retain(|_| *iter.next().unwrap());
             return true;
@@ -288,9 +272,10 @@ fn subdividable(
         let points = bumpalo::collections::Vec::from_iter_in(
             interpolant_vec[i]
                 .iter()
-                .interleave(&interpolant_vec[j])
-                .interleave(&interpolant_vec[k])
-                .map(|v| *v),
+                .zip(&interpolant_vec[j])
+                .zip(&interpolant_vec[k])
+                .map(|((a, b), c)| [*a, *b, *c])
+                .flatten(),
             bump,
         );
         if !contain_dim_3(&points, &[0.0, 0.0, 0.0], bump) {
@@ -303,7 +288,7 @@ fn subdividable(
             interpolant_diff_vec[j].as_slice(),
             interpolant_diff_vec[k].as_slice(),
         ];
-        if test_distance(&trans_adj_vmat, &h, b, sq_det_vmat, sq_eps, bump) {
+        if test_distance_3(&adj_vmat, &h, b, sq_det_vmat, sq_eps, bump) {
             let mut iter = active.iter();
             surfs.retain(|_| *iter.next().unwrap());
             return true;
@@ -351,77 +336,11 @@ fn det<const N: usize>(mat: &[[f64; N]]) -> f64 {
     }
 }
 
-fn test_distance<const M: usize>(
-    trans_adj_v: &[[f64; 3]],
-    h: &[[f64; 3]],
-    b: [&[f64]; M],
-    sq_det_v: f64,
-    sq_eps: f64,
-    bump: &Bump,
-) -> bool {
-    // w: (M, 3)
-    let mut w = bumpalo::vec![in bump; [0.0f64; 3]; M];
-    for i in 0..M {
-        for j in 0..3 {
-            w[i][j] = h[i][0] * trans_adj_v[j][0]
-                + h[i][1] * trans_adj_v[j][1]
-                + h[i][2] * trans_adj_v[j][2];
-        }
-    }
-    if M == 1 {
-        let w2 = square_norm(&w[0]);
-        let max_b = b[0]
-            .iter()
-            .map(|s| s.abs())
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
-            .unwrap();
-        let b2 = max_b * max_b;
-        return b2 * sq_det_v > w2 * sq_eps;
-    } else {
-        // u = w * w^T with shape(M, M)
-        let mut u = bumpalo::vec![in bump; [0.0; M]; M];
-
-        for i in 0..M {
-            for j in 0..M {
-                u[i][j] = w[i][0] * w[j][0] + w[i][1] * w[j][1] + w[i][2] * w[j][2];
-            }
-        }
-
-        // adj_u: (M, M)
-        let trans_adj_u = transpose_adjacent_mat(&u, bump);
-        // wu = w^T x adj_u with shape (3, M)
-        let mut wu = bumpalo::vec![in bump; [0.0; M]; 3];
-        for i in 0..3 {
-            for j in 0..M {
-                for k in 0..M {
-                    wu[i][j] += w[k][i] * trans_adj_u[j][k];
-                }
-            }
-        }
-        let r2 = (0..b[0].len())
-            .map(|l| {
-                let mut d = [0.0; 3];
-                for i in 0..3 {
-                    for j in 0..M {
-                        d[i] += wu[i][j] * b[j][l];
-                    }
-                }
-                square_norm(&d)
-            })
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
-            .unwrap();
-        let det_u = det(&u);
-        let sq_det_u = det_u * det_u;
-
-        return r2 * sq_det_v > sq_det_u * sq_eps;
-    }
-}
-
 fn contain_dim_2(points: &[f64], query: &[f64], bump: &Bump) -> bool {
     for ((i, pa), (j, pb)) in points.chunks(2).enumerate().tuple_combinations() {
         let base_ori = double_to_sign(orient2d(pa, pb, query, bump));
         if base_ori == Orientation::Zero {
-            return false;
+            continue;
         }
 
         let separating = || {
@@ -447,7 +366,7 @@ fn contain_dim_3(points: &[f64], query: &[f64], bump: &Bump) -> bool {
     for ((i, pa), (j, pb), (k, pc)) in points.chunks(3).enumerate().tuple_combinations() {
         let base_ori = double_to_sign(orient3d(pa, pb, pc, query, bump));
         if base_ori == Orientation::Zero {
-            return false;
+            continue;
         }
 
         let separating = || {
@@ -467,4 +386,107 @@ fn contain_dim_3(points: &[f64], query: &[f64], bump: &Bump) -> bool {
         }
     }
     true
+}
+
+fn test_distance_1(adj_v: &[[f64; 3]], h: [f64; 3], b: &[f64], sq_det_v: f64, sq_eps: f64) -> bool {
+    // w: (M, 3)
+    let mut w = [0.0f64; 3];
+    for i in 0..3 {
+        w[i] = h[0] * adj_v[0][i] + h[1] * adj_v[1][i] + h[2] * adj_v[2][i];
+    }
+    let w2 = square_norm(&w);
+    let max_b = b
+        .iter()
+        .map(|s| s.abs())
+        .max_by(|a, b| a.partial_cmp(b).unwrap())
+        .unwrap();
+    let b2 = max_b * max_b;
+    return b2 * sq_det_v > w2 * sq_eps;
+}
+
+fn test_distance_2(
+    adj_v: &[[f64; 3]],
+    h: &[[f64; 3]],
+    b: [&[f64]; 2],
+    sq_det_v: f64,
+    sq_eps: f64,
+    bump: &Bump,
+) -> bool {
+    // w: (M, 3)
+    let mut w = bumpalo::vec![in bump; [0.0f64; 3]; 2];
+    for i in 0..2 {
+        for j in 0..3 {
+            w[i][j] = h[i][0] * adj_v[0][j] + h[i][1] * adj_v[1][j] + h[i][2] * adj_v[2][j];
+        }
+    }
+    // u = w * w^T with shape(M, M)
+    let mut u = bumpalo::vec![in bump; [0.0; 2]; 2];
+
+    for i in 0..2 {
+        for j in 0..2 {
+            u[i][j] = w[i][0] * w[j][0] + w[i][1] * w[j][1] + w[i][2] * w[j][2];
+        }
+    }
+
+    let det_u = det(&u);
+
+    // adj_u: (M, M)
+    let trans_adj_u = transpose_adjacent_mat(&u, bump);
+    // wu = w^T x adj_u with shape (3, M)
+    let mut wu = bumpalo::vec![in bump; [0.0; 2]; 3];
+    for i in 0..3 {
+        for j in 0..2 {
+            for k in 0..2 {
+                wu[i][j] += w[k][i] * trans_adj_u[j][k];
+            }
+        }
+    }
+    let r2 = (0..b[0].len())
+        .map(|l| {
+            let mut d = [0.0; 3];
+            for i in 0..3 {
+                for j in 0..2 {
+                    d[i] += wu[i][j] * b[j][l];
+                }
+            }
+            square_norm(&d)
+        })
+        .max_by(|a, b| a.partial_cmp(b).unwrap())
+        .unwrap();
+    let sq_det_u = det_u * det_u;
+
+    return r2 * sq_det_v > sq_det_u * sq_eps;
+}
+
+fn test_distance_3(
+    adj_v: &[[f64; 3]],
+    h: &[[f64; 3]],
+    b: [&[f64]; 3],
+    sq_det_v: f64,
+    sq_eps: f64,
+    bump: &Bump,
+) -> bool {
+    // w: (M, 3)
+    let mut w = bumpalo::vec![in bump; [0.0f64; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            w[i][j] = h[i][0] * adj_v[0][j] + h[i][1] * adj_v[1][j] + h[i][2] * adj_v[2][j];
+        }
+    }
+    let det_w = det(&w);
+    let trans_adj_w = transpose_adjacent_mat(&w, bump);
+    let r2 = (0..b[0].len())
+        .map(|l| {
+            let mut d = [0.0; 3];
+            for i in 0..3 {
+                for j in 0..3 {
+                    d[i] += trans_adj_w[i][j] * b[j][l];
+                }
+            }
+            square_norm(&d)
+        })
+        .max_by(|a, b| a.partial_cmp(b).unwrap())
+        .unwrap();
+
+    return r2 * sq_det_v > det_w * det_w * sq_eps;
 }
