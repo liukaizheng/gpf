@@ -1,13 +1,15 @@
 use core::panic;
 use std::collections::{BinaryHeap, HashMap};
 
+use hashbrown::HashSet;
+
 use bumpalo::Bump;
 use itertools::Itertools;
 
 use crate::{
     geometry::{Surf, Surface},
     math::{cross, cross_in, dot, square_norm, sub_short},
-    mesh::{EdgeId, Mesh, SurfaceMesh},
+    mesh::EdgeId,
     point,
     predicates::{double_to_sign, orient2d, orient3d, Orientation},
 };
@@ -244,6 +246,7 @@ fn subdividable(
             .map(|(i, _)| i),
         bump,
     );
+    let mut pair_set = HashSet::new_in(bump);
     for (&i, &j) in activated.iter().tuple_combinations() {
         let points = bumpalo::collections::Vec::from_iter_in(
             interpolant_vec[i]
@@ -256,14 +259,18 @@ fn subdividable(
             continue;
         }
 
+        pair_set.insert([i, j]);
+
         let h = bumpalo::vec![in bump; val_diff_vec[i], val_diff_vec[j]];
         let b = [
             interpolant_diff_vec[i].as_slice(),
             interpolant_diff_vec[j].as_slice(),
         ];
         if test_distance_2(&adj_vmat, &h, b, sq_det_vmat, sq_eps, bump) {
-            let mut iter = active.iter();
-            surfs.retain(|_| *iter.next().unwrap());
+            if activated.len() != active.len() {
+                let mut iter = active.iter();
+                surfs.retain(|_| *iter.next().unwrap());
+            }
             return true;
         }
     }
@@ -278,6 +285,12 @@ fn subdividable(
                 .flatten(),
             bump,
         );
+
+        if !pair_set.contains(&[i, j]) || !pair_set.contains(&[i, k]) || !pair_set.contains(&[j, k])
+        {
+            continue;
+        }
+
         if !contain_dim_3(&points, &[0.0, 0.0, 0.0], bump) {
             continue;
         }
@@ -289,8 +302,10 @@ fn subdividable(
             interpolant_diff_vec[k].as_slice(),
         ];
         if test_distance_3(&adj_vmat, &h, b, sq_det_vmat, sq_eps, bump) {
-            let mut iter = active.iter();
-            surfs.retain(|_| *iter.next().unwrap());
+            if activated.len() != active.len() {
+                let mut iter = active.iter();
+                surfs.retain(|_| *iter.next().unwrap());
+            }
             return true;
         }
     }
