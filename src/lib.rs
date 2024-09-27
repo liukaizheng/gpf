@@ -1,4 +1,3 @@
-#![feature(const_fn_floating_point_arithmetic)]
 #![feature(float_next_up_down)]
 #![feature(cell_leak)]
 #![feature(trait_alias)]
@@ -9,15 +8,15 @@
 
 use itertools::Itertools;
 
+pub mod boolean3d;
 pub mod disjoint_set;
+pub mod geometry;
 pub mod graphcut;
 pub mod math;
 pub mod mesh;
 pub mod polygonlization;
 pub mod predicates;
 pub mod triangle;
-pub mod geometry;
-pub mod boolean3d;
 
 const INVALID_IND: usize = usize::MAX;
 
@@ -25,6 +24,12 @@ const INVALID_IND: usize = usize::MAX;
 fn point(points: &[f64], tid: usize) -> &[f64] {
     let start = tid * 3;
     &points[start..(start + 3)]
+}
+
+#[inline(always)]
+fn point_2(points: &[f64], tid: usize) -> &[f64] {
+    let start = tid * 2;
+    &points[start..(start + 2)]
 }
 
 #[inline(always)]
