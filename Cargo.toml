@@ -6,10 +6,14 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bumpalo = {version = "3.13.0", features = ["collections", "allocator_api"]}
-hashbrown = { version = "0.14.3", default-features = false, features = ["ahash", "nightly"] }
-itertools = "0.10.5"
-rand = {version = "0.8.5", features = ["small_rng"]}
+bumpalo = { version = "3.13", features = ["collections", "allocator_api"] }
+hashbrown = { version = "0.14", default-features = false, features = [
+    "ahash",
+    "nightly",
+] }
+itertools = "0.10"
+rand = { version = "0.8.5", features = ["small_rng"] }
+rayon = "1.10"
 
 [dev-dependencies]
 serde = { version = "1.0.163", features = ["derive"] }

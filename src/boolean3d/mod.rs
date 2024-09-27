@@ -43,6 +43,8 @@ pub fn boolean3d(first: &SimpleBody, second: &SimpleBody, t: BooleanType, eps: f
     bbox.merge(&first.bbox);
     bbox.merge(&second.bbox);
     bbox.scale(1.1);
+    // bbox.min = [-2.0, -2.0, -2.0];
+    // bbox.max = [2.0, 2.0, 2.0];
     let mut tets = init_mesh(bbox);
     adaptive_subdivide(&mut tets, surfaces, eps * eps);
 

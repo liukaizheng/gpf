@@ -36,7 +36,7 @@ impl TetSet {
         &mut self,
         eid: EdgeId,
         alloc: A,
-    ) -> (VertexId, Vec<[usize; 2], A>) {
+    ) -> (VertexId, Vec<usize, A>) {
         let [va, vb] = self.mesh.e_vertices(eid);
         let mut tet_faces_map: hashbrown::HashMap<usize, [usize; 2], _, _> =
             hashbrown::HashMap::<usize, [usize; 2], _, _>::new_in(alloc);
@@ -265,7 +265,7 @@ impl TetSet {
             ]);
             self.tet_faces
                 .push([nt_faces[0], nt_faces[1], nt_faces[2], nt_faces[3]]);
-            result_tets.push([tid, new_tid]);
+            result_tets.extend([tid, new_tid]);
         }
         (new_vert, result_tets)
     }

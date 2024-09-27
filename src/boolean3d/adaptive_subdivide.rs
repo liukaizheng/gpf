@@ -5,6 +5,9 @@ use hashbrown::HashSet;
 
 use bumpalo::Bump;
 use itertools::Itertools;
+use rayon::iter::{
+    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
+};
 
 use crate::{
     geometry::{Surf, Surface},
@@ -55,7 +58,6 @@ struct SubdivisionData<'a> {
 }
 
 pub(super) fn adaptive_subdivide(tets: &mut TetSet, surfaces: Vec<&Surf>, sq_eps: f64) {
-    let mut check_bump = Bump::new();
     let mut vals_and_grads = vec![HashMap::<usize, [f64; 4]>::new(); surfaces.len()];
     // TODO: parallelize by rayon
     for (i, &surf) in surfaces.iter().enumerate() {
@@ -73,9 +75,10 @@ pub(super) fn adaptive_subdivide(tets: &mut TetSet, surfaces: Vec<&Surf>, sq_eps
         queue: BinaryHeap::new(),
     };
 
+    let mut check_bumps = vec![Bump::new()];
     for tid in 0..tets.tet_faces.len() {
-        check_bump.reset();
-        push_longest_edge(tid, tets, &mut data, sq_eps, &check_bump);
+        check_bumps[0].reset();
+        check_and_push_longest_edge(tid, tets, &mut data, sq_eps, &check_bumps[0]);
     }
 
     let mut split_bump = Bump::new();
@@ -86,8 +89,8 @@ pub(super) fn adaptive_subdivide(tets: &mut TetSet, surfaces: Vec<&Surf>, sq_eps
             continue;
         }
         split_bump.reset();
-        let (new_vert, tet_pairs) = tets.split_edge(eid, &split_bump);
-        for &[old_tet, _] in &tet_pairs {
+        let (new_vert, split_tets) = tets.split_edge(eid, &split_bump);
+        for &old_tet in split_tets.iter().step_by(2) {
             for &sid in &data.active_surfs[old_tet] {
                 let vals_grads = &mut data.vals_and_grads[sid];
                 if vals_grads.contains_key(&new_vert) {
@@ -100,34 +103,61 @@ pub(super) fn adaptive_subdivide(tets: &mut TetSet, surfaces: Vec<&Surf>, sq_eps
             }
             data.active_surfs.push(data.active_surfs[old_tet].clone());
         }
-        for tid in tet_pairs.into_iter().flatten() {
-            check_bump.reset();
-            push_longest_edge(tid, tets, &mut data, sq_eps, &check_bump);
+        for _ in check_bumps.len()..split_tets.len() {
+            check_bumps.push(Bump::new());
         }
+
+        let check_info: Vec<_> = split_tets
+            .into_par_iter()
+            .zip(&mut check_bumps)
+            .map(|(&tid, check_bump)| {
+                check_bump.reset();
+                subdividable(tid, tets, &data, sq_eps, check_bump)
+            })
+            .collect();
+        for ((is_subdividable, active_surfs), tid) in check_info.into_iter().zip(split_tets) {
+            data.active_surfs[tid] = active_surfs;
+            if is_subdividable {
+                push_longest_edge(tid, tets, &mut data);
+            }
+        }
+        // for tid in split_tets.into_iter().flatten() {
+        //     check_bump.reset();
+        //     push_longest_edge(tid, tets, &mut data, sq_eps, &check_bump);
+        // }
     }
+    println!("n check bumps: {}", check_bumps.len());
     println!("n tets: {}", tets.tet_faces.len());
 }
 
-fn push_longest_edge(
+#[inline]
+fn push_longest_edge(tid: usize, tets: &mut TetSet, data: &mut SubdivisionData) {
+    let longest_eid = *tets.tet_edges[tid]
+        .iter()
+        .max_by(|&&ea, &&eb| {
+            tets.square_edge_lengths[ea]
+                .partial_cmp(&tets.square_edge_lengths[eb])
+                .unwrap()
+        })
+        .unwrap();
+    data.queue.push(EdgeAndLen {
+        eid: longest_eid,
+        len: tets.square_edge_lengths[longest_eid],
+    });
+}
+
+#[inline]
+fn check_and_push_longest_edge(
     tid: usize,
     tets: &mut TetSet,
     data: &mut SubdivisionData,
     sq_eps: f64,
     bump: &Bump,
 ) {
-    if subdividable(tid, tets, data, sq_eps, bump) {
-        let longest_eid = *tets.tet_edges[tid]
-            .iter()
-            .max_by(|&&ea, &&eb| {
-                tets.square_edge_lengths[ea]
-                    .partial_cmp(&tets.square_edge_lengths[eb])
-                    .unwrap()
-            })
-            .unwrap();
-        data.queue.push(EdgeAndLen {
-            eid: longest_eid,
-            len: tets.square_edge_lengths[longest_eid],
-        });
+    let (is_subdivdable, active_surfs) = subdividable(tid, tets, data, sq_eps, bump);
+    data.active_surfs[tid] = active_surfs;
+    if is_subdivdable {
+        push_longest_edge(tid, tets, data);
     }
 }
 
@@ -152,12 +182,12 @@ const C: [[f64; 4]; 16] = [
 
 fn subdividable(
     tid: usize,
-    tets: &mut TetSet,
-    data: &mut SubdivisionData,
+    tets: &TetSet,
+    data: &SubdivisionData,
     sq_eps: f64,
     bump: &Bump,
-) -> bool {
-    let surfs = &mut data.active_surfs[tid];
+) -> (bool, Vec<usize>) {
+    let surfs = &data.active_surfs[tid];
     let mut active = Vec::with_capacity_in(surfs.len(), bump);
     active.resize(surfs.len(), true);
     let verts = tets.vertices_in(tid, bump);
@@ -223,9 +253,7 @@ fn subdividable(
 
         let val_diff = [v1 - v0, v2 - v0, v3 - v0];
         if test_distance_1(&adj_vmat, val_diff, &diffs, sq_det_vmat, sq_eps) {
-            let mut iter = active.iter();
-            surfs.retain(|_| *iter.next().unwrap());
-            return true;
+            return (true, surfs.iter().zip(active).filter_map(|(&idx, a)| { if a { Some(idx) } else { None } }).collect());
         } else {
             if *vals.iter().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap() <= 0.0 ||
                 *vals.iter().min_by(|x, y| x.partial_cmp(y).unwrap()).unwrap() >= 0.0 {
@@ -242,8 +270,7 @@ fn subdividable(
         active
             .iter()
             .enumerate()
-            .filter(|(_, &v)| v)
-            .map(|(i, _)| i),
+            .filter_map(|(i, &v)| if v { Some(i) } else { None }),
         bump,
     );
     let mut pair_set = HashSet::new_in(bump);
@@ -268,10 +295,10 @@ fn subdividable(
         ];
         if test_distance_2(&adj_vmat, &h, b, sq_det_vmat, sq_eps, bump) {
             if activated.len() != active.len() {
-                let mut iter = active.iter();
-                surfs.retain(|_| *iter.next().unwrap());
+                return (true, activated.into_iter().map(|i| surfs[i]).collect());
+            } else {
+                return (true, surfs.clone());
             }
-            return true;
         }
     }
 
@@ -303,17 +330,17 @@ fn subdividable(
         ];
         if test_distance_3(&adj_vmat, &h, b, sq_det_vmat, sq_eps, bump) {
             if activated.len() != active.len() {
-                let mut iter = active.iter();
-                surfs.retain(|_| *iter.next().unwrap());
+                return (true, activated.into_iter().map(|i| surfs[i]).collect());
+            } else {
+                return (true, surfs.clone());
             }
-            return true;
         }
     }
-    {
-        let mut iter = active.into_iter();
-        surfs.retain(|_| iter.next().unwrap());
+    if activated.len() != active.len() {
+        return (false, activated.into_iter().map(|i| surfs[i]).collect());
+    } else {
+        return (false, surfs.clone());
     }
-    false
 }
 
 fn transpose_adjacent_mat<'b, const N: usize>(
@@ -456,6 +483,7 @@ fn test_distance_2(
             }
         }
     }
+
     let r2 = (0..b[0].len())
         .map(|l| {
             let mut d = [0.0; 3];
