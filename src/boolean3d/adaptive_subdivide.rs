@@ -10,8 +10,9 @@ use crate::{
     geometry::{Surf, Surface},
     math::{cross, cross_in, dot, square_norm, sub_short},
     mesh::EdgeId,
-    point,
-    predicates::{double_to_sign, orient2d, orient3d, Orientation},
+    point, point_2,
+    predicates::{double_to_sign, orient3d, Orientation},
+    triangle::convex_2,
 };
 
 type BVec<'a, T> = bumpalo::collections::Vec<'a, T>;
@@ -248,14 +249,15 @@ fn subdividable(
     );
     let mut pair_set = HashSet::new_in(bump);
     for (&i, &j) in activated.iter().tuple_combinations() {
-        let points = bumpalo::collections::Vec::from_iter_in(
+        let mut points = BVec::with_capacity_in(42, bump);
+        points.extend(
             interpolant_vec[i]
                 .iter()
                 .interleave(&interpolant_vec[j])
                 .map(|v| *v),
-            bump,
         );
-        if !contain_dim_2(&points, &[0.0, 0.0], bump) {
+
+        if !contain_zero_2(points, bump) {
             continue;
         }
 
@@ -351,26 +353,12 @@ fn det<const N: usize>(mat: &[[f64; N]]) -> f64 {
     }
 }
 
-fn contain_dim_2(points: &[f64], query: &[f64], bump: &Bump) -> bool {
-    for ((i, pa), (j, pb)) in points.chunks(2).enumerate().tuple_combinations() {
-        let base_ori = double_to_sign(orient2d(pa, pb, query, bump));
-        if base_ori == Orientation::Zero {
-            continue;
-        }
-
-        let separating = || {
-            for (k, pc) in points.chunks(2).enumerate() {
-                if i == k || j == k {
-                    continue;
-                }
-                let ori = double_to_sign(orient2d(pa, pb, pc, bump));
-                if ori == base_ori {
-                    return false;
-                }
-            }
-            true
-        };
-        if separating() {
+fn contain_zero_2<'a>(mut points: BVec<'a, f64>, bump: &'a Bump) -> bool {
+    points.extend([0.0, 0.0]);
+    let hull = convex_2(&points, bump);
+    for vid in hull {
+        let p = point_2(&points, vid);
+        if p[0] == 0.0 && p[1] == 0.0 {
             return false;
         }
     }
