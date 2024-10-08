@@ -188,12 +188,10 @@ struct Mesh<'a, A: Allocator + Copy> {
     triangles: Vec<Triangle, A>,
 }
 
-fn alternate_axes(points: &[f64], indices: &mut [usize], mut axis: usize) {
+pub(crate) fn alternate_axes(points: &[f64], indices: &mut [usize], axis: usize) {
     let len = indices.len();
     let divider = len >> 1;
-    if len <= 3 {
-        axis = 0;
-    }
+
     indices.select_nth_unstable_by(divider, |&i, &j| {
         let pi = &points[(i << 1)..];
         let pj = &points[(j << 1)..];
