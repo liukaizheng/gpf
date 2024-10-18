@@ -72,45 +72,45 @@ impl SurfaceMesh {
             mesh.core_data.connect_halfedges(prev_hid, first_hid);
         }
 
-        let mut edge_history = HashMap::<(usize, usize), usize>::new();
+        let mut edge_history = HashMap::<(usize, usize), HalfedgeId>::new();
         // build edge
-        {
-            let mut hid = 0;
-            for polygon in polygons.as_ref() {
-                for (&tail, &tip) in polygon.as_ref().iter().circular_tuple_windows() {
-                    let key = if tail < tip { (tail, tip) } else { (tip, tail) };
-                    if let Some(prev_hid) = edge_history.get_mut(&key) {
-                        // We're already seen this edge, connect to the previous halfedge incident on the edge
-                        mesh.he_sibling_arr[hid] = (*prev_hid).into();
-                        let eid = mesh.he_edge_arr[*prev_hid];
-                        mesh.he_edge_arr[hid] = eid;
-                        *prev_hid = hid;
-                    } else {
-                        // This is the first time we've ever seen this edge, create a new edge object
-                        let new_eid = mesh.new_edges(1);
-                        mesh.he_edge_arr[hid] = new_eid;
-                        mesh.he_sibling_arr[hid] = HalfedgeId::default();
-                        mesh.e_halfedge_arr[new_eid] = hid.into();
-                        edge_history.insert(key, hid);
-                    }
-                    hid += 1;
-                }
+        for hid in 0..mesh.he_edge_arr.len() {
+            let hid = hid.into();
+            let [va, vb] = mesh.he_vertices(hid);
+            let key = if va.0 < vb.0 {
+                (va.0, vb.0)
+            } else {
+                (vb.0, va.0)
+            };
+            if let Some(prev_hid) = edge_history.get_mut(&key) {
+                // We're already seen this edge, connect to the previous halfedge incident on the edge
+                mesh.he_sibling_arr[hid] = *prev_hid;
+                let eid = mesh.he_edge_arr[*prev_hid];
+                mesh.he_edge_arr[hid] = eid;
+                *prev_hid = hid;
+            } else {
+                // This is the first time we've ever seen this edge, create a new edge object
+                let new_eid = mesh.new_edges(1);
+                mesh.he_edge_arr[hid] = new_eid;
+                mesh.he_sibling_arr[hid] = HalfedgeId::default();
+                mesh.e_halfedge_arr[new_eid] = hid;
+                edge_history.insert(key, hid);
             }
         }
         // Complete the sibling cycle by following backwards each edge until we reach the first sibling-less entry
         for last_he in edge_history.into_values() {
             if !mesh.he_sibling_arr[last_he].valid() {
                 // Any edges which never got any sibling entries at all are boundary halfedges
-                mesh.he_sibling_arr[last_he] = last_he.into();
+                mesh.he_sibling_arr[last_he] = last_he;
                 continue;
             }
 
             // Get the index of the first halfedge in the sibling cycle to complete the cycle
             let mut curr_he = last_he;
             while mesh.he_sibling_arr[curr_he].valid() {
-                curr_he = *mesh.he_sibling_arr[curr_he];
+                curr_he = mesh.he_sibling_arr[curr_he];
             }
-            mesh.he_sibling_arr[curr_he] = last_he.into(); // connect the first to the last
+            mesh.he_sibling_arr[curr_he] = last_he; // connect the first to the last
         }
 
         let (v_in_halfedges, v_in_separators) = mesh.vertex_cycle();

@@ -1,6 +1,6 @@
 use super::element::{HalfedgeId, VertexId};
 
-pub(crate) struct MeshCoreData {
+pub struct MeshCoreData {
     pub(crate) v_halfedge_arr: Vec<HalfedgeId>,
     pub(crate) he_prev_arr: Vec<HalfedgeId>,
     pub(crate) he_next_arr: Vec<HalfedgeId>,
