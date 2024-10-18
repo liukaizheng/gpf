@@ -47,7 +47,7 @@ pub trait Mesh: Sized {
 
     #[inline(always)]
     fn halfedge_is_valid(&self, hid: HalfedgeId) -> bool {
-        self.he_vertex(hid).valid()
+        self.he_to(hid).valid()
     }
 
     fn edge_is_valid(&self, eid: EdgeId) -> bool;
@@ -105,12 +105,12 @@ pub trait Mesh: Sized {
 
     /// the start vertex of the halfedge
     #[inline(always)]
-    fn he_vertex(&self, hid: HalfedgeId) -> VertexId {
+    fn he_to(&self, hid: HalfedgeId) -> VertexId {
         self.core_data().he_vertex_arr[hid.index()]
     }
     /// the end vertex of the halfedge
-    fn he_tip_vertex(&self, hid: HalfedgeId) -> VertexId {
-        self.he_vertex(self.he_next(hid))
+    fn he_from(&self, hid: HalfedgeId) -> VertexId {
+        self.he_to(self.he_prev(hid))
     }
 
     /// the next halfedge of the halfedge
@@ -120,7 +120,9 @@ pub trait Mesh: Sized {
     }
 
     /// the previous halfedge of the halfedge
-    fn he_prev(&self, hid: HalfedgeId) -> HalfedgeId;
+    fn he_prev(&self, hid: HalfedgeId) -> HalfedgeId {
+        self.core_data().he_prev_arr[hid.index()]
+    }
 
     /// the twin halfedge of the halfedge
     fn he_twin(&self, hid: HalfedgeId) -> HalfedgeId;
@@ -128,19 +130,22 @@ pub trait Mesh: Sized {
     fn he_sibling(&self, hid: HalfedgeId) -> HalfedgeId;
     /// the next incoming halfedge of the halfedge
     fn he_next_incoming_neighbor(&self, hid: HalfedgeId) -> HalfedgeId;
-    /// the next outgoing halfedge of the halfedge
-    fn he_next_outgoing_neighbor(&self, hid: HalfedgeId) -> HalfedgeId;
     /// the edge of the halfedge
     fn he_edge(&self, hid: HalfedgeId) -> EdgeId;
 
     /// the first halfedge of the edge
     fn e_halfedge(&self, eid: EdgeId) -> HalfedgeId;
 
+    /// two vertices of the halfedge
+    #[inline(always)]
+    fn he_vertices(&self, hid: HalfedgeId) -> [VertexId; 2] {
+        [self.he_from(hid), self.he_to(hid)]
+    }
+
     /// two vertices of the edge
     #[inline(always)]
     fn e_vertices(&self, eid: EdgeId) -> [VertexId; 2] {
-        let hid = self.e_halfedge(eid);
-        [self.he_vertex(hid), self.he_tip_vertex(hid)]
+        self.he_vertices(self.e_halfedge(eid))
     }
 
     /// the first halfedge of the face
@@ -154,8 +159,8 @@ pub trait Mesh: Sized {
         let first_hid = self.f_halfedge(fid);
         let mut hid = first_hid;
         loop {
-            if self.he_vertex(hid) == vid {
-                return hid;
+            if self.he_to(hid) == vid {
+                return self.he_next(hid);
             }
             hid = self.he_next(hid);
             if hid == first_hid {
@@ -168,12 +173,12 @@ pub trait Mesh: Sized {
     #[inline(always)]
     fn he_same_dir(&self, hid: HalfedgeId) -> bool {
         let eid = self.he_edge(hid);
-        self.he_vertex(hid) == self.he_vertex(self.e_halfedge(eid))
+        self.he_to(hid) == self.he_to(self.e_halfedge(eid))
     }
 
     #[inline(always)]
     fn hes_same_dir(&self, ha: HalfedgeId, hb: HalfedgeId) -> bool {
-        self.he_vertex(ha) == self.he_vertex(hb)
+        self.he_to(ha) == self.he_to(hb)
     }
 
     fn use_implicit_twin(&self) -> bool;

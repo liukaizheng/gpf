@@ -412,14 +412,13 @@ impl BSPComplex {
                     });
                     let new_hid = self.mesh.split_face(fid, va, vb, bump);
                     let new_fid = self.mesh.he_face(new_hid);
-                    if self.mesh.he_vertex(new_hid) == va {
+                    if self.mesh.he_from(new_hid) == va {
                         zero_ori_halfedges.push(new_hid);
                     } else {
                         zero_ori_halfedges.push(self.mesh.he_sibling(new_hid));
                     }
 
-                    let new_is_pos = orientation
-                        [&self.mesh.he_tip_vertex(self.mesh.he_next(new_hid))]
+                    let new_is_pos = orientation[&self.mesh.he_to(self.mesh.he_next(new_hid))]
                         == Orientation::Positive;
                     if new_is_pos {
                         pos_faces.push(new_fid);
@@ -508,7 +507,7 @@ impl BSPComplex {
                 .mesh
                 .face(new_fid)
                 .halfedges()
-                .map(|he| self.mesh.he_vertex(*he))
+                .map(|he| self.mesh.he_from(*he))
             {
                 pos_verts.push(vid);
                 neg_verts.push(vid);
@@ -1003,9 +1002,9 @@ impl BSPComplex {
 
         let end_vertex = |he: &(EdgeId, bool)| {
             if he.1 {
-                self.mesh.he_vertex(self.mesh.e_halfedge(he.0))
+                self.mesh.he_from(self.mesh.e_halfedge(he.0))
             } else {
-                self.mesh.he_tip_vertex(self.mesh.e_halfedge(he.0))
+                self.mesh.he_to(self.mesh.e_halfedge(he.0))
             }
         };
 
@@ -1071,9 +1070,9 @@ impl BSPComplex {
         }
         let end_vertex = |he: &(EdgeId, bool)| {
             if he.1 {
-                self.mesh.he_vertex(self.mesh.e_halfedge(he.0))
+                self.mesh.he_from(self.mesh.e_halfedge(he.0))
             } else {
-                self.mesh.he_tip_vertex(self.mesh.e_halfedge(he.0))
+                self.mesh.he_to(self.mesh.e_halfedge(he.0))
             }
         };
 
@@ -1239,7 +1238,6 @@ impl BSPComplex {
         cid: usize,
         bump: A,
     ) -> (Vec<VertexId, A>, Vec<EdgeId, A>) {
-        let mesh = &self.mesh;
         let mut verts = Vec::new_in(bump);
         let mut edges = Vec::new_in(bump);
         for &fid in &self.cell_data[cid].faces {
@@ -1589,7 +1587,7 @@ impl ZeroVert {
     fn id(&self, mesh: &SurfaceMesh, ef_clip_pt_map: &HashMap<EdgeId, usize>) -> GeneralVertexId {
         match self {
             ZeroVert::Intersection((_, eid)) => GeneralVertexId::Index(ef_clip_pt_map[eid]),
-            ZeroVert::Start(he) => GeneralVertexId::Vertex(mesh.he_vertex(*he)),
+            ZeroVert::Start(he) => GeneralVertexId::Vertex(mesh.he_from(*he)),
         }
     }
 }
@@ -1611,7 +1609,7 @@ impl SplitFaceResult {
         match self {
             SplitFaceResult::TwoVerts([va, _]) => va.id(mesh, ef_clip_pt_map),
             SplitFaceResult::ZeroHalfedges(halfedges) => {
-                GeneralVertexId::Vertex(mesh.he_vertex(halfedges[0]))
+                GeneralVertexId::Vertex(mesh.he_from(halfedges[0]))
             }
             _ => panic!("Get start from none split result"),
         }
@@ -1622,7 +1620,7 @@ impl SplitFaceResult {
         match self {
             SplitFaceResult::TwoVerts([_, vb]) => vb.id(mesh, ef_clip_pt_map),
             SplitFaceResult::ZeroHalfedges(halfedges) => {
-                GeneralVertexId::Vertex(mesh.he_tip_vertex(*halfedges.last().unwrap()))
+                GeneralVertexId::Vertex(mesh.he_to(*halfedges.last().unwrap()))
             }
             _ => panic!("Get end from none split result"),
         }
@@ -1676,8 +1674,7 @@ fn split_face_verts(
 
     //all halfedges round counterclockwise
     let sort_two_verts = |mut verts: [ZeroVert; 2]| -> SplitFaceResult {
-        if (vert_orientations[&mesh.he_tip_vertex(verts[1].unwrap_halfedge())]
-            == Orientation::Positive)
+        if (vert_orientations[&mesh.he_to(verts[1].unwrap_halfedge())] == Orientation::Positive)
             == face_ori_correct
         {
             verts.swap(0, 1);
@@ -1706,9 +1703,9 @@ fn split_face_verts(
             } else {
                 let ha = zero_candidates[0].unwrap_halfedge();
                 let hb = zero_candidates[1].unwrap_halfedge();
-                if mesh.he_tip_vertex(ha) == mesh.he_vertex(hb) {
+                if mesh.he_to(ha) == mesh.he_from(hb) {
                     sort_zero_halfedges(vec![ha])
-                } else if mesh.he_tip_vertex(hb) == mesh.he_vertex(ha) {
+                } else if mesh.he_to(hb) == mesh.he_from(ha) {
                     sort_zero_halfedges(vec![hb])
                 } else {
                     sort_two_verts([zero_candidates[0].clone(), zero_candidates[1].clone()])
@@ -1718,8 +1715,8 @@ fn split_face_verts(
         _ => {
             // find break point
             let pos = (0..zero_candidates.len() - 1).find(|&i| {
-                mesh.he_tip_vertex(zero_candidates[i].unwrap_halfedge())
-                    != mesh.he_vertex(zero_candidates[i + 1].unwrap_halfedge())
+                mesh.he_to(zero_candidates[i].unwrap_halfedge())
+                    != mesh.he_from(zero_candidates[i + 1].unwrap_halfedge())
             });
             if let Some(pos) = pos {
                 zero_candidates.rotate_left(pos + 1);

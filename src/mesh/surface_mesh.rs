@@ -1,9 +1,8 @@
 use std::alloc::Allocator;
 
 use crate::mesh::Mesh;
-use crate::INVALID_IND;
 
-use super::element::{ele_ranges, EdgeId, ElementId, FaceId, HalfedgeId, VertexId};
+use super::element::{EdgeId, ElementId, FaceId, HalfedgeId, VertexId};
 use super::mesh_core_data::MeshCoreData;
 use hashbrown::HashMap;
 use itertools::Itertools;
@@ -14,7 +13,6 @@ pub struct SurfaceMesh {
     he_edge_arr: Vec<EdgeId>,
     he_face_arr: Vec<FaceId>,
     he_vert_in_next_arr: Vec<HalfedgeId>,
-    he_vert_out_next_arr: Vec<HalfedgeId>,
     he_sibling_arr: Vec<HalfedgeId>,
     e_halfedge_arr: Vec<HalfedgeId>,
 
@@ -42,7 +40,6 @@ impl SurfaceMesh {
             he_edge_arr: Vec::new(),
             he_face_arr: Vec::new(),
             he_vert_in_next_arr: Vec::new(),
-            he_vert_out_next_arr: Vec::new(),
             he_sibling_arr: Vec::new(),
             e_halfedge_arr: Vec::new(),
             use_implicit_twin: false,
@@ -51,23 +48,28 @@ impl SurfaceMesh {
         for (fid, polygon) in polygons.as_ref().iter().enumerate() {
             let mut first_hid = HalfedgeId::default();
             let mut prev_hid = first_hid;
+            let mut prev_vid = VertexId::default();
 
-            for (i, &tail) in polygon.as_ref().iter().enumerate() {
+            for (i, &b) in polygon.as_ref().iter().enumerate() {
+                let vid = b.into();
                 let hid = mesh.new_halfedges(1);
 
-                mesh.core_data.he_vertex_arr[hid] = tail.into();
+                mesh.core_data.he_vertex_arr[hid] = vid;
                 mesh.he_face_arr[hid] = fid.into();
 
-                mesh.core_data.v_halfedge_arr[tail] = hid;
                 if i == 0 {
                     mesh.core_data.f_halfedge_arr[fid] = hid;
                     first_hid = hid;
                 } else {
+                    mesh.core_data.v_halfedge_arr[prev_vid] = hid;
                     mesh.core_data.he_next_arr[prev_hid] = hid;
+                    mesh.core_data.connect_halfedges(prev_hid, hid);
                 }
+                prev_vid = vid;
                 prev_hid = hid;
             }
-            mesh.core_data.he_next_arr[prev_hid] = first_hid;
+            mesh.core_data.v_halfedge_arr[prev_vid] = first_hid;
+            mesh.core_data.connect_halfedges(prev_hid, first_hid);
         }
 
         let mut edge_history = HashMap::<(usize, usize), usize>::new();
@@ -111,41 +113,29 @@ impl SurfaceMesh {
             mesh.he_sibling_arr[curr_he] = last_he.into(); // connect the first to the last
         }
 
-        let (v_in_halfedges, v_in_separators) = mesh.vertex_cycle(true);
-        let (v_out_halfedges, v_out_separators) = mesh.vertex_cycle(false);
+        let (v_in_halfedges, v_in_separators) = mesh.vertex_cycle();
         let n_vertices = mesh.n_vertices();
         for idx in 0..n_vertices {
             let vid = VertexId::from(idx);
             if !mesh.vertex_is_valid(vid) {
                 continue;
             }
-            {
-                let (start, end) = (v_in_separators[vid], v_in_separators[*vid + 1]);
-                let len = end - start;
-                for i in start..end {
-                    let ha = v_in_halfedges[i];
-                    let hb = v_in_halfedges[start + (i - start + 1) % len];
-                    mesh.he_vert_in_next_arr[ha] = hb;
-                }
-            }
-            {
-                let (start, end) = (v_out_separators[vid], v_out_separators[*vid + 1]);
-                let len = end - start;
-                for i in start..end {
-                    let ha = v_out_halfedges[i];
-                    let hb = v_out_halfedges[start + (i - start + 1) % len];
-                    mesh.he_vert_out_next_arr[ha] = hb;
-                }
+            let (start, end) = (v_in_separators[vid], v_in_separators[*vid + 1]);
+            let len = end - start;
+            for i in start..end {
+                let ha = v_in_halfedges[i];
+                let hb = v_in_halfedges[start + (i - start + 1) % len];
+                mesh.he_vert_in_next_arr[ha] = hb;
             }
         }
         mesh
     }
 
     #[inline]
-    fn vertex_cycle(&self, incoming: bool) -> (Vec<HalfedgeId>, Vec<usize>) {
+    fn vertex_cycle(&self) -> (Vec<HalfedgeId>, Vec<usize>) {
         let mut v_degree = vec![0usize; self.n_vertices_capacity()];
         self.halfedges().for_each(|he| {
-            let vertex = if incoming { he.to() } else { he.from() };
+            let vertex = he.to();
             v_degree[*vertex] += 1;
         });
         let mut vertex_separators = vec![0];
@@ -156,7 +146,7 @@ impl SurfaceMesh {
         let mut he_positions = vertex_separators.clone();
         let mut vertex_halfedges = vec![HalfedgeId::from(0); self.n_halfedges_capacity()];
         self.halfedges().for_each(|he| {
-            let vid = *if incoming { he.to() } else { he.from() };
+            let vid = *he.to();
             let pos = he_positions[vid];
             vertex_halfedges[pos] = *he;
             he_positions[vid] += 1;
@@ -184,6 +174,9 @@ impl SurfaceMesh {
         let hid = HalfedgeId::from(self.core_data.he_next_arr.len());
         let new_len = self.n_halfedges_capacity() + n;
         self.core_data
+            .he_prev_arr
+            .resize(new_len, HalfedgeId::default());
+        self.core_data
             .he_next_arr
             .resize(new_len, HalfedgeId::default());
         self.core_data
@@ -194,8 +187,6 @@ impl SurfaceMesh {
         self.he_sibling_arr.resize(new_len, HalfedgeId::default());
         self.he_edge_arr.resize(new_len, EdgeId::default());
         self.he_vert_in_next_arr
-            .resize(new_len, HalfedgeId::default());
-        self.he_vert_out_next_arr
             .resize(new_len, HalfedgeId::default());
         self.core_data.n_halfedges += n;
         hid
@@ -225,109 +216,54 @@ impl SurfaceMesh {
     pub fn split_edge<A: Allocator + Copy>(&mut self, eid: EdgeId, bump: A) -> VertexId {
         let mut e_halfedges = Vec::new_in(bump);
         e_halfedges.extend(self.edge(eid).halfedges().map(|he| *he));
-        let (va, vb) = (
-            self.he_vertex(e_halfedges[0]),
-            self.he_tip_vertex(e_halfedges[0]),
-        );
+        let vb = self.he_to(e_halfedges[0]);
         let new_v = self.new_vertices(1);
-        let new_halfedges = ele_ranges::<HalfedgeId, _>(
-            self.new_halfedges(e_halfedges.len()).0,
-            e_halfedges.len(),
-            bump,
-        );
-
-        // v-h
-        self.core_data.v_halfedge_arr[new_v] = new_halfedges[0];
-
-        // h-v
-        for &hid in &new_halfedges {
-            self.core_data.he_vertex_arr[hid] = new_v;
-        }
-
-        // h-h
-        let mut he_pos_map =
-            HashMap::<HalfedgeId, usize, _, _>::with_capacity_in(e_halfedges.len(), bump);
-        he_pos_map.extend(e_halfedges.iter().enumerate().map(|(i, &hid)| (hid, i)));
-        let to_new_halfedge = |hid: HalfedgeId, positions: &mut Vec<usize, _>| -> HalfedgeId {
-            if let Some(&pos) = he_pos_map.get(&hid) {
-                positions.push(pos);
-                new_halfedges[pos]
-            } else {
-                hid
-            }
-        };
-        let mut e_va_in_positions = Vec::new_in(bump);
-        let mut e_vb_in_positions = Vec::new_in(bump);
-        let mut va_in_halfedges = Vec::new_in(bump);
-        va_in_halfedges.extend(
-            self.vertex(va)
-                .incoming_halfedges()
-                .map(|hid| to_new_halfedge(*hid, &mut e_va_in_positions)),
-        );
-        let mut vb_in_halfedges = Vec::new_in(bump);
-        vb_in_halfedges.extend(
-            self.vertex(vb)
-                .incoming_halfedges()
-                .map(|hid| to_new_halfedge(*hid, &mut e_vb_in_positions)),
-        );
-        for (&ha, &hb) in va_in_halfedges.iter().circular_tuple_windows() {
-            self.he_vert_in_next_arr[ha] = hb;
-        }
-        for (&ha, &hb) in vb_in_halfedges.iter().circular_tuple_windows() {
-            self.he_vert_in_next_arr[ha] = hb;
-        }
-        for (&ha, &hb) in e_halfedges.iter().circular_tuple_windows() {
-            self.he_vert_in_next_arr[ha] = hb;
-        }
-        for (&ha, &hb) in new_halfedges.iter().circular_tuple_windows() {
-            self.he_vert_out_next_arr[ha] = hb;
-            // self.he_sibling_arr[ha] = hb;
-        }
-
-        let mut e_va_halfedges = Vec::new_in(bump);
-        e_va_halfedges.extend(
-            e_vb_in_positions
-                .iter()
-                .map(|&idx| e_halfedges[idx])
-                .chain(e_va_in_positions.iter().map(|&idx| new_halfedges[idx])),
-        );
-        let mut e_vb_halfedges = Vec::new_in(bump);
-        e_vb_halfedges.extend(
-            e_va_in_positions
-                .into_iter()
-                .map(|idx| e_halfedges[idx])
-                .chain(e_vb_in_positions.into_iter().map(|idx| new_halfedges[idx])),
-        );
-
-        for (&ha, &hb) in e_va_halfedges.iter().circular_tuple_windows() {
-            self.he_sibling_arr[ha] = hb;
-        }
-        for (&ha, &hb) in e_vb_halfedges.iter().circular_tuple_windows() {
-            self.he_sibling_arr[ha] = hb;
-        }
-
-        for (&prev, &next) in e_halfedges.iter().zip(&new_halfedges) {
-            insert_halfedge(&mut self.core_data.he_next_arr, prev, next);
-        }
-
-        // h-e
-        for &he in &e_va_halfedges {
-            self.he_edge_arr[he] = eid;
-        }
+        let first_new_he = self.new_halfedges(e_halfedges.len());
         let new_e = self.new_edges(1);
-        for &he in &e_vb_halfedges {
-            self.he_edge_arr[he] = new_e;
+
+        self.core_data.v_halfedge_arr[new_v] = e_halfedges[0];
+
+        let mut old_e_halfedges = Vec::with_capacity_in(e_halfedges.len(), bump);
+        let mut new_e_halfedges = Vec::with_capacity_in(e_halfedges.len(), bump);
+        for (&old_hid, idx) in e_halfedges
+            .iter()
+            .zip(first_new_he.0..self.n_halfedges_capacity())
+        {
+            let new_hid = idx.into();
+            self.core_data.he_vertex_arr[new_hid] = new_v;
+            let vid = self.he_from(old_hid);
+            if self.v_halfedge(vid) == old_hid {
+                self.core_data.v_halfedge_arr[vid] = new_hid;
+            }
+            if vid != vb {
+                self.he_edge_arr[new_hid] = new_e;
+                old_e_halfedges.push(old_hid);
+                new_e_halfedges.push(new_hid);
+            } else {
+                self.he_edge_arr[old_hid] = new_e;
+                self.he_edge_arr[new_hid] = eid;
+                old_e_halfedges.push(new_hid);
+                new_e_halfedges.push(old_hid);
+            }
+
+            self.he_face_arr[new_hid] = self.he_face_arr[old_hid];
+
+            let prev_hid = self.he_prev(old_hid);
+            self.core_data.connect_halfedges(prev_hid, new_hid);
+            self.core_data.connect_halfedges(new_hid, old_hid);
         }
 
-        // e-h
-        self.e_halfedge_arr[eid] = e_va_halfedges[0];
-        self.e_halfedge_arr[new_e] = e_vb_halfedges[0];
-
-        // h-f
-        for (old_he, new_he) in e_halfedges.into_iter().zip(new_halfedges) {
-            self.he_face_arr[new_he] = self.he_face_arr[old_he];
+        for (ha, hb) in (first_new_he.0..self.n_halfedges_capacity()).circular_tuple_windows() {
+            self.he_vert_in_next_arr[ha] = hb.into();
         }
 
+        for (ha, hb) in old_e_halfedges.into_iter().circular_tuple_windows() {
+            self.he_sibling_arr[ha] = hb;
+        }
+
+        for (ha, hb) in new_e_halfedges.into_iter().circular_tuple_windows() {
+            self.he_sibling_arr[ha] = hb;
+        }
         new_v
     }
 
@@ -338,71 +274,53 @@ impl SurfaceMesh {
         vb: VertexId,
         bump: A,
     ) -> HalfedgeId {
-        let mut face_halfedges = Vec::new_in(bump);
-        face_halfedges.extend(self.face(fid).halfedges().map(|he| *he));
-        let (mut pos1, mut pos2) = (INVALID_IND, INVALID_IND);
-        for (i, &hid) in face_halfedges.iter().enumerate() {
-            let v = self.he_vertex(hid);
+        let mut right_first_hid = HalfedgeId::default();
+        let mut left_first_hid = HalfedgeId::default();
+        for he in self.face(fid).halfedges() {
+            let v = *he.to();
             if v == va || v == vb {
-                if pos1 == INVALID_IND {
-                    pos1 = i;
+                if !right_first_hid.valid() {
+                    right_first_hid = *he.next();
                 } else {
-                    pos2 = i;
+                    left_first_hid = *he.next();
                     break;
                 }
             }
         }
-        let (va, vb) = if self.he_vertex(face_halfedges[pos1]) == va {
+        debug_assert!(right_first_hid.valid());
+        debug_assert!(left_first_hid.valid());
+        let (va, vb) = if self.he_from(right_first_hid) == va {
             (va, vb)
         } else {
             (vb, va)
         };
-        let mut first_halfedges = Vec::new_in(bump);
-        first_halfedges.extend(face_halfedges[pos1..pos2].iter().map(|&hid| hid));
-        let mut second_halfedges = Vec::new_in(bump);
-        second_halfedges.extend(
-            face_halfedges[pos2..]
-                .iter()
-                .chain(&face_halfedges[..pos1])
-                .map(|&hid| hid),
-        );
+
+        //  --------------vb------------
+        //  |             |            |
+        //  |             |            |
+        //  --------------va------------
+        let left_last_hid = self.he_prev(right_first_hid);
+        let right_last_hid = self.he_prev(left_first_hid);
+
         let first_he = self.new_halfedges(2);
         let second_he = HalfedgeId::from(first_he.0 + 1);
 
         // h-v
-        self.core_data.he_vertex_arr[first_he] = vb;
-        self.core_data.he_vertex_arr[second_he] = va;
+        self.core_data.he_vertex_arr[first_he] = va;
+        self.core_data.he_vertex_arr[second_he] = vb;
 
         // h-h
         // sibling halfedges
         self.he_sibling_arr[first_he] = second_he;
         self.he_sibling_arr[second_he] = first_he;
         // incoming halfedges and outcoming halfedges
-        insert_halfedge(
-            &mut self.he_vert_in_next_arr,
-            *second_halfedges.last().unwrap(),
-            first_he,
-        );
-        insert_halfedge(
-            &mut self.he_vert_out_next_arr,
-            second_halfedges[0],
-            first_he,
-        );
-        insert_halfedge(
-            &mut self.he_vert_in_next_arr,
-            *first_halfedges.last().unwrap(),
-            second_he,
-        );
-        insert_halfedge(
-            &mut self.he_vert_out_next_arr,
-            first_halfedges[0],
-            second_he,
-        );
+        insert_halfedge(&mut self.he_vert_in_next_arr, left_last_hid, first_he);
+        insert_halfedge(&mut self.he_vert_in_next_arr, right_last_hid, second_he);
         // next halfedges
-        self.core_data.he_next_arr[first_he] = first_halfedges[0];
-        self.core_data.he_next_arr[*first_halfedges.last().unwrap()] = first_he;
-        self.core_data.he_next_arr[second_he] = second_halfedges[0];
-        self.core_data.he_next_arr[*second_halfedges.last().unwrap()] = second_he;
+        self.core_data.connect_halfedges(right_last_hid, first_he);
+        self.core_data.connect_halfedges(first_he, right_first_hid);
+        self.core_data.connect_halfedges(left_last_hid, second_he);
+        self.core_data.connect_halfedges(second_he, left_first_hid);
 
         // h-e
         let new_e = self.new_edges(1);
@@ -412,9 +330,16 @@ impl SurfaceMesh {
         // h-f
         let new_f = self.new_faces(1);
         self.he_face_arr[first_he] = fid;
-        self.he_face_arr[second_he] = new_f;
-        for hid in second_halfedges {
-            self.he_face_arr[hid] = new_f;
+
+        {
+            let mut hid = second_he;
+            loop {
+                self.he_face_arr[hid] = new_f;
+                hid = self.he_next(hid);
+                if hid == second_he {
+                    break;
+                }
+            }
         }
 
         // e-h
@@ -431,13 +356,14 @@ impl SurfaceMesh {
         halfedges: &[HalfedgeId],
         bump: A,
     ) -> FaceId {
-        let new_halfedges = ele_ranges::<HalfedgeId, _>(
-            self.new_halfedges(halfedges.len()).0,
-            halfedges.len(),
-            bump,
-        );
+        let first_new_hid = self.new_halfedges(halfedges.len());
+        let new_f = self.new_faces(1);
 
-        for (&old_hid, &new_hid) in halfedges.iter().zip(&new_halfedges) {
+        for (&old_hid, idx) in halfedges
+            .iter()
+            .zip(first_new_hid.0..self.n_halfedges_capacity())
+        {
+            let new_hid = idx.into();
             // h-v
             self.core_data.he_vertex_arr[new_hid] = self.core_data.he_vertex_arr[old_hid];
 
@@ -446,25 +372,21 @@ impl SurfaceMesh {
             insert_halfedge(&mut self.he_sibling_arr, old_hid, new_hid);
             // incoming
             insert_halfedge(&mut self.he_vert_in_next_arr, old_hid, new_hid);
-            // outgoing
-            insert_halfedge(&mut self.he_vert_out_next_arr, old_hid, new_hid);
 
             // h-e
             self.he_edge_arr[new_hid] = self.he_edge_arr[old_hid];
+
+            // h-f
+            self.he_face_arr[new_hid] = new_f;
         }
 
         // h-h: next halfedge
-        for (&curr, &next) in new_halfedges.iter().circular_tuple_windows() {
-            self.core_data.he_next_arr[curr] = next;
+        for (ha, hb) in (first_new_hid.0..self.n_halfedges_capacity()).circular_tuple_windows() {
+            self.core_data.connect_halfedges(ha.into(), hb.into());
         }
 
-        // h-f
-        let new_f = self.new_faces(1);
-        for &hid in &new_halfedges {
-            self.he_face_arr[hid] = new_f;
-        }
         // f-h
-        self.core_data.f_halfedge_arr[new_f] = new_halfedges[0];
+        self.core_data.f_halfedge_arr[new_f] = first_new_hid;
         new_f
     }
 
@@ -507,17 +429,6 @@ impl Mesh for SurfaceMesh {
         self.e_halfedge_arr[eid].valid()
     }
 
-    fn he_prev(&self, hid: HalfedgeId) -> HalfedgeId {
-        let mut curr = hid;
-        loop {
-            let next = self.he_next(curr);
-            if next == hid {
-                return curr;
-            }
-            curr = next;
-        }
-    }
-
     fn he_twin(&self, hid: HalfedgeId) -> HalfedgeId {
         let mut curr = hid;
         loop {
@@ -526,7 +437,7 @@ impl Mesh for SurfaceMesh {
                 return hid;
             }
 
-            if self.he_vertex(curr) != self.he_vertex(next) {
+            if self.he_to(curr) != self.he_to(next) {
                 return next;
             }
 
@@ -542,11 +453,6 @@ impl Mesh for SurfaceMesh {
     #[inline(always)]
     fn he_next_incoming_neighbor(&self, hid: HalfedgeId) -> HalfedgeId {
         self.he_vert_in_next_arr[hid]
-    }
-
-    #[inline(always)]
-    fn he_next_outgoing_neighbor(&self, hid: HalfedgeId) -> HalfedgeId {
-        self.he_vert_out_next_arr[hid]
     }
 
     #[inline(always)]

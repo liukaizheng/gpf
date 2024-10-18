@@ -170,7 +170,7 @@ impl<'a, M: Mesh> Element for FVIter<'a, M> {
 
     #[inline(always)]
     fn item(&self) -> Self::Item {
-        Vertex::new(self.mesh, self.mesh.he_vertex(self.he))
+        Vertex::new(self.mesh, self.mesh.he_to(self.he))
     }
 
     #[inline(always)]

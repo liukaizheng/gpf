@@ -26,15 +26,11 @@ impl<'a, M: Mesh> Vertex<'a, M> {
     }
 
     pub fn vertices(&self) -> VVIter<'a, M> {
-        VVIter {
-            imp: VNeiIterImpl::new(self.mesh, self.id),
-        }
+        VVIter::new(self.mesh, self.id)
     }
 
     pub fn edges(&self) -> VEIter<'a, M> {
-        VEIter {
-            imp: VNeiIterImpl::new(self.mesh, self.id),
-        }
+        VEIter::new(self.mesh, self.id)
     }
 
     pub fn incoming_halfedges(&self) -> VIHIter<'a, M> {
@@ -108,78 +104,88 @@ impl<'a, M: Mesh> Iterator for VertexIter<'a, M> {
 }
 
 #[derive(Clone, PartialEq, Eq)]
-struct VNeiState {
-    he: HalfedgeId,
-    incoming: bool,
+struct VNeighbor<'a, M: Mesh> {
+    mesh: &'a M,
+    hid: HalfedgeId,
+    first_hid: HalfedgeId,
+    first: bool,
 }
 
-impl VNeiState {
-    fn new(he: HalfedgeId, incoming: bool) -> Self {
-        Self { he, incoming }
+impl<'a, M: Mesh> VNeighbor<'a, M> {
+    #[inline]
+    fn new(mesh: &'a M, vid: VertexId) -> Self {
+        let hid = mesh.v_halfedge(vid);
+        Self {
+            mesh,
+            hid,
+            first_hid: hid,
+            first: true,
+        }
+    }
+
+    #[inline(always)]
+    fn next(&mut self) {
+        self.hid = self.mesh.he_next_incoming_neighbor(self.hid);
+    }
+
+    #[inline(always)]
+    fn is_end(&self) -> bool {
+        !self.first && self.hid == self.first_hid
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct VNeiIter<'a, M: Mesh> {
+    state: VNeighbor<'a, M>,
+    prev_visited: bool,
+}
+
+impl<'a, M: Mesh> VNeiIter<'a, M> {
+    #[inline]
+    fn new(mesh: &'a M, vid: VertexId) -> Self {
+        Self {
+            state: VNeighbor::new(mesh, vid),
+            prev_visited: false,
+        }
     }
 
     #[inline]
-    fn is_halfedge_canonical<M: Mesh>(&self, mesh: &M) -> bool {
-        if mesh.use_implicit_twin() {
-            true
+    fn halfedge(&self) -> HalfedgeId {
+        if !self.prev_visited {
+            self.state.hid
         } else {
-            let edge = mesh.he_edge(self.he);
-            self.he == mesh.e_halfedge(edge)
+            self.state.mesh.he_next(self.state.hid)
         }
     }
 
-    fn next<M: Mesh>(&mut self, mesh: &M, first_he: &mut HalfedgeId) {
-        if mesh.use_implicit_twin() {
-            self.he = mesh.he_next_outgoing_neighbor(self.he);
+    #[inline]
+    fn next(&mut self) {
+        if self.prev_visited {
+            self.state.next();
+            self.prev_visited = false;
         } else {
-            if self.incoming {
-                self.he = mesh.he_next_incoming_neighbor(self.he);
-                if self.he == *first_he {
-                    self.incoming = false;
-                    self.he = mesh.he_next(self.he);
-                    *first_he = self.he;
-                }
-            } else {
-                self.he = mesh.he_next_outgoing_neighbor(self.he);
-                if self.he == *first_he {
-                    self.incoming = true;
-                    self.he = mesh.he_prev(self.he);
-                    *first_he = self.he;
-                }
-            }
+            self.prev_visited = true;
         }
     }
-}
 
-struct VNeiIterImpl<'a, M: Mesh> {
-    mesh: &'a M,
-    just_start: bool,
-    curr: VNeiState,
-    start: VNeiState,
-    first_he: HalfedgeId,
-}
-
-impl<'a, M: Mesh> VNeiIterImpl<'a, M> {
-    fn new(mesh: &'a M, id: VertexId) -> Self {
-        let mut first_he = mesh.v_halfedge(id);
-        let mut curr = VNeiState::new(first_he, false);
-        while !curr.is_halfedge_canonical(mesh) {
-            curr.next(mesh, &mut first_he);
-        }
-        let start = curr.clone();
-        first_he = start.he;
-        Self {
-            mesh,
-            just_start: true,
-            curr,
-            start,
-            first_he,
-        }
+    #[inline(always)]
+    fn is_canonical(&self) -> bool {
+        let hid = self.halfedge();
+        let mesh = &self.state.mesh;
+        mesh.e_halfedge(mesh.he_edge(hid)) == hid
     }
 }
 
 pub struct VVIter<'a, M: Mesh> {
-    imp: VNeiIterImpl<'a, M>,
+    imp: VNeiIter<'a, M>,
+}
+
+impl<'a, M: Mesh> VVIter<'a, M> {
+    fn new(mesh: &'a M, vid: VertexId) -> Self {
+        Self {
+            imp: VNeiIter::new(mesh, vid),
+        }
+    }
 }
 
 impl<'a, M: Mesh> Element for VVIter<'a, M> {
@@ -187,28 +193,27 @@ impl<'a, M: Mesh> Element for VVIter<'a, M> {
 
     #[inline(always)]
     fn item(&self) -> Self::Item {
-        let vid = if self.imp.curr.incoming {
-            self.imp.mesh.he_vertex(self.imp.curr.he)
+        let hid = self.imp.halfedge();
+        if self.imp.prev_visited {
+            Vertex::new(&self.imp.state.mesh, self.imp.state.mesh.he_to(hid))
         } else {
-            self.imp.mesh.he_tip_vertex(self.imp.curr.he)
-        };
-        Vertex::new(self.imp.mesh, vid)
+            Vertex::new(&self.imp.state.mesh, self.imp.state.mesh.he_from(hid))
+        }
     }
 
     #[inline(always)]
     fn valid(&self) -> bool {
-        self.imp.curr.is_halfedge_canonical(self.imp.mesh)
+        self.imp.is_canonical()
     }
 
-    #[inline(always)]
+    #[inline]
     fn next(&mut self) {
-        self.imp.just_start = false;
-        self.imp.curr.next(self.imp.mesh, &mut self.imp.first_he);
+        self.imp.next()
     }
 
     #[inline(always)]
     fn is_end(&self) -> bool {
-        self.imp.curr == self.imp.start && !self.imp.just_start
+        self.imp.state.is_end()
     }
 }
 
@@ -222,7 +227,15 @@ impl<'a, M: Mesh> Iterator for VVIter<'a, M> {
 }
 
 pub struct VEIter<'a, M: Mesh> {
-    imp: VNeiIterImpl<'a, M>,
+    imp: VNeiIter<'a, M>,
+}
+
+impl<'a, M: Mesh> VEIter<'a, M> {
+    fn new(mesh: &'a M, vid: VertexId) -> Self {
+        Self {
+            imp: VNeiIter::new(mesh, vid),
+        }
+    }
 }
 
 impl<'a, M: Mesh> Element for VEIter<'a, M> {
@@ -230,24 +243,23 @@ impl<'a, M: Mesh> Element for VEIter<'a, M> {
 
     #[inline(always)]
     fn item(&self) -> Self::Item {
-        let eid = self.imp.mesh.he_edge(self.imp.curr.he);
-        Edge::new(self.imp.mesh, eid)
+        let hid = self.imp.halfedge();
+        Edge::new(&self.imp.state.mesh, self.imp.state.mesh.he_edge(hid))
     }
 
     #[inline(always)]
     fn valid(&self) -> bool {
-        self.imp.curr.is_halfedge_canonical(self.imp.mesh)
+        self.imp.is_canonical()
     }
 
     #[inline(always)]
     fn next(&mut self) {
-        self.imp.just_start = false;
-        self.imp.curr.next(self.imp.mesh, &mut self.imp.first_he);
+        self.imp.next()
     }
 
     #[inline(always)]
     fn is_end(&self) -> bool {
-        self.imp.curr == self.imp.start && !self.imp.just_start
+        self.imp.state.is_end()
     }
 }
 
@@ -268,8 +280,8 @@ pub struct VIHIter<'a, M: Mesh> {
 }
 
 impl<'a, M: Mesh> VIHIter<'a, M> {
-    pub fn new(mesh: &'a M, id: VertexId) -> Self {
-        let start = mesh.he_prev(mesh.v_halfedge(id));
+    pub fn new(mesh: &'a M, vid: VertexId) -> Self {
+        let start = mesh.v_halfedge(vid);
         Self {
             mesh,
             curr: start,
@@ -337,7 +349,7 @@ impl<'a, M: Mesh> Element for VOHIter<'a, M> {
 
     #[inline(always)]
     fn item(&self) -> Self::Item {
-        Halfedge::new(self.mesh, self.curr)
+        Halfedge::new(self.mesh, self.mesh.he_next(self.curr))
     }
 
     #[inline(always)]
@@ -348,7 +360,7 @@ impl<'a, M: Mesh> Element for VOHIter<'a, M> {
     #[inline(always)]
     fn next(&mut self) {
         self.just_start = false;
-        self.curr = self.mesh.he_next_outgoing_neighbor(self.curr);
+        self.curr = self.mesh.he_next_incoming_neighbor(self.curr);
     }
 
     #[inline(always)]

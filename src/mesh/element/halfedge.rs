@@ -19,11 +19,11 @@ impl<'a, M: Mesh> Halfedge<'a, M> {
     }
 
     pub fn from(&self) -> Vertex<'a, M> {
-        Vertex::new(self.mesh, self.mesh.he_vertex(self.id))
+        Vertex::new(self.mesh, self.mesh.he_from(self.id))
     }
 
     pub fn to(&self) -> Vertex<'a, M> {
-        Vertex::new(self.mesh, self.mesh.he_tip_vertex(self.id))
+        Vertex::new(self.mesh, self.mesh.he_to(self.id))
     }
 
     pub fn vertices(&self) -> [Vertex<'a, M>; 2] {

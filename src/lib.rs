@@ -27,7 +27,7 @@ fn point(points: &[f64], tid: usize) -> &[f64] {
 }
 
 #[inline(always)]
-fn point_2(points: &[f64], tid: usize) -> &[f64] {
+pub fn point_2(points: &[f64], tid: usize) -> &[f64] {
     let start = tid * 2;
     &points[start..(start + 2)]
 }

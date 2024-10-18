@@ -97,7 +97,7 @@ impl TetSet {
         let new_vert = self.mesh.split_edge(eid, alloc);
         let [bottom_eid, top_eid] = {
             let hid = self.mesh.e_halfedge(eid);
-            if self.mesh.he_vertex(hid) == va || self.mesh.he_tip_vertex(hid) == va {
+            if self.mesh.he_from(hid) == va || self.mesh.he_to(hid) == va {
                 [eid, self.square_edge_lengths.len().into()]
             } else {
                 [self.square_edge_lengths.len().into(), eid]
@@ -129,7 +129,7 @@ impl TetSet {
                 &self.mesh,
             ));
             self.face_tets.push(self.face_tets[fid]);
-            if self.mesh.he_vertex(hid) == new_vert {
+            if self.mesh.he_to(hid) != new_vert {
                 hid
             } else {
                 self.mesh.he_twin(hid)
@@ -138,7 +138,7 @@ impl TetSet {
 
         debug_assert!(new_halfedges
             .iter()
-            .all(|&hid| self.mesh.he_vertex(hid) == new_vert));
+            .all(|&hid| self.mesh.he_from(hid) == new_vert));
 
         let mut result_tets = Vec::with_capacity_in(tet_faces_map.len() << 1, alloc);
         for ((((tid, face_indices), oppo_hid), bottom_fid), top_fid) in tet_faces_map
@@ -149,14 +149,14 @@ impl TetSet {
         {
             let mut ha = new_halfedges[face_indices[0]];
             let mut hb = new_halfedges[face_indices[1]];
-            if self.mesh.he_tip_vertex(ha) != self.mesh.he_vertex(oppo_hid) {
+            if self.mesh.he_to(ha) != self.mesh.he_from(oppo_hid) {
                 std::mem::swap(&mut ha, &mut hb);
             }
             hb = self.mesh.he_twin(hb);
 
-            debug_assert!(self.mesh.he_tip_vertex(ha) == self.mesh.he_vertex(oppo_hid));
-            debug_assert!(self.mesh.he_vertex(hb) == self.mesh.he_tip_vertex(oppo_hid));
-            debug_assert!(self.mesh.he_tip_vertex(hb) == self.mesh.he_vertex(ha));
+            debug_assert!(self.mesh.he_to(ha) == self.mesh.he_from(oppo_hid));
+            debug_assert!(self.mesh.he_from(hb) == self.mesh.he_to(oppo_hid));
+            debug_assert!(self.mesh.he_to(hb) == self.mesh.he_from(ha));
 
             let new_fid = self.mesh.add_face_by_halfedges(&[ha, oppo_hid, hb], alloc);
             let new_tid = self.tet_vertices.len();
