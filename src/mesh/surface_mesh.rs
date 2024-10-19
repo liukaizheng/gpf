@@ -269,13 +269,7 @@ impl SurfaceMesh {
         new_v
     }
 
-    pub fn split_face<A: Allocator + Copy>(
-        &mut self,
-        fid: FaceId,
-        va: VertexId,
-        vb: VertexId,
-        bump: A,
-    ) -> HalfedgeId {
+    pub fn split_face(&mut self, fid: FaceId, va: VertexId, vb: VertexId) -> HalfedgeId {
         let mut right_first_hid = HalfedgeId::default();
         let mut left_first_hid = HalfedgeId::default();
         for he in self.face(fid).halfedges() {
@@ -353,11 +347,7 @@ impl SurfaceMesh {
         second_he
     }
 
-    pub fn add_face_by_halfedges<A: Allocator + Copy>(
-        &mut self,
-        halfedges: &[HalfedgeId],
-        bump: A,
-    ) -> FaceId {
+    pub fn add_face_by_halfedges(&mut self, halfedges: &[HalfedgeId]) -> FaceId {
         let first_new_hid = self.new_halfedges(halfedges.len());
         let new_f = self.new_faces(1);
 

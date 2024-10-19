@@ -122,7 +122,7 @@ impl TetSet {
 
         let mut new_halfedges = Vec::new_in(alloc);
         new_halfedges.extend(oppo_verts.into_iter().zip(&faces).map(|(v, &fid)| {
-            let hid = self.mesh.split_face(fid, new_vert, v, alloc);
+            let hid = self.mesh.split_face(fid, new_vert, v);
             self.square_edge_lengths.push(square_edge_length(
                 &self.points,
                 self.mesh.he_edge(hid),
@@ -158,7 +158,7 @@ impl TetSet {
             debug_assert!(self.mesh.he_from(hb) == self.mesh.he_to(oppo_hid));
             debug_assert!(self.mesh.he_to(hb) == self.mesh.he_from(ha));
 
-            let new_fid = self.mesh.add_face_by_halfedges(&[ha, oppo_hid, hb], alloc);
+            let new_fid = self.mesh.add_face_by_halfedges(&[ha, oppo_hid, hb]);
             let new_tid = self.tet_vertices.len();
             self.face_tets.push([tid, new_tid]);
 

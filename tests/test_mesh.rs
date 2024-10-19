@@ -239,7 +239,7 @@ fn split_edge_and_face() {
     }
     // split face
     {
-        let new_hid = mesh.split_face(0.into(), 2.into(), 6.into(), &bump);
+        let new_hid = mesh.split_face(0.into(), 2.into(), 6.into());
         assert_eq!(
             mesh.face(mesh.he_face(new_hid)).halfedges().count(),
             5,

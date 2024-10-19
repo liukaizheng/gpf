@@ -410,7 +410,7 @@ impl BSPComplex {
                         GeneralVertexId::Vertex(vid) => vid,
                         GeneralVertexId::Index(idx) => new_vertices[idx],
                     });
-                    let new_hid = self.mesh.split_face(fid, va, vb, bump);
+                    let new_hid = self.mesh.split_face(fid, va, vb);
                     let new_fid = self.mesh.he_face(new_hid);
                     if self.mesh.he_from(new_hid) == va {
                         zero_ori_halfedges.push(new_hid);
@@ -501,8 +501,7 @@ impl BSPComplex {
 
         // add separating face
         {
-            // let face_halfedges = make_loop(&self.mesh, zero_ori_halfedges);
-            let new_fid = self.mesh.add_face_by_halfedges(&zero_ori_halfedges, bump);
+            let new_fid = self.mesh.add_face_by_halfedges(&zero_ori_halfedges);
             for vid in self
                 .mesh
                 .face(new_fid)
