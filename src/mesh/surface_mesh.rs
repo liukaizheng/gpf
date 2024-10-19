@@ -252,6 +252,8 @@ impl SurfaceMesh {
             self.core_data.connect_halfedges(prev_hid, new_hid);
             self.core_data.connect_halfedges(new_hid, old_hid);
         }
+        self.e_halfedge_arr[eid] = old_e_halfedges[0];
+        self.e_halfedge_arr[new_e] = new_e_halfedges[0];
 
         for (ha, hb) in (first_new_he.0..self.n_halfedges_capacity()).circular_tuple_windows() {
             self.he_vert_in_next_arr[ha] = hb.into();

@@ -116,7 +116,7 @@ pub fn convex_2<A: Allocator + Copy>(points: &[f64], alloc: A) -> Vec<usize, A> 
 fn div_conq_recurse<A: Allocator + Copy>(
     points: &[f64],
     hull: &[usize],
-    axis: usize,
+    mut axis: usize,
     link: &mut LinkList<A>,
     alloc: A,
 ) -> usize {
@@ -130,6 +130,9 @@ fn div_conq_recurse<A: Allocator + Copy>(
             return hull[0];
         }
         _ => {
+            if axis == 3 {
+                axis = 0;
+            }
             let divider = hull.len() >> 1;
             let (left, right) = hull.split_at(divider);
             let left_start = div_conq_recurse(points, left, 1 - axis, link, alloc);
