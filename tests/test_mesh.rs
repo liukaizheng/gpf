@@ -1,6 +1,4 @@
-use gpf::mesh::{
-    Edge, EdgeId, Face, FaceId, Halfedge, HalfedgeId, Mesh, SurfaceMesh, VertexId,
-};
+use gpf::mesh::{EdgeId, FaceId, HalfedgeId, ManifoldMesh, Mesh, SurfaceMesh, VertexId};
 
 fn validate_mesh_connectivity(mesh: &SurfaceMesh) -> Result<(), String> {
     let validate_vertex = |vid: VertexId, msg: &str| {
@@ -120,11 +118,7 @@ fn validate_mesh_connectivity(mesh: &SurfaceMesh) -> Result<(), String> {
     for hid in mesh.halfedges() {
         let hid = *hid;
         let tip = mesh.he_to(hid);
-        if *mesh
-            .halfedge(mesh.he_next_incoming_neighbor(hid))
-            .to()
-            != tip
-        {
+        if *mesh.halfedge(mesh.he_next_incoming_neighbor(hid)).to() != tip {
             return Err(format!("next incoming he is not to same vert"));
         }
     }
@@ -240,9 +234,13 @@ fn split_edge_and_face() {
     // split face
     {
         let new_hid = mesh.split_face(0.into(), 2.into(), 6.into());
-        assert_eq!(
-            mesh.face(mesh.he_face(new_hid)).halfedges().count(),
-            5,
-        );
+        assert!(validate_mesh_connectivity(&mesh).is_ok());
+        assert_eq!(mesh.face(mesh.he_face(new_hid)).halfedges().count(), 5,);
     }
+}
+
+#[test]
+fn test_manifold_mesh() {
+    let triangles = vec![0, 1, 2, 0, 2, 3, 0, 3, 4];
+    let mesh = ManifoldMesh::new(triangles.chunks(3));
 }

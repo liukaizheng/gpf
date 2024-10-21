@@ -62,7 +62,6 @@ impl SurfaceMesh {
                     first_hid = hid;
                 } else {
                     mesh.core_data.v_halfedge_arr[prev_vid] = hid;
-                    mesh.core_data.he_next_arr[prev_hid] = hid;
                     mesh.core_data.connect_halfedges(prev_hid, hid);
                 }
                 prev_vid = vid;
