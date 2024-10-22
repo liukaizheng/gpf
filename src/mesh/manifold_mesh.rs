@@ -48,7 +48,8 @@ impl ManifoldMesh {
                     }
                 };
                 mesh.core_data.v_halfedge_arr[a] = hid;
-                mesh.core_data.he_vertex_arr[hid] = b.into();
+                mesh.core_data.set_he_vertex(hid, b.into());
+                mesh.core_data.set_he_vertex(mesh.he_twin(hid), a.into());
                 mesh.he_face_arr[hid] = fid.into();
                 if !first_hid.valid() {
                     mesh.core_data.f_halfedge_arr[fid] = hid;
@@ -85,6 +86,8 @@ impl ManifoldMesh {
                         break;
                     }
                 }
+                mesh.core_data
+                    .set_v_halfedge(mesh.he_to(prev_hid), curr_hid);
                 edge_visited[mesh.he_edge(prev_hid)] = true;
                 mesh.core_data.connect_halfedges(prev_hid, curr_hid);
                 curr_hid = prev_hid;
@@ -175,7 +178,7 @@ impl Mesh for ManifoldMesh {
 
     #[inline(always)]
     fn he_next_incoming_neighbor(&self, hid: HalfedgeId) -> HalfedgeId {
-        self.he_twin(self.he_next(hid))
+        self.he_prev(self.he_twin(hid))
     }
 
     #[inline(always)]

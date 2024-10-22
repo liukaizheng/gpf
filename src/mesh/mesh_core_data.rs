@@ -31,4 +31,14 @@ impl MeshCoreData {
         self.he_next_arr[hid0] = hid1;
         self.he_prev_arr[hid1] = hid0;
     }
+
+    #[inline]
+    pub(crate) fn set_v_halfedge(&mut self, vid: VertexId, hid: HalfedgeId) {
+        self.v_halfedge_arr[vid] = hid;
+    }
+
+    #[inline]
+    pub(crate) fn set_he_vertex(&mut self, hid: HalfedgeId, vid: VertexId) {
+        self.he_vertex_arr[hid] = vid;
+    }
 }

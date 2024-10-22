@@ -243,4 +243,27 @@ fn split_edge_and_face() {
 fn test_manifold_mesh() {
     let triangles = vec![0, 1, 2, 0, 2, 3, 0, 3, 4];
     let mesh = ManifoldMesh::new(triangles.chunks(3));
+    let base_vertices = [1, 2, 3, 4];
+    {
+        let mut neighbor_veritices =
+            Vec::from_iter(mesh.vertex(0.into()).vertices().map(|v| (*v).0));
+        neighbor_veritices.sort_unstable();
+        assert_eq!(&neighbor_veritices, &base_vertices);
+    }
+    {
+        let incoming_halfedges =
+            Vec::from_iter(mesh.vertex(0.into()).incoming_halfedges().map(|h| *h));
+        assert_eq!(incoming_halfedges.len(), 4);
+        for &hid in &incoming_halfedges {
+            assert_eq!(mesh.he_to(hid), 0.into());
+        }
+    }
+    {
+        let outgoing_halfedges =
+            Vec::from_iter(mesh.vertex(0.into()).outgoing_halfedges().map(|h| *h));
+        let mut end_vertices =
+            Vec::from_iter(outgoing_halfedges.iter().map(|hid| mesh.he_to(*hid).0));
+        end_vertices.sort_unstable();
+        assert_eq!(&end_vertices, &base_vertices);
+    }
 }
