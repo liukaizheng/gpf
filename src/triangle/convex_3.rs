@@ -1,6 +1,7 @@
 use std::alloc::Allocator;
 
 use crate::{
+    mesh::ManifoldMesh,
     point,
     predicates::{max_comp_in_tri_normal, orient2d, orient3d},
 };
@@ -60,12 +61,18 @@ pub fn convex_3<A: Allocator + Copy>(points: &[f64], alloc: A) -> Convex3Result<
             let p = point(points, idx);
             [p[axis + 1], p[axis + 2]]
         }));
-        triangulate(&points_2d, &[], alloc)
+        let mut triangles = Vec::new_in(alloc);
+        triangles.extend(
+            triangulate(&points_2d, &[], alloc)
+                .into_iter()
+                .map(|idx| indices[idx]),
+        );
+        triangles
     };
     if colinear_len == indices.len() {
         return Convex3Result::Dim2(triangles);
     }
-    return Convex3Result::Dim2(triangles);
+    Convex3Result::Dim3(hull_3(points, &indices, coplanar_len, triangles, alloc))
 }
 
 fn hull_1<A: Allocator + Copy>(points: &[f64], indices: &[usize], alloc: A) -> usize {
@@ -97,8 +104,20 @@ fn hull_3<A: Allocator + Copy>(
     points: &[f64],
     indices: &[usize],
     start: usize,
-    triangles: Vec<usize, A>,
+    mut triangles: Vec<usize, A>,
     alloc: A,
-) -> usize {
-    0
+) -> Vec<usize, A> {
+    let is_pos = {
+        let pa = point(points, triangles[0]);
+        let pb = point(points, triangles[1]);
+        let pc = point(points, triangles[2]);
+        let pd = point(points, indices[start]);
+        orient3d(pa, pb, pc, pd, alloc) > 0.0
+    };
+
+    if is_pos {
+        triangles.reverse();
+    }
+
+    Vec::new_in(alloc)
 }
