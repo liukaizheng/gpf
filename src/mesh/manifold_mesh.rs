@@ -98,16 +98,32 @@ impl ManifoldMesh {
         }
         mesh
     }
+
+    pub fn new_face_by_halfedges(&mut self, halfedges: &[HalfedgeId]) -> FaceId {
+        0.into()
+    }
     #[inline(always)]
     pub fn he_face(&self, hid: HalfedgeId) -> FaceId {
         self.he_face_arr[hid]
     }
+
     #[inline(always)]
     pub fn he_is_boundary(&self, hid: HalfedgeId) -> bool {
         !self.he_face(hid).valid()
     }
 
     #[inline(always)]
+    pub fn new_vertices(&mut self, len: usize) -> VertexId {
+        let new_vid = VertexId::from(self.n_vertices_capacity());
+        let new_len = new_vid.0 + len;
+        self.core_data
+            .v_halfedge_arr
+            .resize(new_len, HalfedgeId::default());
+        self.core_data.n_vertices += len;
+        new_vid
+    }
+
+    #[inline]
     pub fn new_edge(&mut self) -> HalfedgeId {
         let hid = self.core_data.he_next_arr.len().into();
         let new_len = self.core_data.he_prev_arr.len() + 2;
@@ -124,6 +140,17 @@ impl ManifoldMesh {
 
         self.he_face_arr.resize(new_len, FaceId::default());
         self.core_data.n_halfedges += 2;
+        hid
+    }
+
+    #[inline]
+    pub fn new_edge_by_veritces(&mut self, va: VertexId, vb: VertexId) -> HalfedgeId {
+        let hid = self.new_edge();
+        let twin_hid = self.he_twin(hid);
+        self.core_data.set_v_halfedge(va, hid);
+        self.core_data.set_v_halfedge(vb, twin_hid);
+        self.core_data.set_he_vertex(hid, vb);
+        self.core_data.set_he_vertex(twin_hid, va);
         hid
     }
 }

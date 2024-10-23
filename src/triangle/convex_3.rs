@@ -1,7 +1,7 @@
 use std::alloc::Allocator;
 
 use crate::{
-    mesh::ManifoldMesh,
+    mesh::{ElementId, FaceId, HalfedgeId, ManifoldMesh, Mesh, VertexId},
     point,
     predicates::{max_comp_in_tri_normal, orient2d, orient3d},
 };
@@ -118,6 +118,84 @@ fn hull_3<A: Allocator + Copy>(
     if is_pos {
         triangles.reverse();
     }
+    let mut mesh = ManifoldMesh::new(triangles.chunks(3));
+    mesh.new_vertices(points.len() / 3 - mesh.n_vertices_capacity());
+
+    let first_bot_hid = (mesh.n_halfedges_capacity() - 1).into();
+    close_hull(&mut mesh, first_bot_hid, indices[start].into());
+
+    let mut visited = Vec::new_in(alloc);
+    visited.resize(mesh.n_faces_capacity(), false);
+    let mut visible_faces = Vec::new_in(alloc);
+    let mut removed_faces = Vec::new_in(alloc);
+    for &pid in &indices[(start + 1)..] {
+        let pd = point(points, pid);
+        let vid = pid.into();
+        let visible = |fid: FaceId| {
+            let he = mesh.face(fid).halfedge();
+
+            let pa = point(points, he.to().0);
+            let he = he.next();
+            let pb = point(points, he.to().0);
+            let he = he.next();
+            let pc = point(points, he.to().0);
+            orient3d(pa, pb, pc, pd, alloc) > 0.0
+        };
+        visible_faces.clear();
+        removed_faces.clear();
+        visible_faces.extend(mesh.vertex(vid).incoming_halfedges().filter_map(|he| {
+            let fid = mesh.he_face(*he);
+            debug_assert!(fid.valid());
+            visited[fid.0] = true;
+            if visible(fid) {
+                removed_faces.push(fid);
+                Some(fid)
+            } else {
+                None
+            }
+        }));
+        let mut idx = 0;
+
+        loop {
+            if idx >= visible_faces.len() {
+                break;
+            }
+            let fid = visible_faces[idx];
+            for he in mesh.face(fid).halfedges() {
+                let t
+            }
+            idx += 1;
+        }
+    }
 
     Vec::new_in(alloc)
+}
+
+fn close_hull(mesh: &mut ManifoldMesh, first_hid: HalfedgeId, vid: VertexId) {
+    debug_assert!(mesh.he_is_boundary(first_hid));
+
+    let mut curr_bot_hid = first_hid;
+    let mut first_side_hid = HalfedgeId::default();
+    let mut prev_side_hid = HalfedgeId::default();
+    loop {
+        let next_bot_hid = mesh.he_next(curr_bot_hid);
+        let [va, vb] = mesh.he_vertices(curr_bot_hid);
+        if curr_bot_hid == first_hid {
+            prev_side_hid = mesh.new_edge_by_veritces(vid, va);
+            first_side_hid = mesh.he_twin(prev_side_hid);
+        }
+
+        let curr_side_hid = if next_bot_hid == first_hid {
+            first_side_hid
+        } else {
+            mesh.new_edge_by_veritces(vb, vid)
+        };
+
+        mesh.new_face_by_halfedges(&[prev_side_hid, curr_bot_hid, curr_side_hid]);
+        if next_bot_hid == first_hid {
+            break;
+        }
+        curr_bot_hid = next_bot_hid;
+        prev_side_hid = mesh.he_twin(curr_side_hid);
+    }
 }
