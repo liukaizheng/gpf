@@ -1,4 +1,4 @@
-use std::alloc::Allocator;
+use std::{alloc::Allocator, collections::VecDeque};
 
 use crate::{
     mesh::{ElementId, FaceId, HalfedgeId, ManifoldMesh, Mesh, VertexId},
@@ -121,13 +121,14 @@ fn hull_3<A: Allocator + Copy>(
     let mut mesh = ManifoldMesh::new(triangles.chunks(3));
     mesh.new_vertices(points.len() / 3 - mesh.n_vertices_capacity());
 
-    let first_bot_hid = (mesh.n_halfedges_capacity() - 1).into();
+    let mut first_bot_hid = (mesh.n_halfedges_capacity() - 1).into();
     close_hull(&mut mesh, first_bot_hid, indices[start].into());
 
     let mut visited = Vec::new_in(alloc);
     visited.resize(mesh.n_faces_capacity(), false);
-    let mut visible_faces = Vec::new_in(alloc);
+    let mut visible_faces = VecDeque::new_in(alloc);
     let mut removed_faces = Vec::new_in(alloc);
+    let mut visited_faces = Vec::new_in(alloc);
     for &pid in &indices[(start + 1)..] {
         let pd = point(points, pid);
         let vid = pid.into();
@@ -143,10 +144,12 @@ fn hull_3<A: Allocator + Copy>(
         };
         visible_faces.clear();
         removed_faces.clear();
+        visited_faces.clear();
         visible_faces.extend(mesh.vertex(vid).incoming_halfedges().filter_map(|he| {
             let fid = mesh.he_face(*he);
             debug_assert!(fid.valid());
             visited[fid.0] = true;
+            visited_faces.push(fid);
             if visible(fid) {
                 removed_faces.push(fid);
                 Some(fid)
@@ -154,18 +157,45 @@ fn hull_3<A: Allocator + Copy>(
                 None
             }
         }));
-        let mut idx = 0;
 
+        first_bot_hid = HalfedgeId::default();
         loop {
-            if idx >= visible_faces.len() {
+            if visible_faces.is_empty() {
                 break;
             }
-            let fid = visible_faces[idx];
+            let fid = visible_faces.pop_front().unwrap();
             for he in mesh.face(fid).halfedges() {
-                let t
+                let twin_he = he.twin();
+                let twin_fid = mesh.he_face(*twin_he);
+                if visited[twin_fid.0] {
+                    continue;
+                }
+
+                visited[twin_fid.0] = true;
+                visited_faces.push(twin_fid);
+
+                if visible(twin_fid) {
+                    visible_faces.push_back(twin_fid);
+                    removed_faces.push(twin_fid);
+                } else {
+                    if !first_bot_hid.valid() {
+                        first_bot_hid = *he;
+                    }
+                }
             }
-            idx += 1;
         }
+
+        debug_assert!(first_bot_hid.valid());
+        for &fid in &removed_faces {
+            mesh.remove_face(fid);
+        }
+        debug_assert!(mesh.he_is_boundary(first_bot_hid));
+
+        for &fid in &visited_faces {
+            visited[fid.0] = false;
+        }
+
+        close_hull(&mut mesh, first_bot_hid, vid);
     }
 
     Vec::new_in(alloc)

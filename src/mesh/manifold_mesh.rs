@@ -100,8 +100,48 @@ impl ManifoldMesh {
     }
 
     pub fn new_face_by_halfedges(&mut self, halfedges: &[HalfedgeId]) -> FaceId {
-        0.into()
+        let new_fid = self.new_face();
+        for (&ha, &hb) in halfedges.iter().circular_tuple_windows() {
+            self.core_data.connect_halfedges(ha, hb);
+            self.he_face_arr[ha] = new_fid;
+        }
+        self.core_data.f_halfedge_arr[new_fid] = halfedges[0];
+        for (&ha_twin, &hb_twin) in halfedges.iter().rev().circular_tuple_windows() {
+            let ha = self.he_twin(ha_twin);
+            let hb = self.he_twin(hb_twin);
+            match [self.he_is_boundary(ha), self.he_is_boundary(hb)] {
+                [true, true] => {
+                    self.core_data.connect_halfedges(ha, hb);
+                }
+                [true, false] => {
+                    let ha_next = self.he_twin(self.he_prev(hb));
+                    self.core_data.connect_halfedges(ha, ha_next);
+                }
+                [false, true] => {
+                    let hb_prev = self.he_prev(self.he_twin(ha));
+                    self.core_data.connect_halfedges(hb_prev, hb);
+                }
+                [false, false] => {}
+            }
+        }
+        new_fid
     }
+
+    pub fn remove_face(&mut self, fid: FaceId) {
+        let first_hid = self.f_halfedge(fid);
+        let mut curr_hid = first_hid;
+        loop {
+            if !self.he_is_boundary(self.he_twin(curr_hid)) {
+                self.core_data
+                    .set_v_halfedge(self.he_from(curr_hid), curr_hid);
+            }
+            curr_hid = self.he_next(curr_hid);
+            if curr_hid == first_hid {
+                break;
+            }
+        }
+    }
+
     #[inline(always)]
     pub fn he_face(&self, hid: HalfedgeId) -> FaceId {
         self.he_face_arr[hid]
@@ -152,6 +192,13 @@ impl ManifoldMesh {
         self.core_data.set_he_vertex(hid, vb);
         self.core_data.set_he_vertex(twin_hid, va);
         hid
+    }
+
+    #[inline]
+    pub fn new_face(&mut self) -> FaceId {
+        let fid = FaceId::from(self.core_data.f_halfedge_arr.len());
+        self.core_data.f_halfedge_arr.push(HalfedgeId::default());
+        fid
     }
 }
 
