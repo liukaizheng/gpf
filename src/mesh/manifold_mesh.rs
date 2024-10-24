@@ -127,21 +127,6 @@ impl ManifoldMesh {
         new_fid
     }
 
-    pub fn remove_face(&mut self, fid: FaceId) {
-        let first_hid = self.f_halfedge(fid);
-        let mut curr_hid = first_hid;
-        loop {
-            if !self.he_is_boundary(self.he_twin(curr_hid)) {
-                self.core_data
-                    .set_v_halfedge(self.he_from(curr_hid), curr_hid);
-            }
-            curr_hid = self.he_next(curr_hid);
-            if curr_hid == first_hid {
-                break;
-            }
-        }
-    }
-
     #[inline(always)]
     pub fn he_face(&self, hid: HalfedgeId) -> FaceId {
         self.he_face_arr[hid]
@@ -184,6 +169,14 @@ impl ManifoldMesh {
     }
 
     #[inline]
+    pub fn new_face(&mut self) -> FaceId {
+        let fid = FaceId::from(self.core_data.f_halfedge_arr.len());
+        self.core_data.f_halfedge_arr.push(HalfedgeId::default());
+        self.core_data.n_faces += 1;
+        fid
+    }
+
+    #[inline]
     pub fn new_edge_by_veritces(&mut self, va: VertexId, vb: VertexId) -> HalfedgeId {
         let hid = self.new_edge();
         let twin_hid = self.he_twin(hid);
@@ -195,10 +188,65 @@ impl ManifoldMesh {
     }
 
     #[inline]
-    pub fn new_face(&mut self) -> FaceId {
-        let fid = FaceId::from(self.core_data.f_halfedge_arr.len());
-        self.core_data.f_halfedge_arr.push(HalfedgeId::default());
-        fid
+    pub fn remove_vertex(&mut self, vid: VertexId) {
+        self.core_data.set_v_halfedge(vid, HalfedgeId::default());
+        self.core_data.n_vertices -= 1;
+    }
+
+    #[inline]
+    pub fn remove_edge(&mut self, eid: EdgeId) {
+        let hid = self.e_halfedge(eid);
+        self.core_data.set_he_vertex(hid, VertexId::default());
+        self.core_data
+            .set_he_vertex(self.he_twin(hid), VertexId::default());
+        self.core_data.n_halfedges -= 2;
+    }
+
+    pub fn remove_face(&mut self, fid: FaceId) {
+        let first_hid = self.f_halfedge(fid);
+        let mut curr_hid = first_hid;
+        loop {
+            self.he_face_arr[curr_hid] = FaceId::default();
+
+            let next_hid = self.he_next(curr_hid);
+            let rev_next_hid = self.he_twin(curr_hid);
+            let rev_curr_hid = self.he_twin(next_hid);
+            if !self.he_is_boundary(rev_next_hid) {
+                self.core_data
+                    .set_v_halfedge(self.he_to(rev_next_hid), curr_hid);
+            }
+
+            match [
+                self.he_is_boundary(rev_next_hid),
+                self.he_is_boundary(rev_curr_hid),
+            ] {
+                [true, true] => {
+                    self.remove_vertex(self.he_to(curr_hid));
+                }
+                [true, false] => {
+                    self.core_data
+                        .connect_halfedges(self.he_prev(rev_next_hid), next_hid);
+                }
+                [false, true] => {
+                    self.core_data
+                        .connect_halfedges(curr_hid, self.he_next(rev_curr_hid));
+                }
+                [false, false] => {}
+            }
+
+            // make current edge invalid
+            if self.he_is_boundary(rev_next_hid) {
+                self.core_data.set_he_vertex(curr_hid, VertexId::default());
+                self.core_data
+                    .set_he_vertex(rev_next_hid, VertexId::default());
+                self.core_data.n_halfedges -= 2;
+            }
+
+            curr_hid = next_hid;
+            if curr_hid == first_hid {
+                break;
+            }
+        }
     }
 }
 
@@ -229,15 +277,9 @@ impl Mesh for ManifoldMesh {
         self.halfedge_is_valid(idx.into()) || self.halfedge_is_valid((idx + 1).into())
     }
 
-    fn he_prev(&self, hid: HalfedgeId) -> HalfedgeId {
-        let mut curr = hid;
-        loop {
-            let next = self.he_next(curr);
-            if next == hid {
-                return curr;
-            }
-            curr = next;
-        }
+    #[inline(always)]
+    fn he_from(&self, hid: HalfedgeId) -> VertexId {
+        self.he_to(self.he_twin(hid))
     }
 
     #[inline(always)]
@@ -262,11 +304,6 @@ impl Mesh for ManifoldMesh {
 
     #[inline(always)]
     fn e_halfedge(&self, eid: EdgeId) -> HalfedgeId {
-        let idx = eid.0 << 1;
-        if self.halfedge_is_valid(idx.into()) {
-            idx.into()
-        } else {
-            (idx + 1).into()
-        }
+        (eid.0 << 1).into()
     }
 }

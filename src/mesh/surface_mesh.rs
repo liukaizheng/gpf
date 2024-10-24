@@ -420,6 +420,11 @@ impl Mesh for SurfaceMesh {
         self.e_halfedge_arr[eid].valid()
     }
 
+    #[inline(always)]
+    fn he_from(&self, hid: HalfedgeId) -> VertexId {
+        self.he_to(self.he_prev(hid))
+    }
+
     fn he_twin(&self, hid: HalfedgeId) -> HalfedgeId {
         let mut curr = hid;
         loop {

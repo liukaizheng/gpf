@@ -106,12 +106,11 @@ pub trait Mesh: Sized {
     /// the start vertex of the halfedge
     #[inline(always)]
     fn he_to(&self, hid: HalfedgeId) -> VertexId {
-        self.core_data().he_vertex_arr[hid.index()]
+        self.core_data().he_vertex_arr[hid]
     }
+
     /// the end vertex of the halfedge
-    fn he_from(&self, hid: HalfedgeId) -> VertexId {
-        self.he_to(self.he_prev(hid))
-    }
+    fn he_from(&self, hid: HalfedgeId) -> VertexId;
 
     /// the next halfedge of the halfedge
     #[inline(always)]
