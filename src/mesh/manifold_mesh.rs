@@ -216,10 +216,6 @@ impl ManifoldMesh {
             };
             let rev_next_hid = self.he_twin(curr_hid);
             let rev_curr_hid = self.he_twin(next_hid);
-            if !self.he_is_boundary(rev_next_hid) {
-                self.core_data
-                    .set_v_halfedge(self.he_to(rev_next_hid), curr_hid);
-            }
 
             match [
                 self.he_is_boundary(rev_next_hid),
@@ -233,13 +229,18 @@ impl ManifoldMesh {
                     // /  \
                     let vid = self.he_to(curr_hid);
                     let vh = self.v_halfedge(vid);
-                    let hid = if vh == next_hid {
-                        self.he_next(self.he_twin(vh))
+
+                    let remove_vid =  if vh == next_hid {
+                        panic!("vh == next_hid");
+                    } else if vh == rev_next_hid {
+                        self.he_prev(rev_next_hid) == rev_curr_hid
                     } else {
-                        vh
+                        debug_assert!(!self.he_is_boundary(self.he_twin(vh)));
+                        false
                     };
-                    if self.he_is_boundary(self.he_twin(hid)) {
-                        self.remove_vertex(self.he_to(curr_hid));
+
+                    if remove_vid {
+                        self.remove_vertex(vid);
                     } else {
                         let prev_rev_next_hid = self.he_prev(rev_next_hid);
                         debug_assert!(self.he_is_valid(prev_rev_next_hid));
@@ -247,17 +248,23 @@ impl ManifoldMesh {
                         debug_assert!(self.he_is_valid(next_rev_curr_hid));
                         self.core_data
                             .connect_halfedges(prev_rev_next_hid, next_rev_curr_hid);
+                        self.core_data.set_v_halfedge(vid, next_rev_curr_hid);
                     }
                 }
                 [true, false] => {
                     self.core_data
                         .connect_halfedges(self.he_prev(rev_next_hid), next_hid);
+                    self.core_data.set_v_halfedge(self.he_to(curr_hid), next_hid);
                 }
                 [false, true] => {
+                    let next_rev_curr_hid = self.he_next(rev_curr_hid);
                     self.core_data
-                        .connect_halfedges(curr_hid, self.he_next(rev_curr_hid));
+                        .connect_halfedges(curr_hid, next_rev_curr_hid);
+                    self.core_data.set_v_halfedge(self.he_to(curr_hid), next_rev_curr_hid);
                 }
-                [false, false] => {}
+                [false, false] => {
+                    self.core_data.set_v_halfedge(self.he_to(curr_hid), next_hid);
+                }
             }
 
             // make current edge invalid
@@ -474,6 +481,29 @@ pub fn validate_mesh_connectivity(mesh: &ManifoldMesh) -> Result<(), String> {
                     "the halfedge of  boundary vertex {:?} is not boundary",
                     *he.from()
                 ));
+            }
+        }
+    }
+    {
+        let mut visisted = vec![false; mesh.n_halfedges_capacity()];
+        for he in mesh.halfedges() {
+            if visisted[*he] {
+                continue;
+            }
+
+            let first = *he;
+            let mut curr = first;
+            let mut count = 0;
+            {
+                count += 1;
+                if count > mesh.n_halfedges_capacity() {
+                    return Err(format!("the loop from {:?} is not closed", first));
+                }
+                visisted[curr] = true;
+                curr = mesh.he_next(curr);
+                if curr == first {
+                    break;
+                }
             }
         }
     }
