@@ -230,16 +230,7 @@ impl ManifoldMesh {
                     let vid = self.he_to(curr_hid);
                     let vh = self.v_halfedge(vid);
 
-                    let remove_vid =  if vh == next_hid {
-                        panic!("vh == next_hid");
-                    } else if vh == rev_next_hid {
-                        self.he_prev(rev_next_hid) == rev_curr_hid
-                    } else {
-                        debug_assert!(!self.he_is_boundary(self.he_twin(vh)));
-                        false
-                    };
-
-                    if remove_vid {
+                    if vh == rev_next_hid && self.he_prev(rev_next_hid) == rev_curr_hid {
                         self.remove_vertex(vid);
                     } else {
                         let prev_rev_next_hid = self.he_prev(rev_next_hid);
@@ -254,16 +245,19 @@ impl ManifoldMesh {
                 [true, false] => {
                     self.core_data
                         .connect_halfedges(self.he_prev(rev_next_hid), next_hid);
-                    self.core_data.set_v_halfedge(self.he_to(curr_hid), next_hid);
+                    self.core_data
+                        .set_v_halfedge(self.he_to(curr_hid), next_hid);
                 }
                 [false, true] => {
                     let next_rev_curr_hid = self.he_next(rev_curr_hid);
                     self.core_data
                         .connect_halfedges(curr_hid, next_rev_curr_hid);
-                    self.core_data.set_v_halfedge(self.he_to(curr_hid), next_rev_curr_hid);
+                    self.core_data
+                        .set_v_halfedge(self.he_to(curr_hid), next_rev_curr_hid);
                 }
                 [false, false] => {
-                    self.core_data.set_v_halfedge(self.he_to(curr_hid), next_hid);
+                    self.core_data
+                        .set_v_halfedge(self.he_to(curr_hid), next_hid);
                 }
             }
 
