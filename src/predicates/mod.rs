@@ -407,7 +407,7 @@ pub fn same_half_plane<A: Allocator + Copy>(
 }
 
 #[inline]
-pub fn mis_alignment<A: Allocator + Copy>(p: &[f64], q: &[f64], r: &[f64], allocator: A) -> bool {
+pub fn miss_alignment<A: Allocator + Copy>(p: &[f64], q: &[f64], r: &[f64], allocator: A) -> bool {
     // Projection on (x,y)-plane
     if predicates::orient2d(p, q, r, allocator) != 0.0 {
         return true;
@@ -444,16 +444,16 @@ pub fn inner_segments_cross<A: Allocator + Copy>(
     }
 
     // Each segment endpoint cannot be aligned with the other segment.
-    if !mis_alignment(u1, v1, v2, allocator) {
+    if !miss_alignment(u1, v1, v2, allocator) {
         return false;
     };
-    if !mis_alignment(u2, v1, v2, allocator) {
+    if !miss_alignment(u2, v1, v2, allocator) {
         return false;
     };
-    if !mis_alignment(v1, u1, u2, allocator) {
+    if !miss_alignment(v1, u1, u2, allocator) {
         return false;
     };
-    if !mis_alignment(v2, u1, u2, allocator) {
+    if !miss_alignment(v2, u1, u2, allocator) {
         return false;
     };
 
@@ -494,7 +494,7 @@ pub fn point_in_inner_segment<A: Allocator + Copy>(
     v2: &[f64],
     allocator: A,
 ) -> bool {
-    return !mis_alignment(p, v1, v2, allocator)
+    return !miss_alignment(p, v1, v2, allocator)
         && ((v1[0] < v2[0] && v1[0] < p[0] && p[0] < v2[0])
             || (v1[0] > v2[0] && v1[0] > p[0] && p[0] > v2[0])
             || (v1[1] < v2[1] && v1[1] < p[1] && p[1] < v2[1])

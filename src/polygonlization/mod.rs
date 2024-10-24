@@ -4,7 +4,7 @@ mod conforming_mesh;
 use bumpalo::Bump;
 
 use crate::{
-    predicates::{get_exponent, mis_alignment},
+    predicates::{get_exponent, miss_alignment},
     triangle::{tetrahedralize, triangulate_polygon_soup},
 };
 
@@ -131,7 +131,7 @@ pub fn make_mesh_for_triangles(
         let pa = point(&points, tri[0]);
         let pb = point(&points, tri[1]);
         let pc = point(&points, tri[2]);
-        if !mis_alignment(pa, pb, pc, &bump) {
+        if !miss_alignment(pa, pb, pc, &bump) {
             continue;
         }
 

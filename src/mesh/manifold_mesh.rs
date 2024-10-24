@@ -100,30 +100,32 @@ impl ManifoldMesh {
     }
 
     pub fn new_face_by_halfedges(&mut self, halfedges: &[HalfedgeId]) -> FaceId {
-        let new_fid = self.new_face();
-        for (&ha, &hb) in halfedges.iter().circular_tuple_windows() {
-            self.core_data.connect_halfedges(ha, hb);
-            self.he_face_arr[ha] = new_fid;
-        }
-        self.core_data.f_halfedge_arr[new_fid] = halfedges[0];
         for (&ha_twin, &hb_twin) in halfedges.iter().rev().circular_tuple_windows() {
             let ha = self.he_twin(ha_twin);
             let hb = self.he_twin(hb_twin);
             match [self.he_is_boundary(ha), self.he_is_boundary(hb)] {
                 [true, true] => {
                     self.core_data.connect_halfedges(ha, hb);
+                    self.core_data.set_v_halfedge(self.he_to(ha), hb);
                 }
                 [true, false] => {
-                    let ha_next = self.he_twin(self.he_prev(hb));
+                    let ha_next = self.he_next(hb_twin);
                     self.core_data.connect_halfedges(ha, ha_next);
                 }
                 [false, true] => {
-                    let hb_prev = self.he_prev(self.he_twin(ha));
+                    let hb_prev = self.he_prev(ha_twin);
                     self.core_data.connect_halfedges(hb_prev, hb);
+                    self.core_data.set_v_halfedge(self.he_to(ha), hb);
                 }
                 [false, false] => {}
             }
         }
+        let new_fid = self.new_face();
+        for (&ha, &hb) in halfedges.iter().circular_tuple_windows() {
+            self.core_data.connect_halfedges(ha, hb);
+            self.he_face_arr[ha] = new_fid;
+        }
+        self.core_data.f_halfedge_arr[new_fid] = halfedges[0];
         new_fid
     }
 
@@ -180,8 +182,6 @@ impl ManifoldMesh {
     pub fn new_edge_by_veritces(&mut self, va: VertexId, vb: VertexId) -> HalfedgeId {
         let hid = self.new_edge();
         let twin_hid = self.he_twin(hid);
-        self.core_data.set_v_halfedge(va, hid);
-        self.core_data.set_v_halfedge(vb, twin_hid);
         self.core_data.set_he_vertex(hid, vb);
         self.core_data.set_he_vertex(twin_hid, va);
         hid
@@ -204,11 +204,16 @@ impl ManifoldMesh {
 
     pub fn remove_face(&mut self, fid: FaceId) {
         let first_hid = self.f_halfedge(fid);
+        let prev_first_hid = self.he_prev(first_hid);
         let mut curr_hid = first_hid;
         loop {
             self.he_face_arr[curr_hid] = FaceId::default();
 
-            let next_hid = self.he_next(curr_hid);
+            let next_hid = if curr_hid == prev_first_hid {
+                first_hid
+            } else {
+                self.he_next(curr_hid)
+            };
             let rev_next_hid = self.he_twin(curr_hid);
             let rev_curr_hid = self.he_twin(next_hid);
             if !self.he_is_boundary(rev_next_hid) {
@@ -221,7 +226,28 @@ impl ManifoldMesh {
                 self.he_is_boundary(rev_curr_hid),
             ] {
                 [true, true] => {
-                    self.remove_vertex(self.he_to(curr_hid));
+                    // \  /
+                    //  \/
+                    //  vid
+                    //  /\
+                    // /  \
+                    let vid = self.he_to(curr_hid);
+                    let vh = self.v_halfedge(vid);
+                    let hid = if vh == next_hid {
+                        self.he_next(self.he_twin(vh))
+                    } else {
+                        vh
+                    };
+                    if self.he_is_boundary(self.he_twin(hid)) {
+                        self.remove_vertex(self.he_to(curr_hid));
+                    } else {
+                        let prev_rev_next_hid = self.he_prev(rev_next_hid);
+                        debug_assert!(self.he_is_valid(prev_rev_next_hid));
+                        let next_rev_curr_hid = self.he_next(rev_curr_hid);
+                        debug_assert!(self.he_is_valid(next_rev_curr_hid));
+                        self.core_data
+                            .connect_halfedges(prev_rev_next_hid, next_rev_curr_hid);
+                    }
                 }
                 [true, false] => {
                     self.core_data
@@ -247,6 +273,8 @@ impl ManifoldMesh {
                 break;
             }
         }
+        self.core_data.f_halfedge_arr[fid] = HalfedgeId::default();
+        self.core_data.n_faces -= 1;
     }
 }
 
@@ -272,9 +300,9 @@ impl Mesh for ManifoldMesh {
     }
 
     #[inline(always)]
-    fn edge_is_valid(&self, eid: EdgeId) -> bool {
+    fn e_is_valid(&self, eid: EdgeId) -> bool {
         let idx = eid.0 << 1;
-        self.halfedge_is_valid(idx.into()) || self.halfedge_is_valid((idx + 1).into())
+        self.he_is_valid(idx.into()) || self.he_is_valid((idx + 1).into())
     }
 
     #[inline(always)]
@@ -306,4 +334,168 @@ impl Mesh for ManifoldMesh {
     fn e_halfedge(&self, eid: EdgeId) -> HalfedgeId {
         (eid.0 << 1).into()
     }
+}
+
+pub fn validate_mesh_connectivity(mesh: &ManifoldMesh) -> Result<(), String> {
+    let validate_vertex = |vid: VertexId, msg: &str| {
+        if vid.0 > mesh.n_vertices_capacity() || !mesh.v_is_valid(vid) {
+            Err(format!("{} bad vertex reference: {}", msg, vid.0))
+        } else {
+            Ok(())
+        }
+    };
+    let validate_halfedge = |hid: HalfedgeId, msg: &str| {
+        if hid.0 > mesh.n_halfedges_capacity() || !mesh.he_is_valid(hid) {
+            Err(format!("{} bad halfedge reference: {}", msg, hid.0))
+        } else {
+            Ok(())
+        }
+    };
+    let validate_edge = |eid: EdgeId, msg: &str| {
+        if eid.0 > mesh.n_edges_capacity() || !mesh.e_is_valid(eid) {
+            Err(format!("{} bad edge reference: {}", msg, eid.0))
+        } else {
+            Ok(())
+        }
+    };
+    let validate_face = |fid: FaceId, msg: &str| {
+        if fid.0 > mesh.n_faces_capacity() || !mesh.f_is_valid(fid) {
+            Err(format!("{} bad face reference: {}", msg, fid.0))
+        } else {
+            Ok(())
+        }
+    };
+
+    for v in mesh.vertices() {
+        validate_halfedge(mesh.v_halfedge(*v), "v_he: ")?;
+    }
+
+    for he in mesh.halfedges() {
+        validate_vertex(mesh.he_from(*he), "he_vertex: ")?;
+
+        validate_halfedge(mesh.he_next(*he), "he_next: ")?;
+        validate_halfedge(mesh.he_twin(*he), "he_twin: ")?;
+        validate_halfedge(mesh.he_next_incoming_neighbor(*he), "next_incoming: ")?;
+
+        validate_edge(mesh.he_edge(*he), "he_edge: ")?;
+    }
+
+    for e in mesh.edges() {
+        validate_halfedge(mesh.e_halfedge(*e), "e_he: ")?;
+    }
+
+    for f in mesh.faces() {
+        validate_halfedge(mesh.f_halfedge(*f), "e_face: ")?;
+    }
+
+    for hid in mesh.halfedges() {
+        let first_he = mesh.halfedge(*hid);
+        let mut curr_he = mesh.halfedge(*hid);
+        curr_he = curr_he.sibling();
+        let mut count = 1;
+        while *curr_he != *hid {
+            if *curr_he.edge() != *first_he.edge() {
+                return Err(format!(
+                    "halfedge sibling doesn't have edge == he.edge for he {}",
+                    hid.0
+                ));
+            }
+            if count > mesh.n_halfedges() {
+                return Err(format!(
+                    "halfedge sibling doesn't cycle back for he {}",
+                    hid.0
+                ));
+            }
+            curr_he = curr_he.sibling();
+            count += 1;
+        }
+    }
+
+    for eid in mesh.edges() {
+        for hid in mesh.edge(*eid).halfedges() {
+            if *eid != mesh.he_edge(*hid) {
+                return Err(format!(
+                    "edge.halfedge doesn't match he.edge for edge {}",
+                    eid.0
+                ));
+            }
+        }
+    }
+
+    for face in mesh.faces() {
+        let he = face.halfedge();
+        let fid = *face;
+        if mesh.he_face(*he) != fid {
+            return Err(format!("f.he().face() is not f for face {}", fid.0));
+        }
+
+        let mut curr_he = he.next();
+        let mut count = 1;
+        while *curr_he != *he {
+            if mesh.he_face(*curr_he) != fid {
+                return Err(format!("face.he doesn't match he.face for face {}", fid.0));
+            }
+            if count > mesh.n_halfedges() {
+                return Err(format!(
+                    "halfedge next doesn't cycle back for face {}",
+                    fid.0
+                ));
+            }
+            curr_he = curr_he.next();
+            count += 1;
+        }
+        if count < 2 {
+            return Err(format!("face {} degree < 2", fid.0));
+        }
+    }
+
+    for he in mesh.halfedges() {
+        let hid = *he;
+        let tip = mesh.he_to(hid);
+        if *mesh.halfedge(mesh.he_next_incoming_neighbor(hid)).to() != tip {
+            return Err(format!("next incoming he is not to same vert"));
+        }
+    }
+
+    for he in mesh.halfedges() {
+        let next_he = he.next();
+        if *he.to() != *next_he.from() {
+            return Err(format!(
+                "prev he {} and next he {} are not connected",
+                he.0, next_he.0
+            ));
+        }
+    }
+
+    for he in mesh.halfedges() {
+        if mesh.he_is_boundary(*he) {
+            if !mesh.he_is_boundary(mesh.v_halfedge(*he.from())) {
+                return Err(format!(
+                    "the halfedge of  boundary vertex {:?} is not boundary",
+                    *he.from()
+                ));
+            }
+        }
+    }
+
+    let mut v_in_count = vec![0; mesh.n_vertices_capacity()];
+    for hid in mesh.halfedges() {
+        v_in_count[mesh.he_to(*hid)] += 1;
+    }
+    for vid in mesh.vertices() {
+        let vid = *vid;
+        let mut count = 0;
+        for _ in mesh.vertex(vid).incoming_halfedges() {
+            count += 1;
+            if count > v_in_count[vid] {
+                return Err(format!("vertex {} incomming loop", vid.0));
+            }
+        }
+
+        if count != v_in_count[vid] {
+            return Err(format!("vertex {} incomming loop", vid.0));
+        }
+    }
+
+    Ok(())
 }

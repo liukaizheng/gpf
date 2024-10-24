@@ -116,7 +116,7 @@ impl SurfaceMesh {
         let n_vertices = mesh.n_vertices();
         for idx in 0..n_vertices {
             let vid = VertexId::from(idx);
-            if !mesh.vertex_is_valid(vid) {
+            if !mesh.v_is_valid(vid) {
                 continue;
             }
             let (start, end) = (v_in_separators[vid], v_in_separators[*vid + 1]);
@@ -416,7 +416,7 @@ impl Mesh for SurfaceMesh {
     }
 
     #[inline(always)]
-    fn edge_is_valid(&self, eid: EdgeId) -> bool {
+    fn e_is_valid(&self, eid: EdgeId) -> bool {
         self.e_halfedge_arr[eid].valid()
     }
 

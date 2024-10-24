@@ -80,7 +80,7 @@ impl<'a, M: Mesh> Element for VertexIter<'a, M> {
 
     #[inline(always)]
     fn valid(&self) -> bool {
-        self.mesh.vertex_is_valid(self.id)
+        self.mesh.v_is_valid(self.id)
     }
 
     #[inline(always)]

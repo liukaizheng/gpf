@@ -90,7 +90,7 @@ impl<'a, M: Mesh> Element for HalfedgeIter<'a, M> {
 
     #[inline(always)]
     fn valid(&self) -> bool {
-        self.mesh.halfedge_is_valid(self.id)
+        self.mesh.he_is_valid(self.id)
     }
 
     #[inline(always)]

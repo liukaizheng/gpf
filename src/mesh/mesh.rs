@@ -41,19 +41,19 @@ pub trait Mesh: Sized {
     }
 
     #[inline(always)]
-    fn vertex_is_valid(&self, vid: VertexId) -> bool {
+    fn v_is_valid(&self, vid: VertexId) -> bool {
         self.v_halfedge(vid).valid()
     }
 
     #[inline(always)]
-    fn halfedge_is_valid(&self, hid: HalfedgeId) -> bool {
+    fn he_is_valid(&self, hid: HalfedgeId) -> bool {
         self.he_to(hid).valid()
     }
 
-    fn edge_is_valid(&self, eid: EdgeId) -> bool;
+    fn e_is_valid(&self, eid: EdgeId) -> bool;
 
     #[inline(always)]
-    fn face_is_valid(&self, fid: FaceId) -> bool {
+    fn f_is_valid(&self, fid: FaceId) -> bool {
         self.f_halfedge(fid).valid()
     }
 

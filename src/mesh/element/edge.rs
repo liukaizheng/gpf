@@ -65,7 +65,7 @@ impl<'a, M: Mesh> Element for EdgeIter<'a, M> {
 
     #[inline(always)]
     fn valid(&self) -> bool {
-        self.mesh.edge_is_valid(self.id)
+        self.mesh.e_is_valid(self.id)
     }
 
     #[inline(always)]

@@ -70,7 +70,7 @@ impl<'a, M: Mesh> Element for FaceIter<'a, M> {
 
     #[inline(always)]
     fn valid(&self) -> bool {
-        self.mesh.face_is_valid(self.id)
+        self.mesh.f_is_valid(self.id)
     }
 
     #[inline(always)]

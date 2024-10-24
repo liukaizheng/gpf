@@ -2,56 +2,56 @@ use gpf::mesh::{EdgeId, FaceId, HalfedgeId, ManifoldMesh, Mesh, SurfaceMesh, Ver
 
 fn validate_mesh_connectivity(mesh: &SurfaceMesh) -> Result<(), String> {
     let validate_vertex = |vid: VertexId, msg: &str| {
-        if vid.0 > mesh.n_vertices_capacity() || !mesh.vertex_is_valid(vid) {
+        if vid.0 > mesh.n_vertices_capacity() || !mesh.v_is_valid(vid) {
             Err(format!("{} bad vertex reference: {}", msg, vid.0))
         } else {
             Ok(())
         }
     };
     let validate_halfedge = |hid: HalfedgeId, msg: &str| {
-        if hid.0 > mesh.n_halfedges_capacity() || !mesh.halfedge_is_valid(hid) {
+        if hid.0 > mesh.n_halfedges_capacity() || !mesh.he_is_valid(hid) {
             Err(format!("{} bad halfedge reference: {}", msg, hid.0))
         } else {
             Ok(())
         }
     };
     let validate_edge = |eid: EdgeId, msg: &str| {
-        if eid.0 > mesh.n_edges_capacity() || !mesh.edge_is_valid(eid) {
+        if eid.0 > mesh.n_edges_capacity() || !mesh.e_is_valid(eid) {
             Err(format!("{} bad edge reference: {}", msg, eid.0))
         } else {
             Ok(())
         }
     };
     let validate_face = |fid: FaceId, msg: &str| {
-        if fid.0 > mesh.n_faces_capacity() || !mesh.face_is_valid(fid) {
+        if fid.0 > mesh.n_faces_capacity() || !mesh.f_is_valid(fid) {
             Err(format!("{} bad face reference: {}", msg, fid.0))
         } else {
             Ok(())
         }
     };
 
-    for vid in mesh.vertices() {
-        validate_halfedge(mesh.v_halfedge(*vid), "v_he: ")?;
+    for v in mesh.vertices() {
+        validate_halfedge(mesh.v_halfedge(*v), "v_he: ")?;
     }
 
-    for hid in mesh.halfedges() {
-        validate_vertex(mesh.he_from(*hid), "he_vertex: ")?;
+    for he in mesh.halfedges() {
+        validate_vertex(mesh.he_from(*he), "he_vertex: ")?;
 
-        validate_halfedge(mesh.he_next(*hid), "he_next: ")?;
-        validate_halfedge(mesh.he_twin(*hid), "he_twin: ")?;
-        validate_halfedge(mesh.he_next_incoming_neighbor(*hid), "next_incoming: ")?;
+        validate_halfedge(mesh.he_next(*he), "he_next: ")?;
+        validate_halfedge(mesh.he_twin(*he), "he_twin: ")?;
+        validate_halfedge(mesh.he_next_incoming_neighbor(*he), "next_incoming: ")?;
 
-        validate_edge(mesh.he_edge(*hid), "he_edge: ")?;
-        let fid = mesh.he_face(*hid);
+        validate_edge(mesh.he_edge(*he), "he_edge: ")?;
+        let fid = mesh.he_face(*he);
         validate_face(fid, "he_face: ")?;
     }
 
-    for eid in mesh.edges() {
-        validate_halfedge(mesh.e_halfedge(*eid), "e_he: ")?;
+    for e in mesh.edges() {
+        validate_halfedge(mesh.e_halfedge(*e), "e_he: ")?;
     }
 
-    for fid in mesh.faces() {
-        validate_halfedge(mesh.f_halfedge(*fid), "e_face: ")?;
+    for f in mesh.faces() {
+        validate_halfedge(mesh.f_halfedge(*f), "e_face: ")?;
     }
 
     for hid in mesh.halfedges() {
@@ -115,19 +115,26 @@ fn validate_mesh_connectivity(mesh: &SurfaceMesh) -> Result<(), String> {
         }
     }
 
-    for hid in mesh.halfedges() {
-        let hid = *hid;
+    for he in mesh.halfedges() {
+        let hid = *he;
         let tip = mesh.he_to(hid);
         if *mesh.halfedge(mesh.he_next_incoming_neighbor(hid)).to() != tip {
             return Err(format!("next incoming he is not to same vert"));
         }
     }
 
-    let bump = bumpalo::Bump::new();
-    let mut v_in_count = bumpalo::vec![in &bump; 0; mesh.n_vertices_capacity()];
-    let mut v_out_count = bumpalo::vec![in &bump; 0; mesh.n_vertices_capacity()];
+    for he in mesh.halfedges() {
+        let next_he = he.next();
+        if *he.to() != *next_he.from() {
+            return Err(format!(
+                "prev he {} and next he {} are not connected",
+                he.0, next_he.0
+            ));
+        }
+    }
+
+    let mut v_in_count = vec![0; mesh.n_vertices_capacity()];
     for hid in mesh.halfedges() {
-        v_out_count[mesh.he_from(*hid)] += 1;
         v_in_count[mesh.he_to(*hid)] += 1;
     }
     for vid in mesh.vertices() {
