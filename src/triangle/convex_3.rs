@@ -15,7 +15,11 @@ pub enum Convex3Result<A: Allocator + Copy> {
     Dim3(Vec<usize, A>),
 }
 
-pub fn convex_3<A: Allocator + Copy>(points: &[f64], alloc: A) -> Convex3Result<A> {
+pub fn convex_3<A: Allocator + Copy>(
+    points: &[f64],
+    only_verts: bool,
+    alloc: A,
+) -> Convex3Result<A> {
     let n_points = points.len() / 3;
     let mut indices = Vec::with_capacity_in(n_points, alloc);
     indices.extend(0..n_points);
@@ -59,7 +63,7 @@ pub fn convex_3<A: Allocator + Copy>(points: &[f64], alloc: A) -> Convex3Result<
 
         points_2d.extend(indices[..coplanar_len].into_iter().flat_map(|&idx| {
             let p = point(points, idx);
-            [p[axis + 1], p[axis + 2]]
+            [p[(axis + 1) % 3], p[(axis + 2) % 3]]
         }));
         let mut triangles = Vec::new_in(alloc);
         triangles.extend(
@@ -72,7 +76,20 @@ pub fn convex_3<A: Allocator + Copy>(points: &[f64], alloc: A) -> Convex3Result<
     if colinear_len == indices.len() {
         return Convex3Result::Dim2(triangles);
     }
-    Convex3Result::Dim3(hull_3(points, &indices, coplanar_len, triangles, alloc))
+    let mesh = hull_3(points, &indices, coplanar_len, triangles, alloc);
+    let mut result = Vec::new_in(alloc);
+    if only_verts {
+        result.extend(mesh.vertices().map(|v| v.0));
+    } else {
+        let mut result = Vec::new_in(alloc);
+        result.extend(mesh.faces().flat_map(|f| {
+            let he = f.halfedge();
+            let he_next = he.next();
+            let he_nnext = he_next.next();
+            [he.to().0, he_next.to().0, he_nnext.to().0]
+        }));
+    }
+    Convex3Result::Dim3(result)
 }
 
 fn hull_1<A: Allocator + Copy>(points: &[f64], indices: &[usize], alloc: A) -> usize {
@@ -106,7 +123,7 @@ fn hull_3<A: Allocator + Copy>(
     start: usize,
     mut triangles: Vec<usize, A>,
     alloc: A,
-) -> Vec<usize, A> {
+) -> ManifoldMesh {
     let is_neg = {
         let pa = point(points, triangles[0]);
         let pb = point(points, triangles[1]);
@@ -223,15 +240,7 @@ fn hull_3<A: Allocator + Copy>(
         kept.resize(mesh.n_faces_capacity(), false);
         prev_vid = vid;
     }
-
-    let mut result = Vec::new_in(alloc);
-    result.extend(mesh.faces().flat_map(|f| {
-        let he = f.halfedge();
-        let he_next = he.next();
-        let he_nnext = he_next.next();
-        [he.to().0, he_next.to().0, he_nnext.to().0]
-    }));
-    result
+    mesh
 }
 
 fn close_hull(mesh: &mut ManifoldMesh, first_hid: HalfedgeId, vid: VertexId) {

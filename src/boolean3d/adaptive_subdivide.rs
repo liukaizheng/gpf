@@ -11,8 +11,7 @@ use crate::{
     math::{cross, cross_in, dot, square_norm, sub_short},
     mesh::EdgeId,
     point, point_2,
-    predicates::{double_to_sign, orient3d, Orientation},
-    triangle::convex_2,
+    triangle::{convex_2, convex_3},
 };
 
 type BVec<'a, T> = bumpalo::collections::Vec<'a, T>;
@@ -278,7 +277,7 @@ fn subdividable(
     }
 
     for (&i, &j, &k) in activated.iter().tuple_combinations() {
-        let points = bumpalo::collections::Vec::from_iter_in(
+        let points = BVec::from_iter_in(
             interpolant_vec[i]
                 .iter()
                 .zip(&interpolant_vec[j])
@@ -293,7 +292,7 @@ fn subdividable(
             continue;
         }
 
-        if !contain_dim_3(&points, &[0.0, 0.0, 0.0], bump) {
+        if !contain_zero_3(points, bump) {
             continue;
         }
 
@@ -355,40 +354,32 @@ fn det<const N: usize>(mat: &[[f64; N]]) -> f64 {
 
 fn contain_zero_2<'a>(mut points: BVec<'a, f64>, bump: &'a Bump) -> bool {
     points.extend([0.0, 0.0]);
+    let zero_vid = points.len() >> 1;
     let hull = convex_2(&points, bump);
     for vid in hull {
         let p = point_2(&points, vid);
-        if p[0] == 0.0 && p[1] == 0.0 {
+        if vid == zero_vid || (p[0] == 0.0 && p[1] == 0.0) {
             return false;
         }
     }
     true
 }
 
-fn contain_dim_3(points: &[f64], query: &[f64], bump: &Bump) -> bool {
-    for ((i, pa), (j, pb), (k, pc)) in points.chunks(3).enumerate().tuple_combinations() {
-        let base_ori = double_to_sign(orient3d(pa, pb, pc, query, bump));
-        if base_ori == Orientation::Zero {
-            continue;
-        }
-
-        let separating = || {
-            for (l, pd) in points.chunks(3).enumerate() {
-                if i == l || j == l || k == l {
-                    continue;
-                }
-                let ori = double_to_sign(orient3d(pa, pb, pc, pd, bump));
-                if ori == base_ori {
+fn contain_zero_3<'a>(mut points: BVec<'a, f64>, bump: &'a Bump) -> bool {
+    let zero_vid = points.len() / 3;
+    points.extend([0.0, 0.0, 0.0]);
+    match convex_3(&points, true, bump) {
+        crate::triangle::Convex3Result::Dim3(hull) => {
+            for vid in hull {
+                let p = point(&points, vid);
+                if vid == zero_vid || (p[0] == 0.0 && p[1] == 0.0 && p[2] == 0.0) {
                     return false;
                 }
             }
             true
-        };
-        if separating() {
-            return false;
         }
+        _ => false,
     }
-    true
 }
 
 fn test_distance_1(adj_v: &[[f64; 3]], h: [f64; 3], b: &[f64], sq_det_v: f64, sq_eps: f64) -> bool {

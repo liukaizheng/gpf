@@ -36,7 +36,7 @@ fn test_convex_3() {
         0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.2, 0.2, 0.2, 1.0, 1.0, 1.0,
     ];
 
-    match convex_3(&points, std::alloc::Global) {
+    match convex_3(&points, false, std::alloc::Global) {
         gpf::triangle::Convex3Result::Dim3(hull) => {
             write_obj("hull.obj", &points, &hull);
         }
@@ -49,10 +49,10 @@ fn test_convex_3() {
 fn test_convex_3_rng() {
     let rng = SmallRng::seed_from_u64(5489);
     let uniform = Uniform::new_inclusive(-1.0, 1.0);
-    let n_points = 48;
+    let n_points = 1000 ;
     let points = Vec::from_iter(rng.sample_iter(uniform).take(n_points * 3));
 
-    match convex_3(&points, std::alloc::Global) {
+    match convex_3(&points, false, std::alloc::Global) {
         gpf::triangle::Convex3Result::Dim3(hull) => {
             write_obj("hull.obj", &points, &hull);
         }
