@@ -128,7 +128,7 @@ pub trait Mesh: Sized {
     /// the sibling halfedge of the halfedge
     fn he_sibling(&self, hid: HalfedgeId) -> HalfedgeId;
     /// the next incoming halfedge of the halfedge
-    fn he_next_incoming_neighbor(&self, hid: HalfedgeId) -> HalfedgeId;
+    fn he_next_incoming(&self, hid: HalfedgeId) -> HalfedgeId;
     /// the edge of the halfedge
     fn he_edge(&self, hid: HalfedgeId) -> EdgeId;
 

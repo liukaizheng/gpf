@@ -39,7 +39,7 @@ fn validate_mesh_connectivity(mesh: &SurfaceMesh) -> Result<(), String> {
 
         validate_halfedge(mesh.he_next(*he), "he_next: ")?;
         validate_halfedge(mesh.he_twin(*he), "he_twin: ")?;
-        validate_halfedge(mesh.he_next_incoming_neighbor(*he), "next_incoming: ")?;
+        validate_halfedge(mesh.he_next_incoming(*he), "next_incoming: ")?;
 
         validate_edge(mesh.he_edge(*he), "he_edge: ")?;
         let fid = mesh.he_face(*he);
@@ -118,7 +118,7 @@ fn validate_mesh_connectivity(mesh: &SurfaceMesh) -> Result<(), String> {
     for he in mesh.halfedges() {
         let hid = *he;
         let tip = mesh.he_to(hid);
-        if *mesh.halfedge(mesh.he_next_incoming_neighbor(hid)).to() != tip {
+        if *mesh.halfedge(mesh.he_next_incoming(hid)).to() != tip {
             return Err(format!("next incoming he is not to same vert"));
         }
     }

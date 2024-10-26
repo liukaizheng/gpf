@@ -134,7 +134,7 @@ impl VNeiState {
 
     fn next<M: Mesh>(&mut self, mesh: &M) {
         if self.prev_visited {
-            self.hid = mesh.he_next_incoming_neighbor(self.hid);
+            self.hid = mesh.he_next_incoming(self.hid);
             self.prev_visited = false;
         } else {
             self.prev_visited = true;
@@ -325,7 +325,7 @@ impl<'a, M: Mesh> Element for VIHIter<'a, M> {
     #[inline(always)]
     fn next(&mut self) {
         self.just_start = false;
-        self.curr = self.mesh.he_next_incoming_neighbor(self.curr);
+        self.curr = self.mesh.he_next_incoming(self.curr);
     }
 
     #[inline(always)]
@@ -378,7 +378,7 @@ impl<'a, M: Mesh> Element for VOHIter<'a, M> {
     #[inline(always)]
     fn next(&mut self) {
         self.just_start = false;
-        self.curr = self.mesh.he_next_incoming_neighbor(self.curr);
+        self.curr = self.mesh.he_next_incoming(self.curr);
     }
 
     #[inline(always)]

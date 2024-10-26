@@ -322,7 +322,7 @@ impl Mesh for ManifoldMesh {
     }
 
     #[inline(always)]
-    fn he_next_incoming_neighbor(&self, hid: HalfedgeId) -> HalfedgeId {
+    fn he_next_incoming(&self, hid: HalfedgeId) -> HalfedgeId {
         self.he_prev(self.he_twin(hid))
     }
 
@@ -376,7 +376,7 @@ pub fn validate_mesh_connectivity(mesh: &ManifoldMesh) -> Result<(), String> {
 
         validate_halfedge(mesh.he_next(*he), "he_next: ")?;
         validate_halfedge(mesh.he_twin(*he), "he_twin: ")?;
-        validate_halfedge(mesh.he_next_incoming_neighbor(*he), "next_incoming: ")?;
+        validate_halfedge(mesh.he_next_incoming(*he), "next_incoming: ")?;
 
         validate_edge(mesh.he_edge(*he), "he_edge: ")?;
     }
@@ -453,7 +453,7 @@ pub fn validate_mesh_connectivity(mesh: &ManifoldMesh) -> Result<(), String> {
     for he in mesh.halfedges() {
         let hid = *he;
         let tip = mesh.he_to(hid);
-        if *mesh.halfedge(mesh.he_next_incoming_neighbor(hid)).to() != tip {
+        if *mesh.halfedge(mesh.he_next_incoming(hid)).to() != tip {
             return Err(format!("next incoming he is not to same vert"));
         }
     }

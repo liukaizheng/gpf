@@ -447,7 +447,7 @@ impl Mesh for SurfaceMesh {
     }
 
     #[inline(always)]
-    fn he_next_incoming_neighbor(&self, hid: HalfedgeId) -> HalfedgeId {
+    fn he_next_incoming(&self, hid: HalfedgeId) -> HalfedgeId {
         self.he_vert_in_next_arr[hid]
     }
 
