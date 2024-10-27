@@ -100,7 +100,7 @@ impl BSPCellData {
 
 pub(crate) struct BSPComplex {
     points: Vec<Point3D>,
-    pub mesh: SurfaceMesh,
+    pub mesh: SurfaceMesh<std::alloc::Global>,
     vertex_data: Vec<BSPVertexData>,
     edge_data: Vec<BSPEdgeData>,
     face_data: Vec<BSPFaceData>,
@@ -184,7 +184,7 @@ impl BSPComplex {
             cell_data.push(BSPCellData::new(cell_faces, tet_mark[4][tid].clone()));
         }
 
-        let mesh = SurfaceMesh::new(faces);
+        let mesh = SurfaceMesh::new(faces, std::alloc::Global);
 
         let vert_orientations = vec![HashMap::new(); constraints_data.triangles.len() / 3];
         let vert_visits = vec![false; points.len()];
@@ -1583,7 +1583,11 @@ impl ZeroVert {
         }
     }
     // #[inline(always)]
-    fn id(&self, mesh: &SurfaceMesh, ef_clip_pt_map: &HashMap<EdgeId, usize>) -> GeneralVertexId {
+    fn id(
+        &self,
+        mesh: &SurfaceMesh<std::alloc::Global>,
+        ef_clip_pt_map: &HashMap<EdgeId, usize>,
+    ) -> GeneralVertexId {
         match self {
             ZeroVert::Intersection((_, eid)) => GeneralVertexId::Index(ef_clip_pt_map[eid]),
             ZeroVert::Start(he) => GeneralVertexId::Vertex(mesh.he_from(*he)),
@@ -1602,7 +1606,7 @@ impl SplitFaceResult {
     #[inline]
     fn start(
         &self,
-        mesh: &SurfaceMesh,
+        mesh: &SurfaceMesh<std::alloc::Global>,
         ef_clip_pt_map: &HashMap<EdgeId, usize>,
     ) -> GeneralVertexId {
         match self {
@@ -1615,7 +1619,11 @@ impl SplitFaceResult {
     }
 
     #[inline]
-    fn end(&self, mesh: &SurfaceMesh, ef_clip_pt_map: &HashMap<EdgeId, usize>) -> GeneralVertexId {
+    fn end(
+        &self,
+        mesh: &SurfaceMesh<std::alloc::Global>,
+        ef_clip_pt_map: &HashMap<EdgeId, usize>,
+    ) -> GeneralVertexId {
         match self {
             SplitFaceResult::TwoVerts([_, vb]) => vb.id(mesh, ef_clip_pt_map),
             SplitFaceResult::ZeroHalfedges(halfedges) => {
@@ -1627,7 +1635,7 @@ impl SplitFaceResult {
 }
 
 fn split_face_verts(
-    mesh: &SurfaceMesh,
+    mesh: &SurfaceMesh<std::alloc::Global>,
     fid: FaceId,
     vert_orientations: &HashMap<VertexId, Orientation>,
     face_ori_correct: bool,
@@ -1732,7 +1740,7 @@ fn split_face_verts(
 }
 
 fn make_loop(
-    mesh: &SurfaceMesh,
+    mesh: &SurfaceMesh<std::alloc::Global>,
     halfedges: Vec<SplitFaceResult>,
     ef_clip_pt_map: &HashMap<EdgeId, usize>,
 ) -> Vec<SplitFaceResult> {
@@ -1903,7 +1911,7 @@ fn find_uncoplanar_verts<A: Allocator + Copy>(
     vertex_data: &[BSPVertexData],
     points: &[Point3D],
     faces: &[FaceId],
-    mesh: &SurfaceMesh,
+    mesh: &SurfaceMesh<std::alloc::Global>,
     bump: A,
 ) -> VertexId {
     let pa = &points[tri[0]];

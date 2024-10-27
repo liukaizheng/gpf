@@ -15,7 +15,7 @@ macro_rules! element_id {
             }
         }
 
-        impl<T> Index<$name> for Vec<T> {
+        impl<T, A: Allocator + Copy> Index<$name> for Vec<T, A> {
             type Output = T;
             #[inline(always)]
             fn index(&self, index: $name) -> &Self::Output {
@@ -23,7 +23,7 @@ macro_rules! element_id {
             }
         }
 
-        impl<T> IndexMut<$name> for Vec<T> {
+        impl<T, A: Allocator + Copy> IndexMut<$name> for Vec<T, A> {
             #[inline(always)]
             fn index_mut(&mut self, index: $name) -> &mut Self::Output {
                 &mut self[index.0]

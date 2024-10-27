@@ -1,16 +1,18 @@
+use std::alloc::Allocator;
+
 use hashbrown::HashMap;
 use itertools::Itertools;
 
 use super::{mesh_core_data::MeshCoreData, EdgeId, ElementId, FaceId, HalfedgeId, Mesh, VertexId};
 
-pub struct ManifoldMesh {
-    core_data: MeshCoreData,
+pub struct ManifoldMesh<A: Allocator + Copy> {
+    core_data: MeshCoreData<A>,
 
-    he_face_arr: Vec<FaceId>,
+    he_face_arr: Vec<FaceId, A>,
 }
 
-impl ManifoldMesh {
-    pub fn new<U, T>(polygons: T) -> Self
+impl<A: Allocator + Copy> ManifoldMesh<A> {
+    pub fn new<U, T>(polygons: T, alloc: A) -> Self
     where
         U: AsRef<[usize]>,
         T: Iterator<Item = U> + Clone,
@@ -22,10 +24,10 @@ impl ManifoldMesh {
             n_faces += 1;
         }
         n_vertices += 1;
-        let core_data = MeshCoreData::new(n_vertices, n_faces);
+        let core_data = MeshCoreData::new(n_vertices, n_faces, alloc);
         let mut mesh = Self {
             core_data,
-            he_face_arr: Vec::new(),
+            he_face_arr: Vec::new_in(alloc),
         };
 
         let mut edge_map = HashMap::<(usize, usize), HalfedgeId>::new();
@@ -279,15 +281,40 @@ impl ManifoldMesh {
     }
 }
 
-impl Mesh for ManifoldMesh {
+impl<A: Allocator + Copy> Mesh for ManifoldMesh<A> {
     #[inline(always)]
     fn use_implicit_twin(&self) -> bool {
         true
     }
 
     #[inline(always)]
-    fn core_data(&self) -> &MeshCoreData {
-        &self.core_data
+    fn n_vertices(&self) -> usize {
+        self.core_data.n_vertices
+    }
+
+    #[inline(always)]
+    fn n_halfedges(&self) -> usize {
+        self.core_data.n_halfedges
+    }
+
+    #[inline(always)]
+    fn n_faces(&self) -> usize {
+        self.core_data.n_faces
+    }
+
+    #[inline(always)]
+    fn n_vertices_capacity(&self) -> usize {
+        self.core_data.n_vertices_capacity()
+    }
+
+    #[inline(always)]
+    fn n_halfedges_capacity(&self) -> usize {
+        self.core_data.n_halfedges_capacity()
+    }
+
+    #[inline(always)]
+    fn n_faces_capacity(&self) -> usize {
+        self.core_data.n_faces_capacity()
     }
 
     #[inline(always)]
@@ -304,6 +331,18 @@ impl Mesh for ManifoldMesh {
     fn e_is_valid(&self, eid: EdgeId) -> bool {
         let idx = eid.0 << 1;
         self.he_is_valid(idx.into()) || self.he_is_valid((idx + 1).into())
+    }
+
+    /// the halfedge starting from this vertex
+    #[inline(always)]
+    fn v_halfedge(&self, vid: VertexId) -> HalfedgeId {
+        self.core_data.v_halfedge_arr[vid]
+    }
+
+    /// the start vertex of the halfedge
+    #[inline(always)]
+    fn he_to(&self, hid: HalfedgeId) -> VertexId {
+        self.core_data.he_vertex_arr[hid]
     }
 
     #[inline(always)]
@@ -331,13 +370,31 @@ impl Mesh for ManifoldMesh {
         (hid.0 >> 1).into()
     }
 
+    /// the next halfedge of the halfedge
+    #[inline(always)]
+    fn he_next(&self, hid: HalfedgeId) -> HalfedgeId {
+        self.core_data.he_next_arr[hid]
+    }
+
+    /// the previous halfedge of the halfedge
+    fn he_prev(&self, hid: HalfedgeId) -> HalfedgeId {
+        self.core_data.he_prev_arr[hid]
+    }
+
     #[inline(always)]
     fn e_halfedge(&self, eid: EdgeId) -> HalfedgeId {
         (eid.0 << 1).into()
     }
+
+    #[inline(always)]
+    fn f_halfedge(&self, fid: FaceId) -> HalfedgeId {
+        self.core_data.f_halfedge_arr[fid]
+    }
 }
 
-pub fn validate_mesh_connectivity(mesh: &ManifoldMesh) -> Result<(), String> {
+pub fn validate_mesh_connectivity<A: Allocator + Copy>(
+    mesh: &ManifoldMesh<A>,
+) -> Result<(), String> {
     let validate_vertex = |vid: VertexId, msg: &str| {
         if vid.0 > mesh.n_vertices_capacity() || !mesh.v_is_valid(vid) {
             Err(format!("{} bad vertex reference: {}", msg, vid.0))

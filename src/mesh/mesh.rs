@@ -1,44 +1,24 @@
 use super::element::{
-    Edge, EdgeId, EdgeIter, ElementId, ElementIndex, Face, FaceId, FaceIter, Halfedge, HalfedgeId,
-    HalfedgeIter, Vertex, VertexId, VertexIter,
+    Edge, EdgeId, EdgeIter, ElementId, Face, FaceId, FaceIter, Halfedge, HalfedgeId, HalfedgeIter,
+    Vertex, VertexId, VertexIter,
 };
-use super::mesh_core_data::MeshCoreData;
 
 pub trait Mesh: Sized {
-    fn core_data(&self) -> &MeshCoreData;
+    fn n_vertices(&self) -> usize;
 
-    #[inline(always)]
-    fn n_vertices(&self) -> usize {
-        self.core_data().n_vertices
-    }
+    fn n_halfedges(&self) -> usize;
 
-    #[inline(always)]
-    fn n_halfedges(&self) -> usize {
-        self.core_data().n_halfedges
-    }
     fn n_edges(&self) -> usize;
 
-    fn n_faces(&self) -> usize {
-        self.core_data().n_faces
-    }
-    // fn n_boundary_loops(&self) -> usize;
+    fn n_faces(&self) -> usize;
 
-    #[inline(always)]
-    fn n_vertices_capacity(&self) -> usize {
-        self.core_data().v_halfedge_arr.len()
-    }
+    fn n_vertices_capacity(&self) -> usize;
 
-    #[inline(always)]
-    fn n_halfedges_capacity(&self) -> usize {
-        self.core_data().he_next_arr.len()
-    }
+    fn n_halfedges_capacity(&self) -> usize;
 
     fn n_edges_capacity(&self) -> usize;
 
-    #[inline(always)]
-    fn n_faces_capacity(&self) -> usize {
-        self.core_data().f_halfedge_arr.len()
-    }
+    fn n_faces_capacity(&self) -> usize;
 
     #[inline(always)]
     fn v_is_valid(&self, vid: VertexId) -> bool {
@@ -98,30 +78,19 @@ pub trait Mesh: Sized {
     }
 
     /// the halfedge starting from this vertex
-    #[inline(always)]
-    fn v_halfedge(&self, vid: VertexId) -> HalfedgeId {
-        self.core_data().v_halfedge_arr[vid.index()]
-    }
+    fn v_halfedge(&self, vid: VertexId) -> HalfedgeId;
 
     /// the start vertex of the halfedge
-    #[inline(always)]
-    fn he_to(&self, hid: HalfedgeId) -> VertexId {
-        self.core_data().he_vertex_arr[hid]
-    }
+    fn he_to(&self, hid: HalfedgeId) -> VertexId;
 
     /// the end vertex of the halfedge
     fn he_from(&self, hid: HalfedgeId) -> VertexId;
 
     /// the next halfedge of the halfedge
-    #[inline(always)]
-    fn he_next(&self, hid: HalfedgeId) -> HalfedgeId {
-        self.core_data().he_next_arr[hid.index()]
-    }
+    fn he_next(&self, hid: HalfedgeId) -> HalfedgeId;
 
     /// the previous halfedge of the halfedge
-    fn he_prev(&self, hid: HalfedgeId) -> HalfedgeId {
-        self.core_data().he_prev_arr[hid.index()]
-    }
+    fn he_prev(&self, hid: HalfedgeId) -> HalfedgeId;
 
     /// the twin halfedge of the halfedge
     fn he_twin(&self, hid: HalfedgeId) -> HalfedgeId;
@@ -148,10 +117,7 @@ pub trait Mesh: Sized {
     }
 
     /// the first halfedge of the face
-    #[inline(always)]
-    fn f_halfedge(&self, fid: FaceId) -> HalfedgeId {
-        self.core_data().f_halfedge_arr[fid.index()]
-    }
+    fn f_halfedge(&self, fid: FaceId) -> HalfedgeId;
 
     /// the halfedge in the face that starts from the vertex
     fn fv_halfedge(&self, fid: FaceId, vid: VertexId) -> HalfedgeId {

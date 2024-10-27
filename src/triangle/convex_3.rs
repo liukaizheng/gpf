@@ -123,7 +123,7 @@ fn hull_3<A: Allocator + Copy>(
     start: usize,
     mut triangles: Vec<usize, A>,
     alloc: A,
-) -> ManifoldMesh {
+) -> ManifoldMesh<A> {
     let is_neg = {
         let pa = point(points, triangles[0]);
         let pb = point(points, triangles[1]);
@@ -135,7 +135,7 @@ fn hull_3<A: Allocator + Copy>(
     if is_neg {
         triangles.reverse();
     }
-    let mut mesh = ManifoldMesh::new(triangles.chunks(3));
+    let mut mesh = ManifoldMesh::new(triangles.chunks(3), alloc);
     mesh.new_vertices(points.len() / 3 - mesh.n_vertices_capacity());
 
     let mut first_bot_hid = (mesh.n_halfedges_capacity() - 1).into();
@@ -243,7 +243,11 @@ fn hull_3<A: Allocator + Copy>(
     mesh
 }
 
-fn close_hull(mesh: &mut ManifoldMesh, first_hid: HalfedgeId, vid: VertexId) {
+fn close_hull<A: Allocator + Copy>(
+    mesh: &mut ManifoldMesh<A>,
+    first_hid: HalfedgeId,
+    vid: VertexId,
+) {
     debug_assert!(mesh.he_is_boundary(first_hid));
     let n_old_halfedges_capacity = mesh.n_halfedges_capacity();
 

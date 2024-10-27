@@ -6,7 +6,7 @@ use crate::{
 };
 
 pub(crate) struct TetSet {
-    pub(crate) mesh: SurfaceMesh,
+    pub(crate) mesh: SurfaceMesh<std::alloc::Global>,
     pub(crate) tet_vertices: Vec<[VertexId; 4]>,
     pub(crate) tet_edges: Vec<[EdgeId; 6]>,
     pub(crate) tet_faces: Vec<[FaceId; 4]>,

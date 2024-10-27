@@ -7,20 +7,20 @@ use super::mesh_core_data::MeshCoreData;
 use hashbrown::HashMap;
 use itertools::Itertools;
 
-pub struct SurfaceMesh {
-    core_data: MeshCoreData,
+pub struct SurfaceMesh<A: Allocator + Copy> {
+    core_data: MeshCoreData<A>,
     n_edges: usize,
-    he_edge_arr: Vec<EdgeId>,
-    he_face_arr: Vec<FaceId>,
-    he_vert_in_next_arr: Vec<HalfedgeId>,
-    he_sibling_arr: Vec<HalfedgeId>,
-    e_halfedge_arr: Vec<HalfedgeId>,
+    he_edge_arr: Vec<EdgeId, A>,
+    he_face_arr: Vec<FaceId, A>,
+    he_vert_in_next_arr: Vec<HalfedgeId, A>,
+    he_sibling_arr: Vec<HalfedgeId, A>,
+    e_halfedge_arr: Vec<HalfedgeId, A>,
 
     use_implicit_twin: bool,
 }
 
-impl SurfaceMesh {
-    pub fn new<T, U>(polygons: T) -> Self
+impl<A: Allocator + Copy> SurfaceMesh<A> {
+    pub fn new<T, U>(polygons: T, alloc: A) -> Self
     where
         T: AsRef<[U]>,
         U: AsRef<[usize]>,
@@ -33,15 +33,15 @@ impl SurfaceMesh {
             .max()
             .unwrap()
             + 1;
-        let core_data = MeshCoreData::new(n_vertices, n_faces);
+        let core_data = MeshCoreData::new(n_vertices, n_faces, alloc);
         let mut mesh = Self {
             core_data,
             n_edges: 0,
-            he_edge_arr: Vec::new(),
-            he_face_arr: Vec::new(),
-            he_vert_in_next_arr: Vec::new(),
-            he_sibling_arr: Vec::new(),
-            e_halfedge_arr: Vec::new(),
+            he_edge_arr: Vec::new_in(alloc),
+            he_face_arr: Vec::new_in(alloc),
+            he_vert_in_next_arr: Vec::new_in(alloc),
+            he_sibling_arr: Vec::new_in(alloc),
+            e_halfedge_arr: Vec::new_in(alloc),
             use_implicit_twin: false,
         };
 
@@ -212,8 +212,8 @@ impl SurfaceMesh {
         fid
     }
 
-    pub fn split_edge<A: Allocator + Copy>(&mut self, eid: EdgeId, bump: A) -> VertexId {
-        let mut e_halfedges = Vec::new_in(bump);
+    pub fn split_edge<A1: Allocator + Copy>(&mut self, eid: EdgeId, alloc: A1) -> VertexId {
+        let mut e_halfedges = Vec::new_in(alloc);
         e_halfedges.extend(self.edge(eid).halfedges().map(|he| *he));
         let vb = self.he_to(e_halfedges[0]);
         let new_v = self.new_vertices(1);
@@ -222,8 +222,8 @@ impl SurfaceMesh {
 
         self.core_data.v_halfedge_arr[new_v] = e_halfedges[0];
 
-        let mut old_e_halfedges = Vec::with_capacity_in(e_halfedges.len(), bump);
-        let mut new_e_halfedges = Vec::with_capacity_in(e_halfedges.len(), bump);
+        let mut old_e_halfedges = Vec::with_capacity_in(e_halfedges.len(), alloc);
+        let mut new_e_halfedges = Vec::with_capacity_in(e_halfedges.len(), alloc);
         for (&old_hid, idx) in e_halfedges
             .iter()
             .zip(first_new_he.0..self.n_halfedges_capacity())
@@ -394,15 +394,40 @@ fn insert_halfedge(next_arr: &mut [HalfedgeId], start: HalfedgeId, new_he: Halfe
     next_arr[new_he] = nnext;
 }
 
-impl Mesh for SurfaceMesh {
+impl<A: Allocator + Copy> Mesh for SurfaceMesh<A> {
     #[inline(always)]
     fn use_implicit_twin(&self) -> bool {
         self.use_implicit_twin
     }
 
     #[inline(always)]
-    fn core_data(&self) -> &MeshCoreData {
-        &self.core_data
+    fn n_vertices(&self) -> usize {
+        self.core_data.n_vertices
+    }
+
+    #[inline(always)]
+    fn n_halfedges(&self) -> usize {
+        self.core_data.n_halfedges
+    }
+
+    #[inline(always)]
+    fn n_faces(&self) -> usize {
+        self.core_data.n_faces
+    }
+
+    #[inline(always)]
+    fn n_vertices_capacity(&self) -> usize {
+        self.core_data.n_vertices_capacity()
+    }
+
+    #[inline(always)]
+    fn n_halfedges_capacity(&self) -> usize {
+        self.core_data.n_halfedges_capacity()
+    }
+
+    #[inline(always)]
+    fn n_faces_capacity(&self) -> usize {
+        self.core_data.n_faces_capacity()
     }
 
     #[inline(always)]
@@ -459,5 +484,30 @@ impl Mesh for SurfaceMesh {
     #[inline(always)]
     fn e_halfedge(&self, eid: EdgeId) -> HalfedgeId {
         self.e_halfedge_arr[eid]
+    }
+
+    #[inline(always)]
+    fn v_halfedge(&self, vid: VertexId) -> HalfedgeId {
+        self.core_data.v_halfedge_arr[vid]
+    }
+
+    #[inline(always)]
+    fn he_to(&self, hid: HalfedgeId) -> VertexId {
+        self.core_data.he_vertex_arr[hid]
+    }
+
+    #[inline(always)]
+    fn he_next(&self, hid: HalfedgeId) -> HalfedgeId {
+        self.core_data.he_next_arr[hid]
+    }
+
+    #[inline(always)]
+    fn he_prev(&self, hid: HalfedgeId) -> HalfedgeId {
+        self.core_data.he_prev_arr[hid]
+    }
+
+    #[inline(always)]
+    fn f_halfedge(&self, fid: FaceId) -> HalfedgeId {
+        self.core_data.f_halfedge_arr[fid]
     }
 }

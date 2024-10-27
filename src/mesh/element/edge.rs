@@ -3,6 +3,8 @@ use std::ops::{Deref, DerefMut, Index, IndexMut};
 use super::{iter_next, Element, ElementId, ElementIndex, Halfedge, HalfedgeId};
 use crate::{element_id, mesh::Mesh, INVALID_IND};
 
+use std::alloc::Allocator;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EdgeId(pub usize);
 

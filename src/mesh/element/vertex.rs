@@ -4,6 +4,8 @@ use super::{iter_next, Edge, Element, ElementId, ElementIndex, Halfedge, Halfedg
 use crate::element_id;
 use crate::mesh::Mesh;
 
+use std::alloc::Allocator;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VertexId(pub usize);
 

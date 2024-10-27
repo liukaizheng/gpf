@@ -1,29 +1,51 @@
+use std::alloc::Allocator;
+
 use super::element::{HalfedgeId, VertexId};
 
-pub struct MeshCoreData {
-    pub(crate) v_halfedge_arr: Vec<HalfedgeId>,
-    pub(crate) he_prev_arr: Vec<HalfedgeId>,
-    pub(crate) he_next_arr: Vec<HalfedgeId>,
-    pub(crate) he_vertex_arr: Vec<VertexId>,
-    pub(crate) f_halfedge_arr: Vec<HalfedgeId>,
+pub struct MeshCoreData<A: Allocator + Copy> {
+    pub(crate) v_halfedge_arr: Vec<HalfedgeId, A>,
+    pub(crate) he_prev_arr: Vec<HalfedgeId, A>,
+    pub(crate) he_next_arr: Vec<HalfedgeId, A>,
+    pub(crate) he_vertex_arr: Vec<VertexId, A>,
+    pub(crate) f_halfedge_arr: Vec<HalfedgeId, A>,
 
     pub(crate) n_vertices: usize,
     pub(crate) n_halfedges: usize,
     pub(crate) n_faces: usize,
 }
 
-impl MeshCoreData {
-    pub(crate) fn new(n_vertices: usize, n_faces: usize) -> Self {
+impl<A: Allocator + Copy> MeshCoreData<A> {
+    pub(crate) fn new(n_vertices: usize, n_faces: usize, alloc: A) -> Self {
+        let mut v_halfedge_arr = Vec::with_capacity_in(n_vertices, alloc);
+        v_halfedge_arr.resize(n_vertices, HalfedgeId::default());
+        let mut f_halfedge_arr = Vec::with_capacity_in(n_faces, alloc);
+        f_halfedge_arr.resize(n_faces, HalfedgeId::default());
+
         Self {
-            v_halfedge_arr: vec![HalfedgeId::default(); n_vertices],
-            he_prev_arr: Vec::new(),
-            he_next_arr: Vec::new(),
-            he_vertex_arr: Vec::new(),
-            f_halfedge_arr: vec![HalfedgeId::default(); n_faces],
+            v_halfedge_arr,
+            he_prev_arr: Vec::new_in(alloc),
+            he_next_arr: Vec::new_in(alloc),
+            he_vertex_arr: Vec::new_in(alloc),
+            f_halfedge_arr,
             n_vertices,
             n_halfedges: 0,
             n_faces,
         }
+    }
+
+    #[inline]
+    pub(crate) fn n_vertices_capacity(&self) -> usize {
+        self.v_halfedge_arr.len()
+    }
+
+    #[inline]
+    pub(crate) fn n_halfedges_capacity(&self) -> usize {
+        self.he_vertex_arr.len()
+    }
+
+    #[inline]
+    pub(crate) fn n_faces_capacity(&self) -> usize {
+        self.f_halfedge_arr.len()
     }
 
     #[inline]

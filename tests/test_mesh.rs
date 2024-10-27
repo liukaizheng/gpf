@@ -1,6 +1,9 @@
+#![feature(allocator_api)]
+use std::alloc::Allocator;
+
 use gpf::mesh::{EdgeId, FaceId, HalfedgeId, ManifoldMesh, Mesh, SurfaceMesh, VertexId};
 
-fn validate_mesh_connectivity(mesh: &SurfaceMesh) -> Result<(), String> {
+fn validate_mesh_connectivity<A: Allocator + Copy>(mesh: &SurfaceMesh<A>) -> Result<(), String> {
     let validate_vertex = |vid: VertexId, msg: &str| {
         if vid.0 > mesh.n_vertices_capacity() || !mesh.v_is_valid(vid) {
             Err(format!("{} bad vertex reference: {}", msg, vid.0))
@@ -157,14 +160,17 @@ fn validate_mesh_connectivity(mesh: &SurfaceMesh) -> Result<(), String> {
 
 #[test]
 fn build_nomanifold_mesh() {
-    let mesh = SurfaceMesh::new(vec![
-        vec![0, 1, 2],
-        vec![0, 2, 3],
-        vec![0, 3, 1],
-        vec![0, 4, 5],
-        vec![0, 5, 6],
-        vec![0, 6, 4],
-    ]);
+    let mesh = SurfaceMesh::new(
+        vec![
+            vec![0, 1, 2],
+            vec![0, 2, 3],
+            vec![0, 3, 1],
+            vec![0, 4, 5],
+            vec![0, 5, 6],
+            vec![0, 6, 4],
+        ],
+        std::alloc::Global,
+    );
 
     let base_vertices = vec![1, 2, 3, 4, 5, 6];
 
@@ -200,12 +206,10 @@ fn build_nomanifold_mesh() {
 fn split_edge_and_face() {
     use bumpalo::collections::Vec;
     let bump = bumpalo::Bump::new();
-    let mut mesh = SurfaceMesh::new(vec![
-        vec![0, 1, 2],
-        vec![0, 1, 3],
-        vec![0, 1, 4],
-        vec![0, 1, 5],
-    ]);
+    let mut mesh = SurfaceMesh::new(
+        vec![vec![0, 1, 2], vec![0, 1, 3], vec![0, 1, 4], vec![0, 1, 5]],
+        &bump,
+    );
     // split edge
     {
         mesh.split_edge(1.into(), &bump);
@@ -249,7 +253,7 @@ fn split_edge_and_face() {
 #[test]
 fn test_manifold_mesh() {
     let triangles = vec![0, 1, 2, 0, 2, 3, 0, 3, 4];
-    let mesh = ManifoldMesh::new(triangles.chunks(3));
+    let mesh = ManifoldMesh::new(triangles.chunks(3), std::alloc::Global);
     let base_vertices = [1, 2, 3, 4];
     {
         let mut neighbor_veritices =

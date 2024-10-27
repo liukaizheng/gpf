@@ -1,10 +1,7 @@
 mod adaptive_subdivide;
 mod tet_set;
 
-use std::{
-    alloc::Allocator,
-    collections::{HashMap, HashSet},
-};
+use std::collections::{HashMap, HashSet};
 
 use adaptive_subdivide::adaptive_subdivide;
 use itertools::Itertools;
@@ -12,8 +9,8 @@ use tet_set::TetSet;
 
 use crate::{
     geometry::{BBox, Surf},
-    mesh::{square_edge_length, EdgeId, FaceId, Mesh, SurfaceMesh, VertexId},
-    point, INVALID_IND,
+    mesh::{square_edge_length, EdgeId, FaceId, Mesh, SurfaceMesh},
+    INVALID_IND,
 };
 
 pub struct SimpleBody {
@@ -43,6 +40,8 @@ pub fn boolean3d(first: &SimpleBody, second: &SimpleBody, t: BooleanType, eps: f
     bbox.merge(&first.bbox);
     bbox.merge(&second.bbox);
     bbox.scale(1.1);
+    // bbox.min = [-2.0, -2.0, -2.0];
+    // bbox.max = [2.0, 2.0, 2.0];
     let mut tets = init_mesh(bbox);
     adaptive_subdivide(&mut tets, surfaces, eps * eps);
 
@@ -92,7 +91,7 @@ fn init_mesh(bbox: BBox) -> TetSet {
         tet_faces.push(tet);
     }
 
-    let mesh = SurfaceMesh::new(triangles);
+    let mesh = SurfaceMesh::new(triangles, std::alloc::Global);
 
     tet_edges.extend(tet_faces.iter().map(|faces| {
         let mut set = HashSet::with_capacity(6);

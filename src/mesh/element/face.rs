@@ -3,6 +3,8 @@ use std::ops::{Deref, DerefMut, Index, IndexMut};
 use super::{iter_next, Element, ElementId, ElementIndex, Halfedge, HalfedgeId, Vertex};
 use crate::{element_id, mesh::Mesh, INVALID_IND};
 
+use std::alloc::Allocator;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FaceId(pub usize);
 
