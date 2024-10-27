@@ -1,5 +1,5 @@
 use core::panic;
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::BinaryHeap;
 
 use hashbrown::HashSet;
 
@@ -9,7 +9,7 @@ use itertools::Itertools;
 use crate::{
     geometry::{Surf, Surface},
     math::{cross, cross_in, dot, square_norm, sub_short},
-    mesh::EdgeId,
+    mesh::{EdgeId, Mesh},
     point, point_2,
     triangle::{convex_2, convex_3},
 };
@@ -49,18 +49,19 @@ impl Ord for EdgeAndLen {
 
 struct SubdivisionData<'a> {
     surfaces: Vec<&'a Surf>,
-    vals_and_grads: Vec<HashMap<usize, [f64; 4]>>,
+    vals_and_grads: Vec<Vec<[f64; 4]>>,
     active_surfs: Vec<Vec<usize>>,
     queue: BinaryHeap<EdgeAndLen>,
 }
 
 pub(super) fn adaptive_subdivide(tets: &mut TetSet, surfaces: Vec<&Surf>, sq_eps: f64) {
     let mut check_bump = Bump::new();
-    let mut vals_and_grads = vec![HashMap::<usize, [f64; 4]>::new(); surfaces.len()];
+
+    let mut vals_and_grads = vec![Vec::with_capacity(tets.mesh.n_vertices()); surfaces.len()];
     // TODO: parallelize by rayon
-    for (i, &surf) in surfaces.iter().enumerate() {
-        for (vid, p) in tets.points.chunks(3).enumerate() {
-            vals_and_grads[i].insert(vid, surf.eval(p));
+    for p in tets.points.chunks(3) {
+        for (i, &surf) in surfaces.iter().enumerate() {
+            vals_and_grads[i].push(surf.eval(p));
         }
     }
     let active_surfs = (0..tets.tet_faces.len())
@@ -87,16 +88,18 @@ pub(super) fn adaptive_subdivide(tets: &mut TetSet, surfaces: Vec<&Surf>, sq_eps
         }
         split_bump.reset();
         let (new_vert, tet_pairs) = tets.split_edge(eid, &split_bump);
+        for vals_grads in &mut data.vals_and_grads {
+            vals_grads.push([f64::NAN; 4]);
+        }
+
+        let p = point(&tets.points, new_vert.0);
         for &[old_tet, _] in &tet_pairs {
             for &sid in &data.active_surfs[old_tet] {
                 let vals_grads = &mut data.vals_and_grads[sid];
-                if vals_grads.contains_key(&new_vert) {
+                if !vals_grads[new_vert.0][0].is_nan() {
                     continue;
                 }
-                vals_grads.insert(
-                    new_vert.0,
-                    data.surfaces[sid].eval(point(&tets.points, new_vert.0)),
-                );
+                vals_grads[new_vert] = data.surfaces[sid].eval(p);
             }
             data.active_surfs.push(data.active_surfs[old_tet].clone());
         }
@@ -106,6 +109,29 @@ pub(super) fn adaptive_subdivide(tets: &mut TetSet, surfaces: Vec<&Surf>, sq_eps
         }
     }
     println!("n tets: {}", tets.tet_faces.len());
+    let mut n_zero = 0;
+    let mut n_ones = 0;
+    let mut n_twos = 0;
+    let mut n_three = 0;
+    let mut n_more = 0;
+    for v in &data.active_surfs {
+        if v.is_empty() {
+            n_zero += 1;
+        } else if v.len() == 1 {
+            n_ones += 1;
+        } else if v.len() == 2 {
+            n_twos += 1;
+        } else if v.len() == 3 {
+            n_three += 1;
+        } else {
+            n_more += 1;
+        }
+    }
+    println!("zero: {}", n_zero);
+    println!("one: {}", n_ones);
+    println!("two: {}", n_twos);
+    println!("three: {}", n_three);
+    println!("more: {}", n_more);
 }
 
 fn push_longest_edge(
@@ -187,7 +213,7 @@ fn subdividable(
     let mut val_diff_vec = Vec::with_capacity_in(surfs.len(), bump);
     for (i, &sid) /*surface id*/ in surfs.iter().enumerate() {
         let tet_vals_grads = BVec::from_iter_in(
-            verts.iter().map(|&vid| data.vals_and_grads[sid].get(&vid.0).unwrap()), bump);
+            verts.iter().map(|&vid| &data.vals_and_grads[sid][vid.0]), bump);
         let mut vals = Vec::with_capacity_in(20, bump);
 
         vals.extend(tet_vals_grads.iter().map(|vals_grads| vals_grads[0]));
