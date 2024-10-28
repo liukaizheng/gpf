@@ -1,3 +1,4 @@
+mod det4;
 mod expansion_number;
 mod generic_point;
 mod interval_number;
@@ -17,6 +18,7 @@ pub use interval_number::*;
 pub use less_than::*;
 pub use orient2d::*;
 pub use predicates::*;
+pub use det4::*;
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
 pub enum Orientation {

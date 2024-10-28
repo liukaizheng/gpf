@@ -58,7 +58,7 @@ pub(super) fn adaptive_subdivide(
     tets: &mut TetSet,
     surfaces: Vec<&Surf>,
     sq_eps: f64,
-) -> Vec<Vec<f64>> {
+) -> (Vec<Vec<f64>>, Vec<Vec<usize>>) {
     let mut vals_and_grads = vec![Vec::with_capacity(tets.mesh.n_vertices()); surfaces.len()];
     // TODO: parallelize by rayon
     for p in tets.points.chunks(3) {
@@ -77,7 +77,7 @@ pub(super) fn adaptive_subdivide(
     };
 
     adaptive_subdivide_impl(tets, &mut data, sq_eps);
-    round_vert_vals(tets, &data)
+    (round_vert_vals(tets, &data), data.active_surfs)
 }
 
 fn adaptive_subdivide_impl(tets: &mut TetSet, data: &mut SubdivisionData, sq_eps: f64) {
