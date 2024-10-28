@@ -1,6 +1,6 @@
 use std::alloc::Allocator;
 
-use super::element::{HalfedgeId, VertexId};
+use super::{clone_vec_in, element::{HalfedgeId, VertexId}};
 
 pub struct MeshCoreData<A: Allocator + Copy> {
     pub(crate) v_halfedge_arr: Vec<HalfedgeId, A>,
@@ -30,6 +30,19 @@ impl<A: Allocator + Copy> MeshCoreData<A> {
             n_vertices,
             n_halfedges: 0,
             n_faces,
+        }
+    }
+
+    pub(crate) fn clone_in<A1: Allocator + Copy>(&self, alloc: A1) -> MeshCoreData<A1> {
+        MeshCoreData {
+            v_halfedge_arr: clone_vec_in(&self.v_halfedge_arr, alloc),
+            he_prev_arr: clone_vec_in(&self.he_prev_arr, alloc),
+            he_next_arr: clone_vec_in(&self.he_next_arr, alloc),
+            he_vertex_arr: clone_vec_in(&self.he_vertex_arr, alloc),
+            f_halfedge_arr: clone_vec_in(&self.f_halfedge_arr, alloc),
+            n_vertices: self.n_vertices,
+            n_halfedges: self.n_halfedges,
+            n_faces: self.n_faces,
         }
     }
 

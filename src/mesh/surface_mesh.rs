@@ -2,6 +2,7 @@ use std::alloc::Allocator;
 
 use crate::mesh::Mesh;
 
+use super::clone_vec_in;
 use super::element::{EdgeId, ElementId, FaceId, HalfedgeId, VertexId};
 use super::mesh_core_data::MeshCoreData;
 use hashbrown::HashMap;
@@ -128,6 +129,20 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
             }
         }
         mesh
+    }
+
+    #[inline]
+    pub fn clone_in<A1: Allocator + Copy>(&self, alloc: A1) -> SurfaceMesh<A1> {
+        SurfaceMesh {
+            core_data: self.core_data.clone_in(alloc),
+            n_edges: self.n_edges,
+            he_edge_arr: clone_vec_in(&self.he_edge_arr, alloc),
+            he_face_arr: clone_vec_in(&self.he_face_arr, alloc),
+            he_vert_in_next_arr: clone_vec_in(&self.he_vert_in_next_arr, alloc),
+            he_sibling_arr: clone_vec_in(&self.he_sibling_arr, alloc),
+            e_halfedge_arr: clone_vec_in(&self.e_halfedge_arr, alloc),
+            use_implicit_twin: self.use_implicit_twin,
+        }
     }
 
     #[inline]

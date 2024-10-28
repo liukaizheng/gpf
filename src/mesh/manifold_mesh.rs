@@ -3,7 +3,10 @@ use std::alloc::Allocator;
 use hashbrown::HashMap;
 use itertools::Itertools;
 
-use super::{mesh_core_data::MeshCoreData, EdgeId, ElementId, FaceId, HalfedgeId, Mesh, VertexId};
+use super::{
+    clone_vec_in, mesh_core_data::MeshCoreData, EdgeId, ElementId, FaceId, HalfedgeId, Mesh,
+    VertexId,
+};
 
 pub struct ManifoldMesh<A: Allocator + Copy> {
     core_data: MeshCoreData<A>,
@@ -99,6 +102,14 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
             }
         }
         mesh
+    }
+
+    #[inline(always)]
+    pub fn clone_in<A1: Allocator + Copy>(&self, alloc: A1) -> ManifoldMesh<A1> {
+        ManifoldMesh {
+            core_data: self.core_data.clone_in(alloc),
+            he_face_arr: clone_vec_in(&self.he_face_arr, alloc),
+        }
     }
 
     pub fn new_face_by_halfedges(&mut self, halfedges: &[HalfedgeId]) -> FaceId {
