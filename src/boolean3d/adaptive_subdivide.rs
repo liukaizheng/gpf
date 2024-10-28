@@ -54,9 +54,11 @@ struct SubdivisionData<'a> {
     queue: BinaryHeap<EdgeAndLen>,
 }
 
-pub(super) fn adaptive_subdivide(tets: &mut TetSet, surfaces: Vec<&Surf>, sq_eps: f64) {
-    let mut check_bump = Bump::new();
-
+pub(super) fn adaptive_subdivide(
+    tets: &mut TetSet,
+    surfaces: Vec<&Surf>,
+    sq_eps: f64,
+) -> Vec<Vec<f64>> {
     let mut vals_and_grads = vec![Vec::with_capacity(tets.mesh.n_vertices()); surfaces.len()];
     // TODO: parallelize by rayon
     for p in tets.points.chunks(3) {
@@ -74,9 +76,15 @@ pub(super) fn adaptive_subdivide(tets: &mut TetSet, surfaces: Vec<&Surf>, sq_eps
         queue: BinaryHeap::new(),
     };
 
+    adaptive_subdivide_impl(tets, &mut data, sq_eps);
+    round_vert_vals(tets, &data)
+}
+
+fn adaptive_subdivide_impl(tets: &mut TetSet, data: &mut SubdivisionData, sq_eps: f64) {
+    let mut check_bump = Bump::new();
     for tid in 0..tets.tet_faces.len() {
         check_bump.reset();
-        push_longest_edge(tid, tets, &mut data, sq_eps, &check_bump);
+        push_longest_edge(tid, tets, data, sq_eps, &check_bump);
     }
 
     let mut split_bump = Bump::new();
@@ -105,33 +113,9 @@ pub(super) fn adaptive_subdivide(tets: &mut TetSet, surfaces: Vec<&Surf>, sq_eps
         }
         for tid in tet_pairs.into_iter().flatten() {
             check_bump.reset();
-            push_longest_edge(tid, tets, &mut data, sq_eps, &check_bump);
+            push_longest_edge(tid, tets, data, sq_eps, &check_bump);
         }
     }
-    println!("n tets: {}", tets.tet_faces.len());
-    let mut n_zero = 0;
-    let mut n_ones = 0;
-    let mut n_twos = 0;
-    let mut n_three = 0;
-    let mut n_more = 0;
-    for v in &data.active_surfs {
-        if v.is_empty() {
-            n_zero += 1;
-        } else if v.len() == 1 {
-            n_ones += 1;
-        } else if v.len() == 2 {
-            n_twos += 1;
-        } else if v.len() == 3 {
-            n_three += 1;
-        } else {
-            n_more += 1;
-        }
-    }
-    println!("zero: {}", n_zero);
-    println!("one: {}", n_ones);
-    println!("two: {}", n_twos);
-    println!("three: {}", n_three);
-    println!("more: {}", n_more);
 }
 
 fn push_longest_edge(
@@ -509,4 +493,26 @@ fn test_distance_3(
         .unwrap();
 
     return r2 * sq_det_v > det_w * det_w * sq_eps;
+}
+
+fn round_vert_vals(tets: &TetSet, data: &SubdivisionData) -> Vec<Vec<f64>> {
+    let mut vals = vec![vec![f64::NAN; tets.mesh.n_vertices_capacity()]; data.surfaces.len()];
+    const EPS: f64 = 0.0009765625; // 2^(-10)
+    for (tid, verts) in tets.tet_vertices.iter().enumerate() {
+        let surfs = &data.active_surfs[tid];
+        if surfs.is_empty() {
+            continue;
+        }
+
+        for &sid in surfs {
+            for &vid in verts {
+                if !vals[sid][vid].is_nan() {
+                    continue;
+                }
+                let v = data.vals_and_grads[sid][vid][0];
+                vals[sid][vid] = (v / EPS).round() * EPS;
+            }
+        }
+    }
+    vals
 }
