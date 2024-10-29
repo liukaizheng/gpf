@@ -10,11 +10,11 @@ use crate::{
 
 #[derive(Clone)]
 struct FaceData {
-    /// plane id    
-     pid: usize, 
+    /// plane id
+     pid: usize,
     /// `cells[0]`: inner cell of this face
     /// `cells[1]`: outer cell of this face
-    cells: [usize; 2], 
+    cells: [usize; 2],
 }
 
 pub(super) struct Arrangement<A: Allocator + Copy> {
@@ -34,18 +34,18 @@ fn orient3d<A: Allocator + Copy>(
     alloc: A,
 ) -> Orientation {
 
-    #[rustfmt::skip]    
+    #[rustfmt::skip]
     let numerator_sign = det4(
-        pa[0], pa[1], pa[2], pa[3], 
-        pb[0], pb[1], pb[2], pb[3], 
-        pc[0], pc[1], pc[2], pc[3], 
-        pd[0], pd[1], pd[2], pd[3], 
+        pa[0], pa[1], pa[2], pa[3],
+        pb[0], pb[1], pb[2], pb[3],
+        pc[0], pc[1], pc[2], pc[3],
+        pd[0], pd[1], pd[2], pd[3],
         alloc,
     );
     let denominator_sign = det4(
-        pa[0], pa[1], pa[2], pa[3], 
-        pb[0], pb[1], pb[2], pb[3], 
-        pc[0], pc[1], pc[2], pc[3], 
+        pa[0], pa[1], pa[2], pa[3],
+        pb[0], pb[1], pb[2], pb[3],
+        pc[0], pc[1], pc[2], pc[3],
         1.0  , 1.0  , 1.0  ,   1.0,
         alloc,
     );
@@ -151,7 +151,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
         self.split_cells(&vert_orientations, pid, alloc);
     }
 
-    
+
     fn split_edges<A1: Allocator + Copy>(&mut self, vert_orientations: &mut Vec<Orientation, A1>, pid: usize, alloc: A1) {
         let n_old_edges = self.mesh.n_edges_capacity();
         for eid in 0..n_old_edges {
@@ -166,12 +166,12 @@ impl<A: Allocator + Copy> Arrangement<A> {
             }
         }
     }
-    
+
     fn split_faces(&mut self, vert_orientations: &[Orientation], pid: usize) {
         let n_old_faces = self.mesh.n_faces_capacity();
-        let mut first_zero_vid = VertexId::default();
         for fid in 0..n_old_faces {
             let fid = fid.into();
+            let mut first_zero_vid = VertexId::default();
             let first_hid = self.mesh.f_halfedge(fid);
             let mut curr_hid = first_hid;
             let mut prev_ori = vert_orientations[self.mesh.he_from(curr_hid)];
@@ -181,12 +181,19 @@ impl<A: Allocator + Copy> Arrangement<A> {
             loop {
                 let vid = self.mesh.he_to(curr_hid);
                 let ori = vert_orientations[vid];
+                let next_hid = self.mesh.he_next(curr_hid);
                 if ori == Orientation::Zero {
                     if prev_ori == Orientation::Zero {
                         self.mesh.set_f_halfedge(fid, curr_hid);
                         break;
                     } else {
                         if first_zero_vid.valid() {
+                            if self.mesh.he_to(next_hid) == first_zero_vid {
+                                self.mesh.set_f_halfedge(fid, next_hid);
+                                break;
+                            } else if vid == first_zero_vid {
+                                break;
+                            }
                             self.mesh.split_face(fid, first_zero_vid, vid);
                             let new_fid = self.face_data.len().into();
                             let data = self.face_data[fid].clone();
@@ -203,10 +210,11 @@ impl<A: Allocator + Copy> Arrangement<A> {
                         }
                     }
                 }
+                curr_hid = next_hid;
                 if curr_hid == first_hid {
                     break;
                 }
-                curr_hid = self.mesh.he_next(curr_hid);
+
                 prev_ori = ori;
             }
         }
@@ -260,6 +268,10 @@ impl<A: Allocator + Copy> Arrangement<A> {
                 }
             }
 
+            if !start_zero_vid.valid() {
+                continue;
+            }
+
             let mut curr_vid = start_zero_vid;
             let mut new_halfedges = Vec::with_capacity_in(n_halfedges, alloc);
             loop {
@@ -270,12 +282,10 @@ impl<A: Allocator + Copy> Arrangement<A> {
                     break;
                 }
             }
-            
-            self.mesh.add_face_by_halfedges(&new_halfedges);
+
+            let new_fid = self.mesh.add_face_by_halfedges(&new_halfedges);
             let new_cid = self.cell_faces.len();
             self.face_data.push(FaceData { pid , cells: [cid, new_cid] });
-
-            self.cell_faces[cid] = neg_cell_faces;
 
             for &fid in &pos_cell_faces {
                 for c in &mut self.face_data[fid].cells {
@@ -284,7 +294,10 @@ impl<A: Allocator + Copy> Arrangement<A> {
                     }
                 }
             }
-            
+
+            neg_cell_faces.push(new_fid);
+            pos_cell_faces.push(new_fid);
+            self.cell_faces[cid] = neg_cell_faces;
             self.cell_faces.push(pos_cell_faces);
         }
     }
