@@ -191,12 +191,12 @@ impl TetSet {
             nt_faces.push(new_fid);
 
             // fa and fb
-            for idx in face_indices {
-                let fid = faces[idx];
+            for hid in [ha, hb] {
                 // when the face is split, the f_halfedge of the face is the split halfedge
-                let he = self.mesh.face(fid).halfedge();
+                let he = self.mesh.halfedge(hid);
                 if *he.next().to() == va {
                     debug_assert!(*he.twin().next().to() == vb);
+                    let fid = self.mesh.he_face(*he);
                     nt_faces.push(fid);
                     replace(&mut self.face_tets[fid]);
                     ot_faces.push(self.mesh.he_face(*he.twin()));
@@ -206,7 +206,7 @@ impl TetSet {
                     let twin_fid = self.mesh.he_face(*he.twin());
                     nt_faces.push(twin_fid);
                     replace(&mut self.face_tets[twin_fid]);
-                    ot_faces.push(fid);
+                    ot_faces.push(self.mesh.he_face(*he));
                 }
             }
             debug_assert!(ot_faces.len() == 4);
@@ -232,9 +232,9 @@ impl TetSet {
             debug_assert!(ot_edges.len() == 6);
             debug_assert!(nt_edges.len() == 6);
 
-            let [vc, vd] = self.mesh.e_vertices(self.mesh.he_edge(oppo_hid));
+            let [vc, vd] = self.mesh.he_vertices(oppo_hid);
 
-            self.tet_vertices[tid] = [new_vert, vc, vd, vb];
+            self.tet_vertices[tid] = [new_vert, vb, vd, vc];
             self.tet_edges[tid] = [
                 ot_edges[0],
                 ot_edges[1],
@@ -254,7 +254,7 @@ impl TetSet {
                 tets[0] == new_tid || tets[1] == new_tid
             }));
 
-            self.tet_vertices.push([new_vert, va, vc, vd]);
+            self.tet_vertices.push([new_vert, va, vd, vc]);
             self.tet_edges.push([
                 nt_edges[0],
                 nt_edges[1],

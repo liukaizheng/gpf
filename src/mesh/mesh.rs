@@ -147,4 +147,7 @@ pub trait Mesh: Sized {
     }
 
     fn use_implicit_twin(&self) -> bool;
+
+    fn set_v_halfedge(&mut self, v: VertexId, hid: HalfedgeId);
+    fn set_f_halfedge(&mut self, fid: FaceId, hid: HalfedgeId);
 }
