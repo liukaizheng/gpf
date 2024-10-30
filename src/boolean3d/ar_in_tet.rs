@@ -141,7 +141,8 @@ impl<A: Allocator + Copy> Arrangement<A> {
 
         for f in self.mesh.faces() {
             if f.vertices().all(|v| vert_orientations[*v] == Orientation::Zero) {
-                println!("add same plane");
+                // println!("add same plane");
+
                 return;
             }
         }
@@ -268,9 +269,10 @@ impl<A: Allocator + Copy> Arrangement<A> {
                 }
             }
 
-            if !start_zero_vid.valid() {
+            if n_halfedges < 3 {
                 continue;
             }
+            debug_assert!(start_zero_vid.valid());
 
             let mut curr_vid = start_zero_vid;
             let mut new_halfedges = Vec::with_capacity_in(n_halfedges, alloc);
@@ -297,6 +299,10 @@ impl<A: Allocator + Copy> Arrangement<A> {
 
             neg_cell_faces.push(new_fid);
             pos_cell_faces.push(new_fid);
+
+            debug_assert!(neg_cell_faces.len() >= 4);
+            debug_assert!(pos_cell_faces.len() >= 4);
+
             self.cell_faces[cid] = neg_cell_faces;
             self.cell_faces.push(pos_cell_faces);
         }

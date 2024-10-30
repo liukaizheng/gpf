@@ -138,7 +138,14 @@ fn hull_3<A: Allocator + Copy>(
     let mut mesh = ManifoldMesh::new(triangles.chunks(3), alloc);
     mesh.new_vertices(points.len() / 3 - mesh.n_vertices_capacity());
 
-    let mut first_bot_hid = (mesh.n_halfedges_capacity() - 1).into();
+    let mut first_bot_hid = HalfedgeId::default();
+    for v in mesh.vertices() {
+        let hid = *v.out_halfedge();
+        if mesh.he_is_boundary(hid) {
+            first_bot_hid = hid;
+            break;
+        }
+    }
     close_hull(&mut mesh, first_bot_hid, indices[start].into());
 
     let mut visited = Vec::new_in(alloc);
