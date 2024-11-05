@@ -1,7 +1,7 @@
 use std::alloc::Allocator;
 
 use super::{
-    abs_max, double_to_sign, dummy_abs_max, predicates, ExplicitPoint3D, GenericNum,
+    abs_max, double_to_sign, dummy_abs_max, ExpansionNum, ExplicitPoint3D, GenericNum,
     ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI, Orientation, Point3D,
 };
 
@@ -23,7 +23,7 @@ pub fn orient3d<A: Allocator + Copy>(
             Point3D::Explicit(pb),
             Point3D::Explicit(pc),
             Point3D::Explicit(pd),
-        ) => double_to_sign(-predicates::orient3d(pa, pb, pc, pd, bump)),
+        ) => orient3d_eeee(pa, pb, pc, pd, bump),
         (Point3D::Explicit(pa), Point3D::Explicit(pb), Point3D::Explicit(pc), Point3D::LPI(pd)) => {
             orient3d_leee(pd, pa, pc, pb, bump)
         }
@@ -265,6 +265,53 @@ pub fn orient3d<A: Allocator + Copy>(
             orient3d_tttt(pa, pb, pc, pd, bump)
         }
     }
+}
+
+pub fn orient3d_eeee<A: Allocator + Copy>(
+    pa: &[f64],
+    pb: &[f64],
+    pc: &[f64],
+    pd: &[f64],
+    alloc: A,
+) -> Orientation {
+    let (det, max_var) = orient3d_eeee_impl::<true, _, _>(
+        pa[0],
+        pa[1],
+        pa[2],
+        pb[0],
+        pb[1],
+        pb[2],
+        pc[0],
+        pc[1],
+        pc[2],
+        pd[0],
+        pd[1],
+        pd[2],
+        |arr| Some(arr.iter().map(|x| x.abs()).sum()),
+    );
+    let err_bound = 7.7715611723761027e-016 * max_var.unwrap();
+    if det > err_bound {
+        return Orientation::Positive;
+    } else if det < -err_bound {
+        return Orientation::Negative;
+    }
+    let (det, _) = orient3d_eeee_impl::<false, ExpansionNum<A>, _>(
+        [pa[0]].to_vec_in(alloc).into(),
+        [pa[1]].to_vec_in(alloc).into(),
+        [pa[2]].to_vec_in(alloc).into(),
+        [pb[0]].to_vec_in(alloc).into(),
+        [pb[1]].to_vec_in(alloc).into(),
+        [pb[2]].to_vec_in(alloc).into(),
+        [pc[0]].to_vec_in(alloc).into(),
+        [pc[1]].to_vec_in(alloc).into(),
+        [pc[2]].to_vec_in(alloc).into(),
+        [pd[0]].to_vec_in(alloc).into(),
+        [pd[1]].to_vec_in(alloc).into(),
+        [pd[2]].to_vec_in(alloc).into(),
+        dummy_abs_max,
+    );
+
+    return double_to_sign(*det.last().unwrap());
 }
 
 /// Implicit-Explicit-Explicit-Explicit orient3d
@@ -671,6 +718,48 @@ fn orient3d_tttt<A: Allocator + Copy>(
         },
         bump,
     )
+}
+
+fn orient3d_eeee_impl<const NEED_MAX: bool, T: GenericNum, F: FnOnce(&[T]) -> Option<T>>(
+    px: T,
+    py: T,
+    pz: T,
+    qx: T,
+    qy: T,
+    qz: T,
+    rx: T,
+    ry: T,
+    rz: T,
+    sx: T,
+    sy: T,
+    sz: T,
+    abs_max: F,
+) -> (T, Option<T>) {
+    let fadx = qx - &px;
+    let fbdx = rx - &px;
+    let fcdx = sx - px;
+    let fady = qy - &py;
+    let fbdy = ry - &py;
+    let fcdy = sy - py;
+    let fadz = qz - &pz;
+    let fbdz = rz - &pz;
+    let fcdz = sz - pz;
+
+    let fbdxcdy = &fbdx * &fcdy * &fadz;
+    let fcdxbdy = &fcdx * &fbdy * fadz;
+    let fcdxady = fcdx * &fady * &fbdz;
+    let fadxcdy = &fadx * &fcdy * fbdz;
+    let fadxbdy = fadx * fbdy * &fcdz;
+    let fbdxady = fbdx * fady * fcdz;
+
+    let det = (&fbdxcdy - &fcdxbdy) + (&fcdxady - &fadxcdy) + (&fadxbdy - &fbdxady);
+
+    let max_var = if NEED_MAX {
+        abs_max(&[fbdxcdy, fcdxbdy, fcdxady, fadxcdy, fadxbdy, fbdxady])
+    } else {
+        None
+    };
+    (det, max_var)
 }
 
 fn orient3d_ieee_impl<const NEED_MAX: bool, T: GenericNum, F: FnOnce(&[T]) -> Option<T>>(

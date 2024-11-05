@@ -749,7 +749,8 @@ fn orient3d_adapt<A: Allocator + Copy>(
     *fin.last().unwrap()
 }
 
-pub fn orient3d<A: Allocator + Copy>(
+#[allow(dead_code)]
+fn orient3d<A: Allocator + Copy>(
     pa: &[f64],
     pb: &[f64],
     pc: &[f64],

@@ -7,6 +7,7 @@ use crate::{
     predicates::{self, double_to_sign, sign_reverse, Orientation},
     INVALID_IND,
 };
+
 use bumpalo::Bump;
 use rand::seq::SliceRandom;
 
@@ -221,8 +222,8 @@ impl<'a> TetMesh<'a> {
         pc: usize,
         pd: usize,
         allocator: A,
-    ) -> f64 {
-        predicates::orient3d(
+    ) -> Orientation {
+        predicates::orient3d::orient3d_eeee(
             &self.points[(pa * 3)..],
             &self.points[(pb * 3)..],
             &self.points[(pc * 3)..],
@@ -722,7 +723,7 @@ fn locate_dt(tets: &TetMesh, pid: usize, searchtet: &mut TriFace, bump: &Bump) -
             pid,
             bump,
         );
-        if ori < 0.0 {
+        if ori.is_pos() {
             break;
         }
         searchtet.ver += 1;
@@ -742,28 +743,28 @@ fn locate_dt(tets: &TetMesh, pid: usize, searchtet: &mut TriFace, bump: &Bump) -
         }
 
         let oriorg = tets.orient3d(tets.dest(searchtet), tets.apex(searchtet), toppo, pid, bump);
-        if oriorg < 0.0 {
+        if oriorg.is_pos() {
             searchtet.enext_esym_self();
         } else {
             let oridest =
                 tets.orient3d(tets.apex(searchtet), tets.org(searchtet), toppo, pid, bump);
-            if oridest < 0.0 {
+            if oridest.is_pos() {
                 searchtet.eprev_esym_self();
             } else {
                 let oriapex =
                     tets.orient3d(tets.org(searchtet), tets.dest(searchtet), toppo, pid, bump);
-                if oriapex < 0.0 {
+                if oriapex.is_pos() {
                     searchtet.esym_self();
                 } else {
                     // oriorg >= 0, oridest >= 0, oriapex >= 0 ==> found the point.
                     // The point we seek must be on the boundary of or inside this
                     //   tetrahedron. Check for boundary cases first.
-                    if oriorg == 0.0 {
+                    if oriorg.is_zero() {
                         // Go to the face opposite to origin.
                         searchtet.enext_esym_self();
-                        if oridest == 0.0 {
+                        if oridest.is_zero() {
                             searchtet.eprev_self(); // edge oppo->apex
-                            if oriapex == 0.0 {
+                            if oriapex.is_zero() {
                                 // oppo is duplicated with p.
                                 loc = LocateResult::ONVERTEX; // return ONVERTEX;
                                 break;
@@ -771,7 +772,7 @@ fn locate_dt(tets: &TetMesh, pid: usize, searchtet: &mut TriFace, bump: &Bump) -
                             loc = LocateResult::ONEDGE; // return ONEDGE;
                             break;
                         }
-                        if oriapex == 0.0 {
+                        if oriapex.is_zero() {
                             searchtet.enext_self(); // edge dest->oppo
                             loc = LocateResult::ONEDGE; // return ONEDGE;
                             break;
@@ -779,10 +780,10 @@ fn locate_dt(tets: &TetMesh, pid: usize, searchtet: &mut TriFace, bump: &Bump) -
                         loc = LocateResult::ONFACE; // return ONFACE;
                         break;
                     }
-                    if oridest == 0.0 {
+                    if oridest.is_zero() {
                         // Go to the face opposite to destination.
                         searchtet.eprev_esym_self();
-                        if oriapex == 0.0 {
+                        if oriapex.is_zero() {
                             searchtet.eprev_self(); // edge oppo->org
                             loc = LocateResult::ONEDGE; // return ONEDGE;
                             break;
@@ -790,7 +791,7 @@ fn locate_dt(tets: &TetMesh, pid: usize, searchtet: &mut TriFace, bump: &Bump) -
                         loc = LocateResult::ONFACE; // return ONFACE;
                         break;
                     }
-                    if oriapex == 0.0 {
+                    if oriapex.is_zero() {
                         // Go to the face opposite to apex
                         searchtet.esym_self();
                         loc = LocateResult::ONFACE; // return ONFACE;
@@ -860,14 +861,14 @@ fn insphere_s(
     }
 
     let mut ori = tets.orient3d(pt[1], pt[2], pt[3], pt[4], bump);
-    if ori == 0.0 {
-        ori = -tets.orient3d(pt[0], pt[2], pt[3], pt[4], bump);
+    if ori.is_zero() {
+        ori = sign_reverse(tets.orient3d(pt[0], pt[2], pt[3], pt[4], bump));
     }
 
     if (swaps & 1) != 0 {
-        sign_reverse(double_to_sign(ori))
+        sign_reverse(ori)
     } else {
-        double_to_sign(ori)
+        ori
     }
 }
 
@@ -921,9 +922,9 @@ fn insert_vertex_bw(tets: &mut TetMesh, pid: usize, searchtet: &mut TriFace, bum
                         == Orientation::Negative;
                 } else {
                     let ori = tets.orient3d(pts[0], pts[1], pts[2], pid, bump);
-                    if ori < 0.0 {
+                    if ori.is_pos() {
                         enqflag = true;
-                    } else if ori == 0.0 {
+                    } else if ori.is_zero() {
                         let neineitet = tets.tets[neightid].nei[3].tet;
                         let nei_pts = &tets.tets[neineitet].data;
                         enqflag = insphere_s(

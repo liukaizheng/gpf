@@ -71,7 +71,10 @@ impl Constraints {
             for &(tid, _) in &halfedges[1..] {
                 let tri = self.triangle(tid);
                 // unplannar: return
-                if tet_mesh.orient3d(apex, tri[0], tri[1], tri[2], bump) != 0.0 {
+                if !tet_mesh
+                    .orient3d(apex, tri[0], tri[1], tri[2], bump)
+                    .is_zero()
+                {
                     return;
                 }
             }
@@ -110,8 +113,9 @@ impl Constraints {
                 if apex == triangle0[0]
                     || apex == triangle0[1]
                     || apex == triangle0[2]
-                    || tet_mesh.orient3d(apex, triangle0[0], triangle0[1], triangle0[2], bump)
-                        == 0.0
+                    || tet_mesh
+                        .orient3d(apex, triangle0[0], triangle0[1], triangle0[2], bump)
+                        .is_zero()
                 {
                     apex = tet[i];
                 } else {
@@ -258,8 +262,7 @@ fn verts_in_same_half_space<A: Allocator + Copy>(
     v3: usize,
     allocator: A,
 ) -> bool {
-    double_to_sign(mesh.orient3d(u1, v1, v2, v3, allocator))
-        == double_to_sign(mesh.orient3d(u2, v1, v2, v3, allocator))
+    mesh.orient3d(u1, v1, v2, v3, allocator) == mesh.orient3d(u2, v1, v2, v3, allocator)
 }
 
 #[inline(always)]
@@ -644,9 +647,12 @@ fn set_improper_intersections<A: Allocator + Copy>(
     info: &mut IntersectInfo<A>,
 ) {
     let bump = *info.intersected.allocator();
-    let lookup_ori = |vid: usize, vert_oris: &mut [f64], used_verts: &mut Vec<usize, A>| -> f64 {
+    let lookup_ori = |vid: usize,
+                      vert_oris: &mut [Orientation],
+                      used_verts: &mut Vec<usize, A>|
+     -> Orientation {
         let mut ori = vert_oris[vid];
-        if !ori.is_nan() {
+        if !ori.is_undefined() {
             return ori;
         } else {
             ori = mesh.orient3d(triangle[0], triangle[1], triangle[2], vid, bump);
@@ -655,7 +661,7 @@ fn set_improper_intersections<A: Allocator + Copy>(
             return ori;
         }
     };
-    let mut vert_oris = std::vec::from_elem_in(f64::NAN, mesh.tets.len(), bump);
+    let mut vert_oris = std::vec::from_elem_in(Orientation::Undefined, mesh.tets.len(), bump);
     let mut used_verts = Vec::new_in(bump);
 
     for &tid in &info.intersected {
@@ -666,12 +672,17 @@ fn set_improper_intersections<A: Allocator + Copy>(
         let mut neg = Vec::new_in(bump);
         for &vid in &tet.data {
             let ori = lookup_ori(vid, &mut vert_oris, &mut used_verts);
-            if ori == 0.0 {
-                zero.push(vid);
-            } else if ori > 0.0 {
-                pos.push(vid);
-            } else {
-                neg.push(vid);
+            match ori {
+                Orientation::Positive => {
+                    pos.push(vid);
+                }
+                Orientation::Negative => {
+                    neg.push(vid);
+                }
+                Orientation::Zero => {
+                    zero.push(vid);
+                }
+                Orientation::Undefined => {}
             }
         }
 
@@ -960,7 +971,7 @@ fn constraint_intersect_tet_type<A: Allocator + Copy>(
     let mut oris = [Orientation::Undefined; 4];
     let mut in_tris = [false; 4];
     for i in 0..4 {
-        oris[i] = double_to_sign(mesh.orient3d(verts[i], c[0], c[1], c[2], bump));
+        oris[i] = mesh.orient3d(verts[i], c[0], c[1], c[2], bump);
         in_tris[i] =
             oris[i] == Orientation::Zero && vert_point_in_inner_triangle(mesh, verts[i], c, bump);
     }

@@ -12,13 +12,15 @@ use std::{
     ops::{Add, Mul, Sub},
 };
 
+pub use det4::*;
 pub use expansion_number::*;
 pub use generic_point::*;
 pub use interval_number::*;
 pub use less_than::*;
 pub use orient2d::*;
 pub use predicates::*;
-pub use det4::*;
+
+use self::orient3d::orient3d_eeee;
 
 #[derive(PartialEq, Eq, Clone, Copy, Hash, Debug)]
 pub enum Orientation {
@@ -26,6 +28,24 @@ pub enum Orientation {
     Negative,
     Zero,
     Undefined,
+}
+
+impl Orientation {
+    pub fn is_pos(&self) -> bool {
+        *self == Orientation::Positive
+    }
+
+    pub fn is_neg(&self) -> bool {
+        *self == Orientation::Negative
+    }
+
+    pub fn is_zero(&self) -> bool {
+        *self == Orientation::Zero
+    }
+
+    pub fn is_undefined(&self) -> bool {
+        *self == Orientation::Undefined
+    }
 }
 
 trait GenericNum = Sized + Add<Output = Self> + Sub<Output = Self> + Mul<Output = Self>
@@ -331,8 +351,8 @@ pub fn inner_segment_cross_inner_triangle<A: Allocator + Copy>(
         return false;
     }
 
-    let orient_u1_tri = double_to_sign(predicates::orient3d(u1, v1, v2, v3, allocator));
-    let orient_u2_tri = double_to_sign(predicates::orient3d(u2, v1, v2, v3, allocator));
+    let orient_u1_tri = orient3d_eeee(u1, v1, v2, v3, allocator);
+    let orient_u2_tri = orient3d_eeee(u2, v1, v2, v3, allocator);
 
     // Check if triangle vertices and at least one of the segment endpoints are coplanar:
     // in this case there is no proper intersection.
@@ -349,8 +369,8 @@ pub fn inner_segment_cross_inner_triangle<A: Allocator + Copy>(
 
     // Intersection between segment and triangle sides are not proper.
     // Check also if segment intersect the triangle-plane outside the triangle.
-    let orient_u_v1v2 = double_to_sign(predicates::orient3d(u1, u2, v1, v2, allocator));
-    let orient_u_v2v3 = double_to_sign(predicates::orient3d(u1, u2, v2, v3, allocator));
+    let orient_u_v1v2 = orient3d_eeee(u1, u2, v1, v2, allocator);
+    let orient_u_v2v3 = orient3d_eeee(u1, u2, v2, v3, allocator);
 
     if orient_u_v1v2 == Orientation::Zero || orient_u_v2v3 == Orientation::Zero {
         return false;
@@ -360,7 +380,7 @@ pub fn inner_segment_cross_inner_triangle<A: Allocator + Copy>(
         return false;
     }
 
-    let orient_u_v3v1 = double_to_sign(predicates::orient3d(u1, u2, v3, v1, allocator));
+    let orient_u_v3v1 = orient3d_eeee(u1, u2, v3, v1, allocator);
 
     if orient_u_v3v1 == Orientation::Zero {
         return false;
@@ -436,7 +456,7 @@ pub fn inner_segments_cross<A: Allocator + Copy>(
     allocator: A,
 ) -> bool {
     // The 4 endpoints must be coplanar
-    if predicates::orient3d(u1, u2, v1, v2, allocator) != 0.0 {
+    if !orient3d_eeee(u1, u2, v1, v2, allocator).is_zero() {
         return false;
     }
 

@@ -1,34 +1,12 @@
 use std::{alloc::Allocator, collections::VecDeque};
 
 use crate::{
-    mesh::{validate_mesh_connectivity, ElementId, FaceId, HalfedgeId, ManifoldMesh, Mesh, VertexId},
+    mesh::{ElementId, FaceId, HalfedgeId, ManifoldMesh, Mesh, VertexId},
     point,
-    predicates::{max_comp_in_tri_normal, miss_alignment, orient3d},
+    predicates::{max_comp_in_tri_normal, miss_alignment, orient3d::orient3d_eeee, Orientation},
 };
 
 use super::triangulate;
-
-fn write_mesh<A: Allocator + Copy>(name: &str, points: &[f64], mesh: &ManifoldMesh<A>) {
-    use std::io::Write;
-    let mut file = std::fs::File::create(name).unwrap();
-    writeln!(file, "OFF").unwrap();
-    writeln!(file, "{} {} 0", mesh.n_vertices_capacity(), mesh.n_faces()).unwrap();
-    for i in 0..points.len() / 3 {
-        let p = point(points, i);
-        writeln!(file, "{} {} {}", p[0], p[1], p[2]).unwrap();
-    }
-    for f in mesh.faces() {
-        let he = f.halfedge();
-        let he_next = he.next();
-        let he_nnext = he_next.next();
-        writeln!(
-            file,
-            "3 {} {} {}",
-            he.to().0, he_next.to().0, he_nnext.to().0
-        )
-        .unwrap();
-    }
-}
 
 pub enum Convex3Result<A: Allocator + Copy> {
     Dim0(usize),
@@ -99,18 +77,21 @@ pub fn convex_3<A: Allocator + Copy>(
         return Convex3Result::Dim2(triangles);
     }
     let mesh = hull_3(points, &indices, coplanar_len, triangles, alloc);
-    let mut result = Vec::new_in(alloc);
-    if only_verts {
+    let result = if only_verts {
+        let mut result = Vec::with_capacity_in(mesh.n_vertices(), alloc);
         result.extend(mesh.vertices().map(|v| v.0));
+        result
     } else {
-        let mut result = Vec::new_in(alloc);
+        let mut result = Vec::with_capacity_in(mesh.n_faces(), alloc);
         result.extend(mesh.faces().flat_map(|f| {
             let he = f.halfedge();
             let he_next = he.next();
             let he_nnext = he_next.next();
             [he.to().0, he_next.to().0, he_nnext.to().0]
         }));
-    }
+        result
+    };
+
     Convex3Result::Dim3(result)
 }
 
@@ -132,7 +113,7 @@ fn hull_2<A: Allocator + Copy>(points: &[f64], indices: &[usize], start: usize, 
     let pc = point(points, indices[start]);
     for i in (start + 1)..indices.len() {
         let pd = point(points, indices[i]);
-        if orient3d(pa, pb, pc, pd, alloc) != 0.0 {
+        if orient3d_eeee(pa, pb, pc, pd, alloc) != Orientation::Zero {
             return i;
         }
     }
@@ -151,7 +132,7 @@ fn hull_3<A: Allocator + Copy>(
         let pb = point(points, triangles[1]);
         let pc = point(points, triangles[2]);
         let pd = point(points, indices[start]);
-        orient3d(pa, pb, pc, pd, alloc) < 0.0
+        orient3d_eeee(pa, pb, pc, pd, alloc) == Orientation::Positive
     };
 
     if is_neg {
@@ -190,7 +171,7 @@ fn hull_3<A: Allocator + Copy>(
             let pb = point(points, he.to().0);
             let he = he.next();
             let pc = point(points, he.to().0);
-            orient3d(pa, pb, pc, pd, alloc) < 0.0
+            orient3d_eeee(pa, pb, pc, pd, alloc) == Orientation::Positive
         };
         visible_faces.clear();
         removed_faces.clear();
@@ -254,17 +235,8 @@ fn hull_3<A: Allocator + Copy>(
         }
 
         debug_assert!(first_bot_hid.valid());
-        if pid == 19 {
-            write_mesh("convex_3_ori.off", points, &mesh);
-        }
-        if pid == 12 {
-            write_mesh("convex_3_ori_p12.off", points, &mesh);
-        }
         for &fid in &removed_faces {
             mesh.remove_face(fid);
-            if let Err(error_str) = validate_mesh_connectivity(&mesh) {
-                panic!("{}", error_str);
-            }
         }
         debug_assert!(mesh.he_is_boundary(first_bot_hid));
 
@@ -273,12 +245,7 @@ fn hull_3<A: Allocator + Copy>(
             kept[fid.0] = false;
         }
 
-        if pid == 19 {
-            write_mesh("convex_3.off", points, &mesh);
-        }
-
         close_hull(&mut mesh, first_bot_hid, vid);
-
 
         visited.resize(mesh.n_faces_capacity(), false);
         kept.resize(mesh.n_faces_capacity(), false);
@@ -316,9 +283,6 @@ fn close_hull<A: Allocator + Copy>(
         };
 
         mesh.new_face_by_halfedges(&[prev_side_hid, curr_bot_hid, curr_side_hid]);
-        if let Err(error_str) = validate_mesh_connectivity(&mesh) {
-            panic!("{}", error_str);
-        }
         if next_bot_hid == first_hid {
             break;
         }

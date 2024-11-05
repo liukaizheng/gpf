@@ -5,21 +5,20 @@ use bumpalo::Bump;
 use itertools::Itertools;
 use std::collections::{HashMap, HashSet};
 
+use super::{conforming_mesh::Constraints, point};
 use crate::{
     disjoint_set::DisjointSet,
     graphcut::{ArcBuilder, MaxFlow, PushRelabelFifo},
     math::{cross_in, norm, sub_in},
     mesh::{EdgeId, ElementId, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
-        double_to_sign, max_comp_in_tri_normal, orient2d, orient2d_by_axis, orient3d::orient3d,
-        sign_reverse, sign_reversed, ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI,
-        ImplicitPointTPI, Orientation, Point3D,
+        self, max_comp_in_tri_normal, orient2d, orient2d_by_axis, orient3d::orient3d, sign_reverse,
+        sign_reversed, ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
+        Orientation, Point3D,
     },
     triangle::{triangulate, TetMesh},
     INVALID_IND,
 };
-
-use super::{conforming_mesh::Constraints, point};
 
 struct EdgeGroup {
     edges: Vec<(EdgeId, bool)>,
@@ -1826,13 +1825,13 @@ fn is_triangle_intersects_cell<A: Allocator + Copy>(
         let plane_points: [&[f64]; 3] =
             plane_verts.map(|vid| points[vid].explicit().unwrap().deref());
         let tri_pt_oris = tri_points.map(|p| {
-            double_to_sign(-crate::predicates::orient3d(
+            predicates::orient3d::orient3d_eeee(
                 plane_points[0],
                 plane_points[1],
                 plane_points[2],
                 p.explicit().unwrap().deref(),
                 bump,
-            ))
+            )
         });
         if tri_pt_oris.iter().all(|&ori| ori == Orientation::Zero) {
             return false; // intersect, but not intersect properly
