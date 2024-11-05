@@ -134,10 +134,18 @@ fn push_longest_edge(
     sq_eps: f64,
     bump: &Bump,
 ) {
-    let (is_subdividable, activated) = subdividable(tid, tets, data, sq_eps, bump);
+    let (mut is_subdividable, activated) = subdividable(tid, tets, data, sq_eps, bump);
     if let Some(activated) = activated {
         let mut iter = activated.into_iter();
         data.active_surfs[tid].retain(|_| iter.next().unwrap());
+    }
+    if is_subdividable {
+        if tets.tet_edges[tid]
+            .iter()
+            .all(|&eid| tets.square_edge_lengths[eid] < sq_eps)
+        {
+            is_subdividable = false;
+        }
     }
     if is_subdividable {
         let longest_eid = *tets.tet_edges[tid]
@@ -257,8 +265,6 @@ fn subdividable<A: Allocator + Copy>(
 
         let val_diff = [v1 - v0, v2 - v0, v3 - v0];
         if test_distance_1(&adj_vmat, val_diff, &diffs, sq_det_vmat, sq_eps) {
-            // let mut iter = active.iter();
-            // surfs.retain(|_| *iter.next().unwrap());
             return (true, get_active(active, n_activated));
         } else {
             if *vals.iter().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap() <= 0.0 ||
@@ -344,10 +350,6 @@ fn subdividable<A: Allocator + Copy>(
             }
             return (true, get_active(active, n_activated));
         }
-    }
-    {
-        // let mut iter = active.into_iter();
-        // surfs.retain(|_| iter.next().unwrap());
     }
     return (false, get_active(active, n_activated));
 }
