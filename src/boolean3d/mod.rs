@@ -9,6 +9,7 @@ use ar_in_tet::arrangement_for_tet;
 use bumpalo::Bump;
 use itertools::Itertools;
 use tet_set::TetSet;
+use tinyvec::TinyVec;
 
 use crate::{
     geometry::{BBox, Surf},
@@ -43,28 +44,28 @@ pub fn boolean3d(first: &SimpleBody, second: &SimpleBody, t: BooleanType, eps: f
     bbox.merge(&first.bbox);
     bbox.merge(&second.bbox);
     bbox.scale(1.1);
-    // bbox.min = [-2.0, -2.0, -2.0];
+    // bbox.min = [-0.5, -0.5, -0.5];
     // bbox.max = [2.0, 2.0, 2.0];
     let mut tets = init_mesh(bbox);
     let (vals, active_surfs) = adaptive_subdivide(&mut tets, surfaces, eps * eps);
 
-    let mut bump = Bump::new();
-    for (tid, verts) in tets.tet_vertices.iter().enumerate() {
-        if active_surfs[tid].is_empty() {
-            continue;
-        }
-        bump.reset();
-        let mut planes = Vec::with_capacity_in(active_surfs.len(), &bump);
-        planes.extend(active_surfs[tid].iter().map(|&sid| {
-            let mut tet_vals = [f64::NAN; 4];
-            for (val, &vid) in tet_vals.iter_mut().zip(verts) {
-                *val = vals[sid][vid];
-            }
-            tet_vals
-        }));
+    // let mut bump = Bump::new();
+    // for (tid, verts) in tets.tet_vertices.iter().enumerate() {
+    //     if active_surfs[tid].is_empty() {
+    //         continue;
+    //     }
+    //     bump.reset();
+    //     let mut planes = Vec::with_capacity_in(active_surfs.len(), &bump);
+    //     planes.extend(active_surfs[tid].iter().map(|&sid| {
+    //         let mut tet_vals = [f64::NAN; 4];
+    //         for (val, &vid) in tet_vals.iter_mut().zip(verts) {
+    //             *val = vals[sid][vid];
+    //         }
+    //         tet_vals
+    //     }));
 
-        arrangement_for_tet(&planes, &bump);
-    }
+    //     arrangement_for_tet(&planes, &bump);
+    // }
 
     println!("mesh n  edges: {}", tets.mesh.n_edges());
 }
@@ -160,6 +161,7 @@ fn init_mesh(bbox: BBox) -> TetSet {
     ];
     let square_edge_lengths =
         Vec::from_iter(mesh.edges().map(|e| square_edge_length(&points, *e, &mesh)));
+    let face_surfaces = Vec::from_iter((0..mesh.n_faces()).map(|_| TinyVec::new()));
     TetSet {
         mesh,
         tet_vertices,
@@ -168,5 +170,6 @@ fn init_mesh(bbox: BBox) -> TetSet {
         face_tets,
         points,
         square_edge_lengths,
+        face_surfaces,
     }
 }

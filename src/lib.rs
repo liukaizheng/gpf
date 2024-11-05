@@ -33,6 +33,16 @@ pub fn point_2(points: &[f64], tid: usize) -> &[f64] {
 }
 
 #[inline(always)]
+pub fn signed_index(idx: usize, reversed: bool) -> i64 {
+    (if reversed { -1 } else { 1 }) * (idx as i64 + 1)
+}
+
+#[inline(always)]
+pub fn abs_index(idx: i64) -> usize {
+    (idx.abs() - 1) as usize
+}
+
+#[inline(always)]
 fn face_area_2d(points: &[f64]) -> f64 {
     points
         .chunks(2)

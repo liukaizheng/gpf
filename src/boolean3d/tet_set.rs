@@ -5,6 +5,8 @@ use crate::{
     point, INVALID_IND,
 };
 
+use tinyvec::TinyVec;
+
 pub(crate) struct TetSet {
     pub(crate) mesh: SurfaceMesh<std::alloc::Global>,
     pub(crate) tet_vertices: Vec<[VertexId; 4]>,
@@ -13,6 +15,13 @@ pub(crate) struct TetSet {
     pub(crate) face_tets: Vec<[usize; 2]>,
     pub(crate) points: Vec<f64>,
     pub(crate) square_edge_lengths: Vec<f64>,
+    pub(crate) face_surfaces: Vec<TinyVec<[i64; 2]>>,
+}
+
+#[inline]
+pub(crate) fn tet_face_reversed(face_tets: &[usize; 2], tid: usize) -> bool {
+    debug_assert!(face_tets[0] == tid || face_tets[1] == tid);
+    tid == face_tets[1]
 }
 
 impl TetSet {
@@ -23,13 +32,6 @@ impl TetSet {
         alloc: A,
     ) -> Vec<VertexId, A> {
         self.tet_vertices[tid].to_vec_in(alloc)
-    }
-
-    #[inline]
-    pub(crate) fn tet_face_reversed(&self, tid: usize, fid: FaceId) -> bool {
-        let tets = self.face_tets[fid];
-        debug_assert!(tets[0] == tid || tets[1] == tid);
-        tid == tets[1]
     }
 
     pub(crate) fn split_edge<A: Allocator + Copy>(
@@ -57,9 +59,9 @@ impl TetSet {
             }
             oppo_verts.push(*he.next().to());
         }
-        let mut oppo_halfedges = Vec::new_in(alloc);
-        let mut bottom_faces = Vec::new_in(alloc);
-        let mut top_faces = Vec::new_in(alloc);
+        let mut oppo_halfedges = Vec::with_capacity_in(tet_faces_map.len(), alloc);
+        let mut bottom_faces = Vec::with_capacity_in(tet_faces_map.len(), alloc);
+        let mut top_faces = Vec::with_capacity_in(tet_faces_map.len(), alloc);
         for (&tid, &[fa, fb]) in &tet_faces_map {
             let bottom_top_faces = || {
                 let mut fc = FaceId::default();
@@ -88,7 +90,7 @@ impl TetSet {
             bottom_faces.push(bottom_fid);
             top_faces.push(top_fid);
             let hid = self.mesh.fv_halfedge(bottom_fid, va);
-            if self.tet_face_reversed(tid, bottom_fid) {
+            if tet_face_reversed(&self.face_tets[bottom_fid], tid) {
                 oppo_halfedges.push(self.mesh.he_twin(self.mesh.he_next(hid)));
             } else {
                 oppo_halfedges.push(self.mesh.he_next(hid));
@@ -120,7 +122,10 @@ impl TetSet {
             self.square_edge_lengths[eid] = new_edge_square_len;
         }
 
-        let mut new_halfedges = Vec::new_in(alloc);
+        let faces_capacity = self.mesh.n_faces() + faces.len() + tet_faces_map.len();
+        self.face_tets.reserve(faces_capacity);
+        self.face_surfaces.reserve(faces_capacity);
+        let mut new_halfedges = Vec::with_capacity_in(oppo_verts.len(), alloc);
         new_halfedges.extend(oppo_verts.into_iter().zip(&faces).map(|(v, &fid)| {
             let hid = self.mesh.split_face(fid, new_vert, v);
             self.square_edge_lengths.push(square_edge_length(
@@ -129,6 +134,7 @@ impl TetSet {
                 &self.mesh,
             ));
             self.face_tets.push(self.face_tets[fid]);
+            self.face_surfaces.push(self.face_surfaces[fid].clone());
             if self.mesh.he_to(hid) != new_vert {
                 hid
             } else {
@@ -267,6 +273,8 @@ impl TetSet {
                 .push([nt_faces[0], nt_faces[1], nt_faces[2], nt_faces[3]]);
             result_tets.push([tid, new_tid]);
         }
+        self.face_surfaces
+            .resize(self.face_tets.len(), TinyVec::new());
         (new_vert, result_tets)
     }
 }

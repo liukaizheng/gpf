@@ -5,13 +5,19 @@ use hashbrown::HashSet;
 
 use bumpalo::Bump;
 use itertools::Itertools;
+use tinyvec::TinyVec;
+
+const EPS: f64 = 0.0009765625; // 2^(-10)
 
 use crate::{
+    abs_index,
+    boolean3d::tet_set::tet_face_reversed,
     geometry::{Surf, Surface},
     math::{cross, cross_in, dot, square_norm, sub_short},
-    mesh::{EdgeId, Mesh},
-    point, point_2,
+    mesh::{EdgeId, FaceId, Mesh},
+    point, point_2, signed_index,
     triangle::{convex_2, convex_3},
+    INVALID_IND,
 };
 
 type BVec<'a, T> = bumpalo::collections::Vec<'a, T>;
@@ -60,15 +66,15 @@ pub(super) fn adaptive_subdivide(
     sq_eps: f64,
 ) -> (Vec<Vec<f64>>, Vec<Vec<usize>>) {
     let mut vals_and_grads = vec![Vec::with_capacity(tets.mesh.n_vertices()); surfaces.len()];
-    // TODO: parallelize by rayon
     for p in tets.points.chunks(3) {
         for (i, &surf) in surfaces.iter().enumerate() {
-            vals_and_grads[i].push(surf.eval(p));
+            vals_and_grads[i].push(surf.eval_round(p, EPS));
         }
     }
     let active_surfs = (0..tets.tet_faces.len())
         .map(|_| Vec::from_iter(0..surfaces.len()))
         .collect_vec();
+
     let mut data = SubdivisionData {
         surfaces,
         vals_and_grads,
@@ -77,6 +83,11 @@ pub(super) fn adaptive_subdivide(
     };
 
     adaptive_subdivide_impl(tets, &mut data, sq_eps);
+
+    println!(
+        "{} coplanar faces",
+        tets.face_surfaces.iter().filter(|v| !v.is_empty()).count()
+    );
     (round_vert_vals(tets, &data), data.active_surfs)
 }
 
@@ -107,7 +118,7 @@ fn adaptive_subdivide_impl(tets: &mut TetSet, data: &mut SubdivisionData, sq_eps
                 if !vals_grads[new_vert.0][0].is_nan() {
                     continue;
                 }
-                vals_grads[new_vert] = data.surfaces[sid].eval(p);
+                vals_grads[new_vert] = data.surfaces[sid].eval_round(p, EPS);
             }
             data.active_surfs.push(data.active_surfs[old_tet].clone());
         }
@@ -240,6 +251,7 @@ fn subdividable(
             if *vals.iter().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap() <= 0.0 ||
                 *vals.iter().min_by(|x, y| x.partial_cmp(y).unwrap()).unwrap() >= 0.0 {
                     active[i] = false;
+                    check_flat_surface(&vals[..4], &tets.tet_faces, &mut tets.face_surfaces, &tets.face_tets,tid, sid);
             }
         }
 
@@ -493,6 +505,36 @@ fn test_distance_3(
         .unwrap();
 
     return r2 * sq_det_v > det_w * det_w * sq_eps;
+}
+
+fn check_flat_surface(
+    vals: &[f64],
+    tet_faces: &[[FaceId; 4]],
+    face_surfaces: &mut [TinyVec<[i64; 2]>],
+    face_tets: &[[usize; 2]],
+    tid: usize,
+    sid: usize,
+) {
+    let mut non_zero_idx = INVALID_IND;
+    for (i, &val) in vals.iter().enumerate() {
+        if val != 0.0 {
+            if non_zero_idx != INVALID_IND {
+                return;
+            } else {
+                non_zero_idx = i;
+            }
+        }
+    }
+
+    debug_assert!(non_zero_idx != INVALID_IND);
+    let fid = tet_faces[tid][non_zero_idx];
+    let coplanars = &mut face_surfaces[fid];
+    if coplanars.iter().find(|&&s| abs_index(s) == sid).is_none() {
+        coplanars.push(signed_index(
+            sid,
+            (vals[non_zero_idx] < 0.0) == tet_face_reversed(&face_tets[fid], tid),
+        ));
+    }
 }
 
 fn round_vert_vals(tets: &TetSet, data: &SubdivisionData) -> Vec<Vec<f64>> {
