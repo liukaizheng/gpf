@@ -67,7 +67,7 @@ pub fn boolean3d(first: &SimpleBody, second: &SimpleBody, t: BooleanType, eps: f
     //     arrangement_for_tet(&planes, &bump);
     // }
 
-    println!("mesh n  edges: {}", tets.mesh.n_edges());
+    println!("mesh n tets: {}", tets.tet_faces.len());
 }
 
 fn init_mesh(bbox: BBox) -> TetSet {

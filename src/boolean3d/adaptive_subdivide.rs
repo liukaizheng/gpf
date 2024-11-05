@@ -1,5 +1,5 @@
 use core::panic;
-use std::collections::BinaryHeap;
+use std::{alloc::Allocator, collections::BinaryHeap};
 
 use hashbrown::HashSet;
 
@@ -19,8 +19,6 @@ use crate::{
     triangle::{convex_2, convex_3},
     INVALID_IND,
 };
-
-type BVec<'a, T> = bumpalo::collections::Vec<'a, T>;
 
 use super::TetSet;
 
@@ -136,7 +134,12 @@ fn push_longest_edge(
     sq_eps: f64,
     bump: &Bump,
 ) {
-    if subdividable(tid, tets, data, sq_eps, bump) {
+    let (is_subdividable, activated) = subdividable(tid, tets, data, sq_eps, bump);
+    if let Some(activated) = activated {
+        let mut iter = activated.into_iter();
+        data.active_surfs[tid].retain(|_| iter.next().unwrap());
+    }
+    if is_subdividable {
         let longest_eid = *tets.tet_edges[tid]
             .iter()
             .max_by(|&&ea, &&eb| {
@@ -171,19 +174,20 @@ const C: [[f64; 4]; 16] = [
     [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0, 0.0],
 ];
 
-fn subdividable(
+fn subdividable<A: Allocator + Copy>(
     tid: usize,
     tets: &mut TetSet,
     data: &mut SubdivisionData,
     sq_eps: f64,
-    bump: &Bump,
-) -> bool {
+    alloc: A,
+) -> (bool, Option<Vec<bool, A>>) {
     let surfs = &mut data.active_surfs[tid];
-    let mut active = Vec::with_capacity_in(surfs.len(), bump);
+    let mut active = Vec::with_capacity_in(surfs.len(), alloc);
     active.resize(surfs.len(), true);
-    let verts = tets.vertices_in(tid, bump);
-    let tet_points = BVec::from_iter_in(verts.iter().map(|vid| point(&tets.points, vid.0)), bump);
-    let trans_vmat = bumpalo::vec![in bump;
+    let verts = tets.tet_vertices[tid];
+    let tet_points = verts.map(|vid| point(&tets.points, vid.0));
+
+    let trans_vmat = [
         sub_short::<3, _>(tet_points[1], tet_points[0]),
         sub_short::<3, _>(tet_points[2], tet_points[0]),
         sub_short::<3, _>(tet_points[3], tet_points[0]),
@@ -197,21 +201,30 @@ fn subdividable(
         d * d
     };
 
-    let adj_vmat = bumpalo::vec![in bump;
+    let adj_vmat = [
         cross(&trans_vmat[1], &trans_vmat[2]),
         cross(&trans_vmat[2], &trans_vmat[0]),
         cross(&trans_vmat[0], &trans_vmat[1]),
     ];
 
-    let mut interpolant_vec = Vec::with_capacity_in(surfs.len(), bump);
-    let mut interpolant_diff_vec = Vec::with_capacity_in(surfs.len(), bump);
-    let mut val_diff_vec = Vec::with_capacity_in(surfs.len(), bump);
-    for (i, &sid) /*surface id*/ in surfs.iter().enumerate() {
-        let tet_vals_grads = BVec::from_iter_in(
-            verts.iter().map(|&vid| &data.vals_and_grads[sid][vid.0]), bump);
-        let mut vals = Vec::with_capacity_in(20, bump);
+    let get_active = |active: Vec<bool, A>, n_activated: usize| {
+        if n_activated == active.len() {
+            None
+        } else {
+            Some(active)
+        }
+    };
 
+    let mut interpolant_vec = Vec::with_capacity_in(surfs.len(), alloc);
+    let mut interpolant_diff_vec = Vec::with_capacity_in(surfs.len(), alloc);
+    let mut val_diff_vec = Vec::with_capacity_in(surfs.len(), alloc);
+    let mut n_activated = surfs.len();
+    for (i, &sid) /*surface id*/ in surfs.iter().enumerate() {
+        let tet_vals_grads = verts.map(|vid| &data.vals_and_grads[sid][vid]);
+
+        let mut vals = Vec::with_capacity_in(20, alloc);
         vals.extend(tet_vals_grads.iter().map(|vals_grads| vals_grads[0]));
+
         let v0 = tet_vals_grads[0][0];
         let g = &tet_vals_grads[0][1..];
         const S: f64 = 1.0 / 3.0;
@@ -236,7 +249,7 @@ fn subdividable(
         vals.push(((vals[4] + vals[5] + vals[7] + vals[9] + vals[11] + vals[12]) * 1.5 - vals[0] - vals[1] - vals[2]) / 6.0);
 
 
-        let mut diffs = Vec::with_capacity_in(16, bump);
+        let mut diffs = Vec::with_capacity_in(16, alloc);
         for i in 0..16 {
             let c = &C[i];
             diffs.push(v0 * c[0] + v1 * c[1] + v2 * c[2] + v3 * c[3] - vals[i + 4]);
@@ -244,13 +257,14 @@ fn subdividable(
 
         let val_diff = [v1 - v0, v2 - v0, v3 - v0];
         if test_distance_1(&adj_vmat, val_diff, &diffs, sq_det_vmat, sq_eps) {
-            let mut iter = active.iter();
-            surfs.retain(|_| *iter.next().unwrap());
-            return true;
+            // let mut iter = active.iter();
+            // surfs.retain(|_| *iter.next().unwrap());
+            return (true, get_active(active, n_activated));
         } else {
             if *vals.iter().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap() <= 0.0 ||
                 *vals.iter().min_by(|x, y| x.partial_cmp(y).unwrap()).unwrap() >= 0.0 {
                     active[i] = false;
+                    n_activated -= 1;
                     check_flat_surface(&vals[..4], &tets.tet_faces, &mut tets.face_surfaces, &tets.face_tets,tid, sid);
             }
         }
@@ -260,17 +274,21 @@ fn subdividable(
         val_diff_vec.push(val_diff);
     }
 
-    let activated = BVec::from_iter_in(
+    if n_activated < 2 {
+        return (false, get_active(active, n_activated));
+    }
+
+    let mut activated = Vec::with_capacity_in(n_activated, alloc);
+    activated.extend(
         active
             .iter()
             .enumerate()
             .filter(|(_, &v)| v)
             .map(|(i, _)| i),
-        bump,
     );
-    let mut pair_set = HashSet::new_in(bump);
+    let mut pair_set = HashSet::new_in(alloc);
     for (&i, &j) in activated.iter().tuple_combinations() {
-        let mut points = BVec::with_capacity_in(42, bump);
+        let mut points = Vec::with_capacity_in(42, alloc);
         points.extend(
             interpolant_vec[i]
                 .iter()
@@ -278,72 +296,64 @@ fn subdividable(
                 .map(|v| *v),
         );
 
-        if !contain_zero_2(points, bump) {
+        if !contain_zero_2(points, alloc) {
             continue;
         }
 
         pair_set.insert([i, j]);
 
-        let h = bumpalo::vec![in bump; val_diff_vec[i], val_diff_vec[j]];
+        let h = [val_diff_vec[i], val_diff_vec[j]];
         let b = [
             interpolant_diff_vec[i].as_slice(),
             interpolant_diff_vec[j].as_slice(),
         ];
-        if test_distance_2(&adj_vmat, &h, b, sq_det_vmat, sq_eps, bump) {
-            if activated.len() != active.len() {
-                let mut iter = active.iter();
-                surfs.retain(|_| *iter.next().unwrap());
-            }
-            return true;
+        if test_distance_2(&adj_vmat, &h, b, sq_det_vmat, sq_eps) {
+            return (true, get_active(active, n_activated));
         }
     }
 
     for (&i, &j, &k) in activated.iter().tuple_combinations() {
-        let points = BVec::from_iter_in(
+        if !pair_set.contains(&[i, j]) || !pair_set.contains(&[i, k]) || !pair_set.contains(&[j, k])
+        {
+            continue;
+        }
+        let mut points = Vec::with_capacity_in(63, alloc);
+        points.extend(
             interpolant_vec[i]
                 .iter()
                 .zip(&interpolant_vec[j])
                 .zip(&interpolant_vec[k])
                 .map(|((a, b), c)| [*a, *b, *c])
                 .flatten(),
-            bump,
         );
 
-        if !pair_set.contains(&[i, j]) || !pair_set.contains(&[i, k]) || !pair_set.contains(&[j, k])
-        {
+        if !contain_zero_3(points, alloc) {
             continue;
         }
 
-        if !contain_zero_3(points, bump) {
-            continue;
-        }
-
-        let h = bumpalo::vec![in bump; val_diff_vec[i], val_diff_vec[j], val_diff_vec[k]];
+        let h = [val_diff_vec[i], val_diff_vec[j], val_diff_vec[k]];
         let b = [
             interpolant_diff_vec[i].as_slice(),
             interpolant_diff_vec[j].as_slice(),
             interpolant_diff_vec[k].as_slice(),
         ];
-        if test_distance_3(&adj_vmat, &h, b, sq_det_vmat, sq_eps, bump) {
+        if test_distance_3(&adj_vmat, &h, b, sq_det_vmat, sq_eps) {
             if activated.len() != active.len() {
                 let mut iter = active.iter();
                 surfs.retain(|_| *iter.next().unwrap());
             }
-            return true;
+            return (true, get_active(active, n_activated));
         }
     }
     {
-        let mut iter = active.into_iter();
-        surfs.retain(|_| iter.next().unwrap());
+        // let mut iter = active.into_iter();
+        // surfs.retain(|_| iter.next().unwrap());
     }
-    false
+    return (false, get_active(active, n_activated));
 }
 
-fn transpose_adjacent_mat<'b, const N: usize>(
-    mat: &[[f64; N]],
-    bump: &'b Bump,
-) -> bumpalo::collections::Vec<'b, [f64; N]> {
-    let mut vec = bumpalo::vec![in bump; [0.0; N]; N];
+fn transpose_adjacent_mat<const N: usize>(mat: &[[f64; N]]) -> [[f64; N]; N] {
+    let mut vec = [[0.0; N]; N];
     if N == 2 {
         vec[0][0] = mat[1][1];
         vec[0][1] = -mat[0][1];
@@ -374,10 +384,10 @@ fn det<const N: usize>(mat: &[[f64; N]]) -> f64 {
     }
 }
 
-fn contain_zero_2<'a>(mut points: BVec<'a, f64>, bump: &'a Bump) -> bool {
+fn contain_zero_2<A: Allocator + Copy>(mut points: Vec<f64, A>, alloc: A) -> bool {
     points.extend([0.0, 0.0]);
     let zero_vid = points.len() >> 1;
-    let hull = convex_2(&points, bump);
+    let hull = convex_2(&points, alloc);
     for vid in hull {
         let p = point_2(&points, vid);
         if vid == zero_vid || (p[0] == 0.0 && p[1] == 0.0) {
@@ -387,10 +397,10 @@ fn contain_zero_2<'a>(mut points: BVec<'a, f64>, bump: &'a Bump) -> bool {
     true
 }
 
-fn contain_zero_3<'a>(mut points: BVec<'a, f64>, bump: &'a Bump) -> bool {
+fn contain_zero_3<A: Allocator + Copy>(mut points: Vec<f64, A>, alloc: A) -> bool {
     let zero_vid = points.len() / 3;
     points.extend([0.0, 0.0, 0.0]);
-    match convex_3(&points, true, bump) {
+    match convex_3(&points, true, alloc) {
         crate::triangle::Convex3Result::Dim3(hull) => {
             for vid in hull {
                 let p = point(&points, vid);
@@ -426,17 +436,16 @@ fn test_distance_2(
     b: [&[f64]; 2],
     sq_det_v: f64,
     sq_eps: f64,
-    bump: &Bump,
 ) -> bool {
     // w: (M, 3)
-    let mut w = bumpalo::vec![in bump; [0.0f64; 3]; 2];
+    let mut w = [[0.0f64; 3]; 2];
     for i in 0..2 {
         for j in 0..3 {
             w[i][j] = h[i][0] * adj_v[0][j] + h[i][1] * adj_v[1][j] + h[i][2] * adj_v[2][j];
         }
     }
     // u = w * w^T with shape(M, M)
-    let mut u = bumpalo::vec![in bump; [0.0; 2]; 2];
+    let mut u = [[0.0; 2]; 2];
 
     for i in 0..2 {
         for j in 0..2 {
@@ -447,9 +456,9 @@ fn test_distance_2(
     let det_u = det(&u);
 
     // adj_u: (M, M)
-    let trans_adj_u = transpose_adjacent_mat(&u, bump);
+    let trans_adj_u = transpose_adjacent_mat(&u);
     // wu = w^T x adj_u with shape (3, M)
-    let mut wu = bumpalo::vec![in bump; [0.0; 2]; 3];
+    let mut wu = [[0.0; 2]; 3];
     for i in 0..3 {
         for j in 0..2 {
             for k in 0..2 {
@@ -480,17 +489,16 @@ fn test_distance_3(
     b: [&[f64]; 3],
     sq_det_v: f64,
     sq_eps: f64,
-    bump: &Bump,
 ) -> bool {
     // w: (M, 3)
-    let mut w = bumpalo::vec![in bump; [0.0f64; 3]; 3];
+    let mut w = [[0.0f64; 3]; 3];
     for i in 0..3 {
         for j in 0..3 {
             w[i][j] = h[i][0] * adj_v[0][j] + h[i][1] * adj_v[1][j] + h[i][2] * adj_v[2][j];
         }
     }
     let det_w = det(&w);
-    let trans_adj_w = transpose_adjacent_mat(&w, bump);
+    let trans_adj_w = transpose_adjacent_mat(&w);
     let r2 = (0..b[0].len())
         .map(|l| {
             let mut d = [0.0; 3];
