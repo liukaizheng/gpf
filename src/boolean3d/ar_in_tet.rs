@@ -3,15 +3,21 @@ use std::{
     cell::LazyCell,
 };
 
+use bumpalo::Bump;
+
 use crate::{
+    abs_index,
     mesh::{clone_vec_in, ElementId, FaceId, Mesh, SurfaceMesh, VertexId},
-    predicates::{det4, sign_reverse, sign_reversed, Orientation}, INVALID_IND,
+    predicates::{det4, sign_reverse, sign_reversed, Orientation},
+    signed_index, INVALID_IND,
 };
+
+use super::tet_set::TetSet;
 
 #[derive(Clone)]
 struct FaceData {
     /// plane id
-     pid: usize,
+    pid: usize,
     /// `cells[0]`: inner cell of this face
     /// `cells[1]`: outer cell of this face
     cells: [usize; 2],
@@ -24,6 +30,7 @@ pub(super) struct Arrangement<A: Allocator + Copy> {
     planes: Vec<[f64; 4], A>,
     face_data: Vec<FaceData, A>,
     cell_faces: Vec<Vec<FaceId, A>, A>,
+    plane_indices: Vec<i64, A>,
 }
 
 fn orient3d<A: Allocator + Copy>(
@@ -33,7 +40,6 @@ fn orient3d<A: Allocator + Copy>(
     pd: &[f64; 4],
     alloc: A,
 ) -> Orientation {
-
     #[rustfmt::skip]
     let numerator_sign = det4(
         pa[0], pa[1], pa[2], pa[3],
@@ -43,11 +49,8 @@ fn orient3d<A: Allocator + Copy>(
         alloc,
     );
     let denominator_sign = det4(
-        pa[0], pa[1], pa[2], pa[3],
-        pb[0], pb[1], pb[2], pb[3],
-        pc[0], pc[1], pc[2], pc[3],
-        1.0  , 1.0  , 1.0  ,   1.0,
-        alloc,
+        pa[0], pa[1], pa[2], pa[3], pb[0], pb[1], pb[2], pb[3], pc[0], pc[1], pc[2], pc[3], 1.0,
+        1.0, 1.0, 1.0, alloc,
     );
 
     if denominator_sign == Orientation::Positive {
@@ -104,6 +107,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
             planes,
             face_data,
             cell_faces,
+            plane_indices: Vec::new_in(alloc),
         }
     }
 
@@ -118,6 +122,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
             edges: clone_vec_in(&self.edges, alloc),
             planes: clone_vec_in(&self.planes, alloc),
             face_data: clone_vec_in(&self.face_data, alloc),
+            plane_indices: clone_vec_in(&self.plane_indices, alloc),
             cell_faces,
         }
     }
@@ -136,24 +141,62 @@ impl<A: Allocator + Copy> Arrangement<A> {
         vert_orientations.extend(self.mesh.vertices().map(|v| {
             let vid = *v;
             let v_planes = &self.vertices[vid];
-            orient3d(&self.planes[v_planes[0]], &self.planes[v_planes[1]],  &self.planes[v_planes[2]], plane, alloc)
+            orient3d(
+                &self.planes[v_planes[0]],
+                &self.planes[v_planes[1]],
+                &self.planes[v_planes[2]],
+                plane,
+                alloc,
+            )
         }));
 
-        for f in self.mesh.faces() {
-            if f.vertices().all(|v| vert_orientations[*v] == Orientation::Zero) {
+        for face in self.mesh.faces() {
+            if face
+                .vertices()
+                .all(|v| vert_orientations[*v] == Orientation::Zero)
+            {
                 // println!("add same plane");
+                let base_fid = *face;
+                let pid = self.face_data[base_fid].pid;
+                debug_assert!(pid >= 4);
+                let pos_cid = self.face_data[pid].cells[0];
+                debug_assert!(pos_cid != INVALID_IND);
 
+                let non_zero_ori_fn = || {
+                    for &fid in &self.cell_faces[pos_cid] {
+                        if fid == base_fid {
+                            continue;
+                        }
+
+                        for v in self.mesh.face(fid).vertices() {
+                            let ori = vert_orientations[*v];
+                            if !ori.is_zero() {
+                                return ori;
+                            }
+                        }
+                    }
+                    return Orientation::Undefined;
+                };
+                let non_zero_ori = non_zero_ori_fn();
+                debug_assert!(non_zero_ori != Orientation::Undefined);
+                self.plane_indices
+                    .push(signed_index(pid, non_zero_ori.is_neg()));
                 return;
             }
         }
+        self.plane_indices.push(signed_index(pid, false));
 
         self.split_edges(&mut vert_orientations, pid, alloc);
         self.split_faces(&vert_orientations, pid);
         self.split_cells(&vert_orientations, pid, alloc);
     }
 
-
-    fn split_edges<A1: Allocator + Copy>(&mut self, vert_orientations: &mut Vec<Orientation, A1>, pid: usize, alloc: A1) {
+    fn split_edges<A1: Allocator + Copy>(
+        &mut self,
+        vert_orientations: &mut Vec<Orientation, A1>,
+        pid: usize,
+        alloc: A1,
+    ) {
         let n_old_edges = self.mesh.n_edges_capacity();
         for eid in 0..n_old_edges {
             let eid = eid.into();
@@ -221,7 +264,12 @@ impl<A: Allocator + Copy> Arrangement<A> {
         }
     }
 
-    fn split_cells<A1: Allocator + Copy>(&mut self, vert_orientations: &[Orientation], pid: usize, alloc: A1) {
+    fn split_cells<A1: Allocator + Copy>(
+        &mut self,
+        vert_orientations: &[Orientation],
+        pid: usize,
+        alloc: A1,
+    ) {
         let n_old_cells = self.cell_faces.len();
         let self_alloc = self.vertices.allocator().clone();
         for cid in 0..n_old_cells {
@@ -287,7 +335,10 @@ impl<A: Allocator + Copy> Arrangement<A> {
 
             let new_fid = self.mesh.add_face_by_halfedges(&new_halfedges);
             let new_cid = self.cell_faces.len();
-            self.face_data.push(FaceData { pid , cells: [cid, new_cid] });
+            self.face_data.push(FaceData {
+                pid,
+                cells: [cid, new_cid],
+            });
 
             for &fid in &pos_cell_faces {
                 for c in &mut self.face_data[fid].cells {
@@ -308,12 +359,73 @@ impl<A: Allocator + Copy> Arrangement<A> {
         }
     }
 
+    fn extract_mesh(
+        &mut self,
+        tets: &TetSet,
+        tid: usize,
+        points: &mut Vec<f64>,
+        triangles: &mut Vec<usize>,
+        point_map: &mut Vec<usize>,
+    ) {
+        for i in 0..self.plane_indices.len() {
+            let pid = i + 4;
+            let parent_pid = abs_index(self.plane_indices[i]);
+            if parent_pid == pid {
+                self.plane_indices[i] = 1;
+            } else {
+                self.plane_indices[parent_pid - 4] +=
+                    if self.plane_indices[i] > 0 { 1 } else { -1 };
+                self.plane_indices[i] = 0;
+            }
+        }
+
+        for face in self.mesh.faces() {
+            let fid = *face;
+            let pid = self.face_data[fid].pid;
+            if pid < 4 {
+                continue;
+            }
+
+            let pid = pid - 4;
+            if self.plane_indices[pid] == 0 {
+                continue;
+            }
+
+            let reversed = self.plane_indices[pid] < 0;
+        }
+    }
 }
 
-pub fn arrangement_for_tet<A: Allocator + Copy>(planes: &[[f64; 4]], alloc: A) {
+fn arrangement_for_tet<A: Allocator + Copy>(planes: &[[f64; 4]], alloc: A) -> Arrangement<Global> {
     let one_tet = LazyCell::new(|| Arrangement::new_tet(Global));
     let mut ar = one_tet.clone_in(Global);
+    ar.plane_indices.reserve(planes.len());
     for plane in planes {
         ar.add_plane(plane, alloc);
+    }
+    return ar;
+}
+
+pub(crate) fn extract_mesh(tets: &TetSet, vals: Vec<Vec<f64>>, active_surfaces: Vec<Vec<usize>>) {
+    let mut points = Vec::<f64>::new();
+    let mut triangles = Vec::<f64>::new();
+
+    let mut bump = Bump::new();
+    for (tid, verts) in tets.tet_vertices.iter().enumerate() {
+        let surfs = &active_surfaces[tid];
+        if surfs.is_empty() {
+            continue;
+        }
+        bump.reset();
+        let mut planes = Vec::with_capacity_in(surfs.len(), &bump);
+        planes.extend(surfs.iter().map(|&sid| {
+            let mut tet_vals = [f64::NAN; 4];
+            for (val, &vid) in tet_vals.iter_mut().zip(verts) {
+                *val = vals[sid][vid];
+            }
+            tet_vals
+        }));
+
+        let ar = arrangement_for_tet(&planes, &bump);
     }
 }
