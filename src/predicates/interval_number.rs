@@ -47,12 +47,12 @@ impl IntervalNumber {
 
     #[inline(always)]
     pub fn positive(&self) -> bool {
-        self.data[0] < 0.0
+        self.data[1] < 0.0
     }
 
     #[inline(always)]
     pub fn negative(&self) -> bool {
-        self.data[1] < 0.0
+        self.data[0] < 0.0
     }
 
     #[inline(always)]
