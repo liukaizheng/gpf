@@ -5,6 +5,7 @@ use crate::{
     point, INVALID_IND,
 };
 
+use itertools::Itertools;
 use tinyvec::TinyVec;
 
 pub(crate) struct TetSet {
@@ -50,12 +51,10 @@ impl TetSet {
             }
             oppo_verts.push(*he.next().to());
         }
-        let mut _tet_faces = Vec::from_iter(tet_faces_map.clone());
-        _tet_faces.sort_unstable();
         let mut oppo_halfedges = Vec::with_capacity_in(tet_faces_map.len(), alloc);
         let mut bottom_faces = Vec::with_capacity_in(tet_faces_map.len(), alloc);
         let mut top_faces = Vec::with_capacity_in(tet_faces_map.len(), alloc);
-        for &(tid, [fa, fb]) in &_tet_faces {
+        for (&tid, &[fa, fb]) in &tet_faces_map {
             let bottom_top_faces = || {
                 let mut fc = FaceId::default();
                 let mut fd = FaceId::default();
@@ -140,7 +139,7 @@ impl TetSet {
             .all(|&hid| self.mesh.he_from(hid) == new_vert));
 
         let mut result_tets = Vec::with_capacity_in(tet_faces_map.len() << 1, alloc);
-        for ((((tid, face_indices), oppo_hid), bottom_fid), top_fid) in _tet_faces
+        for ((((tid, face_indices), oppo_hid), bottom_fid), top_fid) in tet_faces_map
             .into_iter()
             .zip(oppo_halfedges)
             .zip(bottom_faces)
@@ -161,14 +160,6 @@ impl TetSet {
             let new_tid = self.tet_vertices.len();
             self.face_tets.push([tid, new_tid]);
 
-            let mut ot_faces = Vec::with_capacity_in(4, alloc); // old tet faces
-            let mut nt_faces = Vec::with_capacity_in(4, alloc); // new tet faces
-
-            let mut ot_edges = Vec::with_capacity_in(6, alloc); // old tet edges
-            let mut nt_edges = Vec::with_capacity_in(6, alloc); // new tet edges
-            ot_edges.push(top_eid);
-            nt_edges.push(bottom_eid);
-
             let replace = |tets: &mut [usize; 2]| {
                 for t in tets {
                     if *t == tid {
@@ -178,92 +169,99 @@ impl TetSet {
                 }
             };
 
-            // bottom face
-            nt_faces.push(bottom_fid);
             replace(&mut self.face_tets[bottom_fid]);
 
-            // old tet top face
-            ot_faces.push(top_fid);
-
-            // new face
-            ot_faces.push(new_fid);
-            nt_faces.push(new_fid);
-
-            // fa and fb
-            for hid in [ha, hb] {
+            let side_faces_and_edges = [ha, self.mesh.he_twin(hb)].map(|hid| {
                 // when the face is split, the f_halfedge of the face is the split halfedge
                 let he = self.mesh.halfedge(hid);
-                if *he.next().to() == va {
-                    debug_assert!(*he.twin().next().to() == vb);
+                let next_he = he.next();
+                if *next_he.to() == va {
                     let fid = self.mesh.he_face(*he);
-                    nt_faces.push(fid);
+                    // nt_faces.push(fid);
                     replace(&mut self.face_tets[fid]);
-                    ot_faces.push(self.mesh.he_face(*he.twin()));
+
+                    let prev_twin = he.twin().prev();
+
+                    debug_assert!(*prev_twin.from() == vb);
+                    debug_assert!(*prev_twin.to() == *he.to());
+
+                    // ot_faces.push(self.mesh.he_face(*prev_twin));
+                    (
+                        [self.mesh.he_face(*prev_twin), fid],
+                        [*prev_twin.edge(), *next_he.edge()],
+                    )
                 } else {
-                    debug_assert!(*he.next().to() == vb);
-                    debug_assert!(*he.twin().next().to() == va);
-                    let twin_fid = self.mesh.he_face(*he.twin());
-                    nt_faces.push(twin_fid);
+                    debug_assert!(*next_he.to() == vb);
+                    let prev_twin = he.twin().prev();
+                    debug_assert!(*prev_twin.from() == va);
+                    debug_assert!(*prev_twin.to() == *he.to());
+                    let twin_fid = self.mesh.he_face(*prev_twin);
                     replace(&mut self.face_tets[twin_fid]);
-                    ot_faces.push(self.mesh.he_face(*he));
+                    (
+                        [self.mesh.he_face(*he), twin_fid],
+                        [*next_he.edge(), *prev_twin.edge()],
+                    )
                 }
-            }
-            debug_assert!(ot_faces.len() == 4);
-            debug_assert!(nt_faces.len() == 4);
-
-            let collect_edges = |vec: &mut Vec<EdgeId, _>, candidate_faces, exclude_eid| {
-                for &fid in candidate_faces {
-                    for he in self.mesh.face(fid).halfedges() {
-                        let e = he.edge();
-                        if *e != exclude_eid {
-                            vec.push(*e);
-                        }
-                    }
-                }
-            };
-            collect_edges(&mut ot_edges, &ot_faces[2..], top_eid);
-            collect_edges(&mut nt_edges, &nt_faces[2..], bottom_eid);
-
-            let oppo_eid = self.mesh.he_edge(oppo_hid);
-            ot_edges.push(oppo_eid);
-            nt_edges.push(oppo_eid);
-
-            debug_assert!(ot_edges.len() == 6);
-            debug_assert!(nt_edges.len() == 6);
+            });
 
             let [vc, vd] = self.mesh.he_vertices(oppo_hid);
+            let [ea, eb, oppo_eid] = [ha, hb, oppo_hid].map(|hid| self.mesh.he_edge(hid));
 
             self.tet_vertices[tid] = [new_vert, vb, vd, vc];
             self.tet_edges[tid] = [
-                ot_edges[0],
-                ot_edges[1],
-                ot_edges[2],
-                ot_edges[3],
-                ot_edges[4],
-                ot_edges[5],
+                top_eid,
+                eb,
+                ea,
+                side_faces_and_edges[1].1[0],
+                side_faces_and_edges[0].1[0],
+                oppo_eid,
             ];
-            self.tet_faces[tid] = [ot_faces[0], ot_faces[1], ot_faces[2], ot_faces[3]];
-
-            debug_assert!(ot_faces.iter().all(|&fid| {
-                let tets = self.face_tets[fid];
-                tets[0] == tid || tets[1] == tid
-            }));
-            debug_assert!(nt_faces.iter().all(|&fid| {
-                let tets = self.face_tets[fid];
-                tets[0] == new_tid || tets[1] == new_tid
-            }));
+            self.tet_faces[tid] = [
+                top_fid,
+                new_fid,
+                side_faces_and_edges[0].0[0],
+                side_faces_and_edges[1].0[0],
+            ];
+            #[cfg(debug_assertions)]
+            {
+                for ((&v1, &v2), &eid) in [new_vert, vb, vd, vc]
+                    .iter()
+                    .tuple_combinations()
+                    .zip(&self.tet_edges[tid])
+                {
+                    let [v3, v4] = self.mesh.e_vertices(eid);
+                    debug_assert!((v1 == v3 && v2 == v4) || (v1 == v4 && v2 == v3));
+                }
+            }
 
             self.tet_vertices.push([new_vert, va, vd, vc]);
             self.tet_edges.push([
-                nt_edges[0],
-                nt_edges[1],
-                nt_edges[2],
-                nt_edges[3],
-                nt_edges[4],
-                nt_edges[5],
+                bottom_eid,
+                eb,
+                ea,
+                side_faces_and_edges[1].1[1],
+                side_faces_and_edges[0].1[1],
+                oppo_eid,
             ]);
-            self.tet_faces
-                .push([nt_faces[0], nt_faces[1], nt_faces[2], nt_faces[3]]);
+
+            #[cfg(debug_assertions)]
+            {
+                for ((&v1, &v2), &eid) in [new_vert, va, vd, vc]
+                    .iter()
+                    .tuple_combinations()
+                    .zip(&self.tet_edges[new_tid])
+                {
+                    let [v3, v4] = self.mesh.e_vertices(eid);
+                    debug_assert!((v1 == v3 && v2 == v4) || (v1 == v4 && v2 == v3));
+                }
+            }
+
+            self.tet_faces.push([
+                bottom_fid,
+                new_fid,
+                side_faces_and_edges[0].0[1],
+                side_faces_and_edges[1].0[1],
+            ]);
             result_tets.push([tid, new_tid]);
         }
         self.face_surfaces

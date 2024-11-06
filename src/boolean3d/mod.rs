@@ -1,19 +1,18 @@
 mod adaptive_subdivide;
-pub mod ar_in_tet;
+mod ar_in_tet;
 mod tet_set;
 
 use std::collections::{HashMap, HashSet};
 
 use adaptive_subdivide::adaptive_subdivide;
-use ar_in_tet::arrangement_for_tet;
-use bumpalo::Bump;
+use ar_in_tet::extract_mesh;
 use itertools::Itertools;
 use tet_set::TetSet;
 use tinyvec::TinyVec;
 
 use crate::{
     geometry::{BBox, Surf},
-    mesh::{square_edge_length, EdgeId, FaceId, Mesh, SurfaceMesh},
+    mesh::{square_edge_length, EdgeId, ElementId, FaceId, Mesh, SurfaceMesh},
     INVALID_IND,
 };
 
@@ -49,23 +48,7 @@ pub fn boolean3d(first: &SimpleBody, second: &SimpleBody, t: BooleanType, eps: f
     let mut tets = init_mesh(bbox);
     let (vals, active_surfs) = adaptive_subdivide(&mut tets, surfaces, eps * eps);
 
-    let mut bump = Bump::new();
-    for (tid, verts) in tets.tet_vertices.iter().enumerate() {
-        if active_surfs[tid].is_empty() {
-            continue;
-        }
-        bump.reset();
-        let mut planes = Vec::with_capacity_in(active_surfs.len(), &bump);
-        planes.extend(active_surfs[tid].iter().map(|&sid| {
-            let mut tet_vals = [f64::NAN; 4];
-            for (val, &vid) in tet_vals.iter_mut().zip(verts) {
-                *val = vals[sid][vid];
-            }
-            tet_vals
-        }));
-
-        arrangement_for_tet(&planes, &bump);
-    }
+    extract_mesh(&tets, vals, active_surfs);
 
     println!("mesh n tets: {}", tets.tet_faces.len());
 }
@@ -115,24 +98,19 @@ fn init_mesh(bbox: BBox) -> TetSet {
 
     let mesh = SurfaceMesh::new(triangles, std::alloc::Global);
 
-    tet_edges.extend(tet_faces.iter().map(|faces| {
-        let mut set = HashSet::with_capacity(6);
-        for &fid in faces {
-            for he in mesh.face(fid).halfedges() {
-                set.insert(*he.edge());
-            }
-        }
-        debug_assert_eq!(set.len(), 6);
-        let mut iter = set.into_iter();
+    tet_edges.extend(tet_vertices.iter().map(|verts| {
         let mut edges = [EdgeId::default(); 6];
-        edges[0] = iter.next().unwrap();
-        edges[1] = iter.next().unwrap();
-        edges[2] = iter.next().unwrap();
-        edges[3] = iter.next().unwrap();
-        edges[4] = iter.next().unwrap();
-        edges[5] = iter.next().unwrap();
+        let mut idx = 0;
+        for (&va, &vb) in verts.iter().tuple_combinations() {
+            let eid = mesh.e_from_va_vb(va, vb);
+            debug_assert!(eid.valid());
+            edges[idx] = eid;
+            idx += 1;
+        }
+        debug_assert!(idx == 6);
         edges
     }));
+
     let points = vec![
         bbox.min[0],
         bbox.min[1],

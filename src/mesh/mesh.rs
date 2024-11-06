@@ -104,6 +104,16 @@ pub trait Mesh: Sized {
     /// the first halfedge of the edge
     fn e_halfedge(&self, eid: EdgeId) -> HalfedgeId;
 
+    /// get the edge from (va, vb)
+    fn e_from_va_vb(&self, va: VertexId, vb: VertexId) -> EdgeId {
+        for he in self.vertex(vb).incoming_halfedges() {
+            if *he.from() == va {
+                return *he.edge();
+            }
+        }
+        EdgeId::default()
+    }
+
     /// two vertices of the halfedge
     #[inline(always)]
     fn he_vertices(&self, hid: HalfedgeId) -> [VertexId; 2] {
