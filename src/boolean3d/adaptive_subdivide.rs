@@ -7,8 +7,6 @@ use bumpalo::Bump;
 use itertools::Itertools;
 use tinyvec::TinyVec;
 
-const EPS: f64 = 0.0009765625; // 2^(-10)
-
 use crate::{
     abs_index,
     boolean3d::tet_set::tet_face_reversed,
@@ -66,7 +64,7 @@ pub(super) fn adaptive_subdivide(
     let mut vals_and_grads = vec![Vec::with_capacity(tets.mesh.n_vertices()); surfaces.len()];
     for p in tets.points.chunks(3) {
         for (i, &surf) in surfaces.iter().enumerate() {
-            vals_and_grads[i].push(surf.eval_round(p, EPS));
+            vals_and_grads[i].push(surf.eval(p));
         }
     }
     let active_surfs = (0..tets.tet_faces.len())
@@ -86,7 +84,14 @@ pub(super) fn adaptive_subdivide(
         "{} coplanar faces",
         tets.face_surfaces.iter().filter(|v| !v.is_empty()).count()
     );
-    (round_vert_vals(tets, &data), data.active_surfs)
+
+    (
+        data.vals_and_grads
+            .into_iter()
+            .map(|v| v.into_iter().map(|vg| vg[0]).collect_vec())
+            .collect_vec(),
+        data.active_surfs,
+    )
 }
 
 fn adaptive_subdivide_impl(tets: &mut TetSet, data: &mut SubdivisionData, sq_eps: f64) {
@@ -116,7 +121,7 @@ fn adaptive_subdivide_impl(tets: &mut TetSet, data: &mut SubdivisionData, sq_eps
                 if !vals_grads[new_vert.0][0].is_nan() {
                     continue;
                 }
-                vals_grads[new_vert] = data.surfaces[sid].eval_round(p, EPS);
+                vals_grads[new_vert] = data.surfaces[sid].eval(p);
             }
             data.active_surfs.push(data.active_surfs[old_tet].clone());
         }
@@ -520,7 +525,7 @@ fn test_distance_3(
 fn check_flat_surface(
     vals: &[f64],
     tet_faces: &[[FaceId; 4]],
-    face_surfaces: &mut [TinyVec<[i64; 2]>],
+    face_surfaces: &mut [TinyVec<[i64; 1]>],
     face_tets: &[[usize; 2]],
     tid: usize,
     sid: usize,
@@ -545,26 +550,4 @@ fn check_flat_surface(
             (vals[non_zero_idx] < 0.0) == tet_face_reversed(&face_tets[fid], tid),
         ));
     }
-}
-
-fn round_vert_vals(tets: &TetSet, data: &SubdivisionData) -> Vec<Vec<f64>> {
-    let mut vals = vec![vec![f64::NAN; tets.mesh.n_vertices_capacity()]; data.surfaces.len()];
-    const EPS: f64 = 0.0009765625; // 2^(-10)
-    for (tid, verts) in tets.tet_vertices.iter().enumerate() {
-        let surfs = &data.active_surfs[tid];
-        if surfs.is_empty() {
-            continue;
-        }
-
-        for &sid in surfs {
-            for &vid in verts {
-                if !vals[sid][vid].is_nan() {
-                    continue;
-                }
-                let v = data.vals_and_grads[sid][vid][0];
-                vals[sid][vid] = (v / EPS).round() * EPS;
-            }
-        }
-    }
-    vals
 }

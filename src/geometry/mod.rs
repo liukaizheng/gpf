@@ -8,13 +8,6 @@ pub use plane::Plane;
 
 pub trait Surface {
     fn eval(&self, p: &[f64]) -> [f64; 4];
-
-    #[inline]
-    fn eval_round(&self, p: &[f64], eps: f64) -> [f64; 4] {
-        let mut res = self.eval(p);
-        res[0] = (res[0] / eps).round() * eps;
-        res
-    }
 }
 
 pub enum Surf {

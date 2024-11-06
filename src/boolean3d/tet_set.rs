@@ -15,7 +15,7 @@ pub(crate) struct TetSet {
     pub(crate) face_tets: Vec<[usize; 2]>,
     pub(crate) points: Vec<f64>,
     pub(crate) square_edge_lengths: Vec<f64>,
-    pub(crate) face_surfaces: Vec<TinyVec<[i64; 2]>>,
+    pub(crate) face_surfaces: Vec<TinyVec<[i64; 1]>>,
 }
 
 #[inline]
@@ -25,15 +25,6 @@ pub(crate) fn tet_face_reversed(face_tets: &[usize; 2], tid: usize) -> bool {
 }
 
 impl TetSet {
-    #[inline]
-    pub(crate) fn vertices_in<A: Allocator + Copy>(
-        &self,
-        tid: usize,
-        alloc: A,
-    ) -> Vec<VertexId, A> {
-        self.tet_vertices[tid].to_vec_in(alloc)
-    }
-
     pub(crate) fn split_edge<A: Allocator + Copy>(
         &mut self,
         eid: EdgeId,
@@ -59,10 +50,12 @@ impl TetSet {
             }
             oppo_verts.push(*he.next().to());
         }
+        let mut _tet_faces = Vec::from_iter(tet_faces_map.clone());
+        _tet_faces.sort_unstable();
         let mut oppo_halfedges = Vec::with_capacity_in(tet_faces_map.len(), alloc);
         let mut bottom_faces = Vec::with_capacity_in(tet_faces_map.len(), alloc);
         let mut top_faces = Vec::with_capacity_in(tet_faces_map.len(), alloc);
-        for (&tid, &[fa, fb]) in &tet_faces_map {
+        for &(tid, [fa, fb]) in &_tet_faces {
             let bottom_top_faces = || {
                 let mut fc = FaceId::default();
                 let mut fd = FaceId::default();
@@ -147,7 +140,7 @@ impl TetSet {
             .all(|&hid| self.mesh.he_from(hid) == new_vert));
 
         let mut result_tets = Vec::with_capacity_in(tet_faces_map.len() << 1, alloc);
-        for ((((tid, face_indices), oppo_hid), bottom_fid), top_fid) in tet_faces_map
+        for ((((tid, face_indices), oppo_hid), bottom_fid), top_fid) in _tet_faces
             .into_iter()
             .zip(oppo_halfedges)
             .zip(bottom_faces)

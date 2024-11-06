@@ -310,7 +310,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
 
 }
 
-pub(super) fn arrangement_for_tet<A: Allocator + Copy>(planes: &[[f64; 4]], alloc: A) {
+pub fn arrangement_for_tet<A: Allocator + Copy>(planes: &[[f64; 4]], alloc: A) {
     let one_tet = LazyCell::new(|| Arrangement::new_tet(Global));
     let mut ar = one_tet.clone_in(Global);
     for plane in planes {
