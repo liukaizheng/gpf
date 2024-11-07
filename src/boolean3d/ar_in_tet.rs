@@ -1,17 +1,37 @@
 use std::alloc::{Allocator, Global};
 
 use bumpalo::Bump;
-use hashbrown::HashMap;
+use std::collections::HashMap;
 use tinyvec::{tiny_vec, TinyVec};
 
 use crate::{
+    math::interpolate,
     mesh::{clone_vec_in, EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, VertexId},
     point,
-    predicates::{det4, sign_reversed, Orientation},
+    predicates::det4,
     signed_index, INVALID_IND,
 };
 
 use super::tet_set::{tet_face_reversed, TetSet};
+
+#[derive(Clone)]
+enum InterPt {
+    V(VertexId),
+    ES((EdgeId, usize)),
+    FSS((FaceId, usize, usize)),
+    SSS([usize; 3]),
+    INVALID,
+}
+
+impl InterPt {
+    #[inline]
+    fn valid(&self) -> bool {
+        match self {
+            InterPt::INVALID => false,
+            _ => true,
+        }
+    }
+}
 
 #[derive(Clone)]
 struct VertexData {
@@ -346,7 +366,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                 }
 
                 if non_zero_vid.valid() {
-                    if vert_orientations[non_zero_vid] == 0.0 {
+                    if vert_orientations[non_zero_vid] > 0.0 {
                         pos_cell_faces.push(fid);
                     } else {
                         neg_cell_faces.push(fid);
@@ -402,37 +422,106 @@ impl<A: Allocator + Copy> Arrangement<A> {
         vid: VertexId,
         tid: usize,
         tets: &TetSet,
-        data: &mut ExtractMesh,
-    ) -> usize {
-        let mut boudries = TinyVec::<[usize; 3]>::new();
+        surfs: &[usize],
+    ) -> InterPt {
+        let mut boundries = TinyVec::<[usize; 3]>::new();
         let mut inners = TinyVec::<[usize; 3]>::new();
         for &i in &self.vertices[vid].planes {
             if i < 4 {
-                boudries.push(i);
+                boundries.push(i);
             } else {
-                inners.push(i);
+                inners.push(i - 4);
             }
         }
 
         match inners.len() {
             0 => {
-                let idx = boudries[0] ^ boudries[1] ^ boudries[2];
-                let vid = tets.tet_vertices[tid][idx];
-                if data.point_map[vid] != INVALID_IND {
-                    return data.point_map[vid];
-                } else {
-                    let pid = data.points.len() / 3;
-                    data.point_map[vid] = pid;
-                    data.points.extend_from_slice(point(&tets.points, vid.0));
-                    return pid;
-                }
+                let idx = boundries[0] ^ boundries[1] ^ boundries[2];
+                InterPt::V(tets.tet_vertices[tid][idx])
             }
-            _ => {
-                return 0;
+            1 => {
+                let edge_index =
+                    if boundries[0] != 0 { 0 } else { 1 } + 5 - boundries[0] - boundries[1];
+                InterPt::ES((tets.tet_edges[tid][edge_index], surfs[inners[0]]))
             }
+            2 => {
+                let fid = tets.tet_faces[tid][boundries[0]];
+                InterPt::FSS((fid, surfs[inners[0]], surfs[inners[1]]))
+            }
+            3 => InterPt::SSS([surfs[inners[0]], surfs[inners[1]], surfs[inners[2]]]),
+            _ => InterPt::INVALID,
         }
     }
-    fn extract_mesh(&mut self, tets: &TetSet, tid: usize, data: &mut ExtractMesh) {
+
+    fn extract_mesh(&mut self, tets: &TetSet, tid: usize, surfs: &[usize], data: &mut ExtractMesh) {
+        let alloc = self.vertices.allocator();
+        let mut vertex_pts = Vec::with_capacity_in(self.mesh.n_vertices_capacity(), alloc);
+        vertex_pts.resize(self.mesh.n_vertices_capacity(), InterPt::INVALID);
+
+        for face in self.mesh.faces() {
+            let fid = *face;
+            if self.face_data[fid].surfaces.is_empty() {
+                continue;
+            }
+            for v in face.vertices() {
+                let vid = *v;
+                if !vertex_pts[vid].valid() {
+                    vertex_pts[vid] = self.get_global_vertex(vid, tid, tets, surfs);
+                }
+            }
+        }
+
+        let mut vertex_indices = Vec::with_capacity_in(self.mesh.n_vertices_capacity(), alloc);
+        vertex_indices.resize(self.mesh.n_vertices_capacity(), INVALID_IND);
+        for (idx, inter_pt) in vertex_pts.into_iter().enumerate() {
+            let pid = match inter_pt {
+                InterPt::V(vid) => {
+                    if data.point_map[vid] == INVALID_IND {
+                        let pid = data.points.len() / 3;
+                        data.points.extend_from_slice(point(&tets.points, vid.0));
+                        pid
+                    } else {
+                        data.point_map[vid]
+                    }
+                }
+                InterPt::ES(key) => match data.edge_point_map.entry(key) {
+                    std::collections::hash_map::Entry::Occupied(occupied) => *occupied.get(),
+                    std::collections::hash_map::Entry::Vacant(vacant) => {
+                        let pid = data.points.len() / 3;
+                        vacant.insert(pid);
+                        pid
+                    }
+                },
+                InterPt::FSS(key) => match data.face_point_map.entry(key) {
+                    std::collections::hash_map::Entry::Occupied(occupied) => *occupied.get(),
+                    std::collections::hash_map::Entry::Vacant(vacant) => {
+                        let pid = data.points.len() / 3;
+                        vacant.insert(pid);
+                        pid
+                    }
+                },
+                InterPt::SSS(_) => data.points.len() / 3,
+
+                InterPt::INVALID => INVALID_IND,
+            };
+
+            if pid != INVALID_IND {
+                if pid * 3 >= data.points.len() {
+                    let [pa, pb] = self.vertices[idx].parents.map(|vid| {
+                        if vid.0 < 4 {
+                            point(&tets.points, tets.tet_vertices[tid][vid].0)
+                        } else {
+                            point(&data.points, vertex_indices[vid])
+                        }
+                    });
+                    let [s1, s2] = self.vertices[idx].vals.map(|x| x.abs());
+                    data.points
+                        .extend_from_slice(&interpolate::<3>(pa, s1, pb, s2));
+                }
+                vertex_indices[idx] = pid;
+            }
+        }
+
         for face in self.mesh.faces() {
             let fid = *face;
             if self.face_data[fid].surfaces.is_empty() {
@@ -441,15 +530,15 @@ impl<A: Allocator + Copy> Arrangement<A> {
 
             let first_hid = self.mesh.f_halfedge(fid);
             let mut curr_hid = first_hid;
-            let v1 = self.get_global_vertex(self.mesh.he_to(curr_hid), tid, tets, data);
+            let v1 = vertex_indices[self.mesh.he_to(curr_hid)];
             curr_hid = self.mesh.he_next(curr_hid);
-            let mut v2 = self.get_global_vertex(self.mesh.he_to(curr_hid), tid, tets, data);
+            let mut v2 = vertex_indices[self.mesh.he_to(curr_hid)];
             loop {
                 curr_hid = self.mesh.he_next(curr_hid);
                 if curr_hid == first_hid {
                     break;
                 }
-                let v3 = self.get_global_vertex(self.mesh.he_to(curr_hid), tid, tets, data);
+                let v3 = vertex_indices[self.mesh.he_to(curr_hid)];
                 data.triangles.extend_from_slice(&[v1, v2, v3]);
                 data.triangle_parents
                     .push(self.face_data[fid].surfaces.clone());
@@ -465,7 +554,7 @@ struct ExtractMesh {
     triangle_parents: Vec<TinyVec<[i64; 1]>>,
     point_map: Vec<usize>,
     edge_point_map: HashMap<(EdgeId, usize), usize>,
-    face_point_map: HashMap<(usize, usize, usize), usize>,
+    face_point_map: HashMap<(FaceId, usize, usize), usize>,
 }
 
 impl ExtractMesh {
@@ -481,13 +570,38 @@ impl ExtractMesh {
     }
 }
 
+fn write_obj(name: &str, points: &[f64], triangles: &[usize]) {
+    let mut file = std::fs::File::create(name).unwrap();
+    use std::io::Write;
+    for i in 0..points.len() / 3 {
+        writeln!(
+            &mut file,
+            "v {} {} {}",
+            points[i * 3],
+            points[i * 3 + 1],
+            points[i * 3 + 2]
+        )
+        .unwrap();
+    }
+
+    for i in 0..triangles.len() / 3 {
+        writeln!(
+            &mut file,
+            "f {} {} {}",
+            triangles[i * 3] + 1,
+            triangles[i * 3 + 1] + 1,
+            triangles[i * 3 + 2] + 1
+        )
+        .unwrap();
+    }
+}
+
 pub(crate) fn extract_mesh(tets: &TetSet, vals: Vec<Vec<f64>>, active_surfaces: Vec<Vec<usize>>) {
     let base_tet = Arrangement::new_tet(Global);
     let mut data = ExtractMesh::new(tets.mesh.n_vertices_capacity());
 
     let mut bump = Bump::new();
     for (tid, verts) in tets.tet_vertices.iter().enumerate() {
-        println!("tid is {}", tid);
         let surfs = &active_surfaces[tid];
         if surfs.is_empty() {
             continue;
@@ -524,6 +638,8 @@ pub(crate) fn extract_mesh(tets: &TetSet, vals: Vec<Vec<f64>>, active_surfaces: 
             ar.add_plane(i + 4, sid, &bump);
         }
 
-        ar.extract_mesh(tets, tid, &mut data);
+        ar.extract_mesh(tets, tid, surfs, &mut data);
     }
+
+    write_obj("123.obj", &data.points, &data.triangles);
 }
