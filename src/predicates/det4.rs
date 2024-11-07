@@ -1,8 +1,6 @@
 use std::alloc::Allocator;
 
-use super::{
-    abs_max, double_to_sign, dummy_abs_max, ExpansionNum, GenericNum, IntervalNumber, Orientation,
-};
+use super::{abs_max, dummy_abs_max, ExpansionNum, GenericNum, IntervalNumber};
 
 pub fn det4<A: Allocator + Copy>(
     a: f64,
@@ -22,7 +20,7 @@ pub fn det4<A: Allocator + Copy>(
     o: f64,
     p: f64,
     alloc: A,
-) -> Orientation {
+) -> f64 {
     {
         // static filter
         let (det, max_var) =
@@ -32,8 +30,8 @@ pub fn det4<A: Allocator + Copy>(
         epsilon *= epsilon;
         epsilon *= epsilon;
         epsilon *= 1.953992523340277e-14;
-        if det.abs() > epsilon {
-            return double_to_sign(det);
+        if det > epsilon || det < -epsilon {
+            return det;
         }
     }
     {
@@ -58,11 +56,7 @@ pub fn det4<A: Allocator + Copy>(
             dummy_abs_max,
         );
         if det.not_zero() {
-            if det.positive() {
-                return Orientation::Positive;
-            } else {
-                return Orientation::Negative;
-            }
+            return det.round();
         }
     }
     {
@@ -86,7 +80,7 @@ pub fn det4<A: Allocator + Copy>(
             [p].to_vec_in(alloc).into(),
             dummy_abs_max,
         );
-        return double_to_sign(*det.vec.last().unwrap());
+        return *det.vec.last().unwrap();
     }
 }
 

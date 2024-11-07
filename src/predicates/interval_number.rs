@@ -63,6 +63,11 @@ impl IntervalNumber {
     pub fn from_f64x2(data: f64x2) -> Self {
         Self { data }
     }
+
+    #[inline(always)]
+    pub fn round(&self) -> f64 {
+        (self.data[0] - self.data[1]) * 0.5
+    }
 }
 
 impl PartialEq for IntervalNumber {
