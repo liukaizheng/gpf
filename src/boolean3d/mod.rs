@@ -2,7 +2,7 @@ mod adaptive_subdivide;
 mod ar_in_tet;
 mod tet_set;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use adaptive_subdivide::adaptive_subdivide;
 use ar_in_tet::extract_mesh;

@@ -34,10 +34,48 @@ impl InterPt {
 }
 
 #[derive(Clone)]
+struct DivNum {
+    /// `data[0] / data[1]` with `data[1] > 0`
+    data: [f64; 2],
+}
+
+impl DivNum {
+    #[inline(always)]
+    fn nan() -> Self {
+        Self {
+            data: [f64::NAN, 1.0],
+        }
+    }
+    #[inline(always)]
+    fn zero() -> Self {
+        Self { data: [0.0, 1.0] }
+    }
+    #[inline(always)]
+    fn is_pos(&self) -> bool {
+        return self.data[0] > 0.0;
+    }
+
+    #[inline(always)]
+    fn is_neg(&self) -> bool {
+        return self.data[0] < 0.0;
+    }
+
+    #[inline(always)]
+    fn is_zero(&self) -> bool {
+        return self.data[0] == 0.0;
+    }
+
+    #[inline(always)]
+    fn is_nan(&self) -> bool {
+        return self.data[0].is_nan();
+    }
+}
+
+#[derive(Clone)]
 struct VertexData {
     planes: [usize; 3],
     parents: [VertexId; 2],
-    vals: [f64; 2],
+    vals: [DivNum; 2],
 }
 
 #[derive(Clone)]
@@ -66,7 +104,7 @@ fn orient3d<A: Allocator + Copy>(
     pc: &[f64; 4],
     pd: &[f64; 4],
     alloc: A,
-) -> f64 {
+) -> DivNum {
     #[rustfmt::skip]
     let numerator = det4(
         pa[0], pa[1], pa[2], pa[3],
@@ -85,11 +123,13 @@ fn orient3d<A: Allocator + Copy>(
     );
 
     debug_assert!(denominator != 0.0);
-    if denominator > 0.0 {
-        return numerator;
+
+    let data = if denominator > 0.0 {
+        [numerator, denominator]
     } else {
-        return -numerator;
-    }
+        [-numerator, -denominator]
+    };
+    DivNum { data }
 }
 
 impl<A: Allocator + Copy> Arrangement<A> {
@@ -104,7 +144,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
             VertexData {
                 planes,
                 parents: [VertexId::default(); 2],
-                vals: [f64::NAN; 2],
+                vals: [DivNum::nan(), DivNum::nan()],
             }
         }));
 
@@ -183,7 +223,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
         }));
 
         let mut coplanar_pid = INVALID_IND;
-        let mut non_zero_ori = f64::NAN;
+        let mut non_zero_ori = DivNum::nan();
         for face in self.mesh.faces() {
             let fid = *face;
             let face_pid = self.face_data[fid].pid;
@@ -196,10 +236,10 @@ impl<A: Allocator + Copy> Arrangement<A> {
                 if face_pid == coplanar_pid {
                     self.face_data[fid]
                         .surfaces
-                        .push(signed_index(sid, non_zero_ori > 0.0));
+                        .push(signed_index(sid, non_zero_ori.is_pos()));
                 }
             } else {
-                if face.vertices().all(|v| vert_orientations[*v] == 0.0) {
+                if face.vertices().all(|v| vert_orientations[*v].is_zero()) {
                     // println!("add same plane");
                     let base_fid = *face;
                     let pid = self.face_data[base_fid].pid;
@@ -214,20 +254,19 @@ impl<A: Allocator + Copy> Arrangement<A> {
                             }
 
                             for v in self.mesh.face(fid).vertices() {
-                                let ori = vert_orientations[*v];
-                                if ori != 0.0 {
-                                    return ori;
+                                if !vert_orientations[*v].is_zero() {
+                                    return vert_orientations[*v].clone();
                                 }
                             }
                         }
-                        return f64::NAN;
+                        return DivNum::nan();
                     };
                     coplanar_pid = face_pid;
                     non_zero_ori = non_zero_ori_fn();
                     debug_assert!(!non_zero_ori.is_nan());
                     self.face_data[fid]
                         .surfaces
-                        .push(signed_index(sid, non_zero_ori > 0.0));
+                        .push(signed_index(sid, non_zero_ori.is_pos()));
                 }
             }
         }
@@ -243,7 +282,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
 
     fn split_edges<A1: Allocator + Copy>(
         &mut self,
-        vert_orientations: &mut Vec<f64, A1>,
+        vert_orientations: &mut Vec<DivNum, A1>,
         pid: usize,
         alloc: A1,
     ) {
@@ -251,9 +290,9 @@ impl<A: Allocator + Copy> Arrangement<A> {
         for eid in 0..n_old_edges {
             let eid = eid.into();
             let [va, vb] = self.mesh.e_vertices(eid);
-            let ori1 = vert_orientations[va];
-            let ori2 = vert_orientations[vb];
-            if (ori1 < 0.0 && ori2 > 0.0) || (ori1 > 0.0 && ori2 < 0.0) {
+            let ori1 = vert_orientations[va].clone();
+            let ori2 = vert_orientations[vb].clone();
+            if (ori1.is_neg() && ori2.is_pos()) || (ori1.is_pos() && ori2.is_neg()) {
                 self.mesh.split_edge(eid, alloc);
                 let e_planes = &self.edges[eid];
                 self.vertices.push(VertexData {
@@ -261,29 +300,29 @@ impl<A: Allocator + Copy> Arrangement<A> {
                     parents: [va, vb],
                     vals: [ori1, ori2],
                 });
-                vert_orientations.push(0.0);
+                vert_orientations.push(DivNum::zero());
                 self.edges.push(e_planes.clone());
             }
         }
     }
 
-    fn split_faces(&mut self, vert_orientations: &[f64], pid: usize) {
+    fn split_faces(&mut self, vert_orientations: &[DivNum], pid: usize) {
         let n_old_faces = self.mesh.n_faces_capacity();
         for fid in 0..n_old_faces {
             let fid = fid.into();
             let mut first_zero_vid = VertexId::default();
             let first_hid = self.mesh.f_halfedge(fid);
             let mut curr_hid = first_hid;
-            let mut prev_ori = vert_orientations[self.mesh.he_from(curr_hid)];
-            if prev_ori == 0.0 {
+            let mut prev_ori = &vert_orientations[self.mesh.he_from(curr_hid)];
+            if prev_ori.is_zero() {
                 first_zero_vid = self.mesh.he_from(curr_hid);
             }
             loop {
                 let vid = self.mesh.he_to(curr_hid);
-                let ori = vert_orientations[vid];
+                let ori = &vert_orientations[vid];
                 let next_hid = self.mesh.he_next(curr_hid);
-                if ori == 0.0 {
-                    if prev_ori == 0.0 {
+                if ori.is_zero() {
+                    if prev_ori.is_zero() {
                         self.mesh.set_f_halfedge(fid, curr_hid);
                         break;
                     } else {
@@ -322,7 +361,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
 
     fn split_cells<A1: Allocator + Copy>(
         &mut self,
-        vert_orientations: &[f64],
+        vert_orientations: &[DivNum],
         pid: usize,
         sid: usize,
         alloc: A1,
@@ -339,12 +378,12 @@ impl<A: Allocator + Copy> Arrangement<A> {
                 let hid = self.mesh.f_halfedge(fid);
                 let [va, vb] = self.mesh.he_vertices(hid);
                 let mut non_zero_vid = VertexId::default();
-                if vert_orientations[va] == 0.0 {
-                    if vert_orientations[vb] == 0.0 {
+                if vert_orientations[va].is_zero() {
+                    if vert_orientations[vb].is_zero() {
                         let vc = *self.mesh.halfedge(hid).next().to();
-                        debug_assert!(vert_orientations[vc] != 0.0);
+                        debug_assert!(!vert_orientations[vc].is_zero());
 
-                        let is_pos = vert_orientations[vc] > 0.0;
+                        let is_pos = vert_orientations[vc].is_pos();
                         if is_pos {
                             pos_cell_faces.push(fid);
                         } else {
@@ -366,7 +405,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                 }
 
                 if non_zero_vid.valid() {
-                    if vert_orientations[non_zero_vid] > 0.0 {
+                    if vert_orientations[non_zero_vid].is_pos() {
                         pos_cell_faces.push(fid);
                     } else {
                         neg_cell_faces.push(fid);
@@ -442,6 +481,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
             1 => {
                 let edge_index =
                     if boundries[0] != 0 { 0 } else { 1 } + 5 - boundries[0] - boundries[1];
+
                 InterPt::ES((tets.tet_edges[tid][edge_index], surfs[inners[0]]))
             }
             2 => {
@@ -514,9 +554,12 @@ impl<A: Allocator + Copy> Arrangement<A> {
                             point(&data.points, vertex_indices[vid])
                         }
                     });
-                    let [s1, s2] = self.vertices[idx].vals.map(|x| x.abs());
+                    let [a1, b1] = self.vertices[idx].vals[0].data.map(|x| x.abs());
+                    let [a2, b2] = self.vertices[idx].vals[1].data.map(|x| x.abs());
+                    let a1b2 = a1 * b2;
+                    let a2b1 = a2 * b1;
                     data.points
-                        .extend_from_slice(&interpolate::<3>(pa, s1, pb, s2));
+                        .extend_from_slice(&interpolate::<3>(pa, pb, a1b2 / (a1b2 + a2b1)));
                 }
                 vertex_indices[idx] = pid;
             }
@@ -641,5 +684,5 @@ pub(crate) fn extract_mesh(tets: &TetSet, vals: Vec<Vec<f64>>, active_surfaces: 
         ar.extract_mesh(tets, tid, surfs, &mut data);
     }
 
-    write_obj("123.obj", &data.points, &data.triangles);
+    // write_obj("123.obj", &data.points, &data.triangles);
 }

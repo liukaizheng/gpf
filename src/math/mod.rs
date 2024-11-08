@@ -58,14 +58,12 @@ pub fn cross<T: Copy + Add<Output = T> + Sub<Output = T> + Mul<Output = T>>(
     ]
 }
 
-pub fn interpolate<const N: usize>(pa: &[f64], s1: f64, pb: &[f64], s2: f64) -> [f64; N] {
+pub fn interpolate<const N: usize>(pa: &[f64], pb: &[f64], t: f64) -> [f64; N] {
     let mut res = [0.0; N];
-    let t = s1 + s2;
-    let t1 = s2 / t;
-    let t2 = s1 / t;
+    let s = 1.0 - t;
 
     for i in 0..N {
-        res[i] = pa[i] * t1 + pb[i] * t2;
+        res[i] = pa[i] * s + pb[i] * t;
     }
     res
 }
