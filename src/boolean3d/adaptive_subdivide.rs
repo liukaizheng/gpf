@@ -194,7 +194,7 @@ fn subdividable<A: Allocator + Copy>(
     sq_eps: f64,
     alloc: A,
 ) -> (bool, Option<Vec<bool, A>>) {
-    let surfs = &mut data.active_surfs[tid];
+    let surfs = &data.active_surfs[tid];
     let mut active = Vec::with_capacity_in(surfs.len(), alloc);
     active.resize(surfs.len(), true);
     let verts = tets.tet_vertices[tid];
@@ -349,10 +349,6 @@ fn subdividable<A: Allocator + Copy>(
             interpolant_diff_vec[k].as_slice(),
         ];
         if test_distance_3(&adj_vmat, &h, b, sq_det_vmat, sq_eps) {
-            if activated.len() != active.len() {
-                let mut iter = active.iter();
-                surfs.retain(|_| *iter.next().unwrap());
-            }
             return (true, get_active(active, n_activated));
         }
     }
