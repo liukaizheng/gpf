@@ -43,8 +43,8 @@ pub fn boolean3d(first: &SimpleBody, second: &SimpleBody, t: BooleanType, eps: f
     bbox.merge(&first.bbox);
     bbox.merge(&second.bbox);
     bbox.scale(1.1);
-    // bbox.min = [-0.5, -0.5, -0.5];
-    // bbox.max = [2.0, 2.0, 2.0];
+    bbox.min = [-0.5, -0.5, -0.5];
+    bbox.max = [2.0, 2.0, 2.0];
     let mut tets = init_mesh(bbox);
     let (vals, active_surfs) = adaptive_subdivide(&mut tets, surfaces, eps * eps);
 
@@ -74,10 +74,10 @@ fn init_mesh(bbox: BBox) -> TetSet {
     let mut triangles: Vec<[usize; 3]> = Vec::new();
     for t in TETS {
         let tet = [
-            [t[0], t[1], t[3]],
             [t[1], t[2], t[3]],
-            [t[2], t[0], t[3]],
-            [t[2], t[1], t[0]],
+            [t[0], t[3], t[2]],
+            [t[0], t[1], t[3]],
+            [t[0], t[2], t[1]],
         ]
         .map(|tri| {
             let key = hash_tri(tri);
@@ -149,5 +149,6 @@ fn init_mesh(bbox: BBox) -> TetSet {
         points,
         square_edge_lengths,
         face_surfaces,
+        tet_indices: vec![0; 6],
     }
 }

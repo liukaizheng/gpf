@@ -194,7 +194,7 @@ fn subdividable<A: Allocator + Copy>(
     sq_eps: f64,
     alloc: A,
 ) -> (bool, Option<Vec<bool, A>>) {
-    let surfs = &data.active_surfs[tid];
+    let surfs: &[usize] = &data.active_surfs[tid];
     let mut active = Vec::with_capacity_in(surfs.len(), alloc);
     active.resize(surfs.len(), true);
     let verts = tets.tet_vertices[tid];

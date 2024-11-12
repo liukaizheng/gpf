@@ -89,7 +89,7 @@ struct FaceData {
     surfaces: TinyVec<[i64; 1]>,
 }
 
-pub(super) struct Arrangement<A: Allocator + Copy> {
+struct Arrangement<A: Allocator + Copy> {
     mesh: SurfaceMesh<A>,
     vertices: Vec<VertexData, A>,
     edges: Vec<[usize; 2], A>,
@@ -240,7 +240,6 @@ impl<A: Allocator + Copy> Arrangement<A> {
                 }
             } else {
                 if face.vertices().all(|v| vert_orientations[*v].is_zero()) {
-                    // println!("add same plane");
                     let base_fid = *face;
                     let pid = self.face_data[base_fid].pid;
                     debug_assert!(pid >= 4);
@@ -386,16 +385,18 @@ impl<A: Allocator + Copy> Arrangement<A> {
                         let is_pos = vert_orientations[vc].is_pos();
                         if is_pos {
                             pos_cell_faces.push(fid);
-                        } else {
-                            neg_cell_faces.push(fid);
-                        }
-
-                        if is_pos == self.is_face_inner_cell(fid, cid) {
-                            self.mesh.set_v_halfedge(va, hid);
+                            let (v, h) = if self.is_face_inner_cell(fid, cid) {
+                                (va, hid)
+                            } else {
+                                (vb, self.mesh.he_twin(hid))
+                            };
+                            self.mesh.set_v_halfedge(v, h);
                             if !start_zero_vid.valid() {
-                                start_zero_vid = va;
+                                start_zero_vid = v;
                             }
                             n_halfedges += 1;
+                        } else {
+                            neg_cell_faces.push(fid);
                         }
                     } else {
                         non_zero_vid = vb;
@@ -582,6 +583,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                     break;
                 }
                 let v3 = vertex_indices[self.mesh.he_to(curr_hid)];
+
                 data.triangles.extend_from_slice(&[v1, v2, v3]);
                 data.triangle_parents
                     .push(self.face_data[fid].surfaces.clone());
@@ -646,9 +648,14 @@ pub(crate) fn extract_mesh(tets: &TetSet, vals: Vec<Vec<f64>>, active_surfaces: 
     let mut bump = Bump::new();
     for (tid, verts) in tets.tet_vertices.iter().enumerate() {
         let surfs = &active_surfaces[tid];
-        if surfs.is_empty() {
+        if surfs.is_empty()
+            && tets.tet_faces[tid]
+                .iter()
+                .all(|&fid| tets.face_surfaces[fid].is_empty())
+        {
             continue;
         }
+
         bump.reset();
 
         let mut ar = base_tet.clone_in(&bump);
@@ -684,5 +691,5 @@ pub(crate) fn extract_mesh(tets: &TetSet, vals: Vec<Vec<f64>>, active_surfaces: 
         ar.extract_mesh(tets, tid, surfs, &mut data);
     }
 
-    // write_obj("123.obj", &data.points, &data.triangles);
+    write_obj("123.obj", &data.points, &data.triangles);
 }

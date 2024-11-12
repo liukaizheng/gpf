@@ -17,6 +17,7 @@ pub(crate) struct TetSet {
     pub(crate) points: Vec<f64>,
     pub(crate) square_edge_lengths: Vec<f64>,
     pub(crate) face_surfaces: Vec<TinyVec<[i64; 1]>>,
+    pub(crate) tet_indices: Vec<usize>,
 }
 
 #[inline]
@@ -51,10 +52,12 @@ impl TetSet {
             }
             oppo_verts.push(*he.next().to());
         }
+        let mut tet_faces = Vec::from_iter(tet_faces_map.clone());
+        tet_faces.sort_unstable();
         let mut oppo_halfedges = Vec::with_capacity_in(tet_faces_map.len(), alloc);
         let mut bottom_faces = Vec::with_capacity_in(tet_faces_map.len(), alloc);
         let mut top_faces = Vec::with_capacity_in(tet_faces_map.len(), alloc);
-        for (&tid, &[fa, fb]) in &tet_faces_map {
+        for &(tid, [fa, fb]) in &tet_faces {
             let bottom_top_faces = || {
                 let mut fc = FaceId::default();
                 let mut fd = FaceId::default();
@@ -139,7 +142,7 @@ impl TetSet {
             .all(|&hid| self.mesh.he_from(hid) == new_vert));
 
         let mut result_tets = Vec::with_capacity_in(tet_faces_map.len() << 1, alloc);
-        for ((((tid, face_indices), oppo_hid), bottom_fid), top_fid) in tet_faces_map
+        for ((((tid, face_indices), oppo_hid), bottom_fid), top_fid) in tet_faces
             .into_iter()
             .zip(oppo_halfedges)
             .zip(bottom_faces)
@@ -262,10 +265,25 @@ impl TetSet {
                 side_faces_and_edges[0].0[1],
                 side_faces_and_edges[1].0[1],
             ]);
+
+            let old_idx = self.tet_indices[tid];
+            self.tet_indices[tid] += 1;
+
+            write_tet(tid, old_idx + 1, tid, old_idx);
+            write_tet(new_tid, 0, tid, old_idx);
+            self.tet_indices.push(0);
+
             result_tets.push([tid, new_tid]);
         }
         self.face_surfaces
             .resize(self.face_tets.len(), TinyVec::new());
         (new_vert, result_tets)
     }
+}
+
+fn write_tet(tid: usize, index: usize, old_tid: usize, old_index: usize) {
+    // let _ = std::fs::File::create(format!(
+    // "data/t_{}_{}_{}_{}",
+    // tid, index, old_tid, old_index
+    // ));
 }
