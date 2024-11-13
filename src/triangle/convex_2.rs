@@ -48,7 +48,7 @@ impl<A: Allocator + Copy> LinkList<A> {
     fn duplicate(&mut self, i: usize) -> usize {
         let j = self.real_indices.len();
         let next = self.next[i];
-        self.real_indices.push(i);
+        self.real_indices.push(self.real_indices[i]);
         self.prev.push(i);
         self.next.push(next);
         self.prev[next] = j;
