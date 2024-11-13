@@ -8,7 +8,6 @@ use adaptive_subdivide::adaptive_subdivide;
 use ar_in_tet::extract_mesh;
 use itertools::Itertools;
 use tet_set::TetSet;
-use tinyvec::TinyVec;
 
 use crate::{
     geometry::{BBox, Surf},
@@ -43,12 +42,12 @@ pub fn boolean3d(first: &SimpleBody, second: &SimpleBody, t: BooleanType, eps: f
     bbox.merge(&first.bbox);
     bbox.merge(&second.bbox);
     bbox.scale(1.1);
-    bbox.min = [-0.5, -0.5, -0.5];
-    bbox.max = [2.0, 2.0, 2.0];
+    // bbox.min = [-0.5, -0.5, -0.5];
+    // bbox.max = [2.0, 2.0, 2.0];
     let mut tets = init_mesh(bbox);
-    let (vals, active_surfs) = adaptive_subdivide(&mut tets, surfaces, eps * eps);
+    let vals = adaptive_subdivide(&mut tets, surfaces, eps * eps);
 
-    extract_mesh(&tets, vals, active_surfs);
+    extract_mesh(&tets, vals);
 
     println!("mesh n tets: {}", tets.tet_faces.len());
 }
@@ -139,7 +138,6 @@ fn init_mesh(bbox: BBox) -> TetSet {
     ];
     let square_edge_lengths =
         Vec::from_iter(mesh.edges().map(|e| square_edge_length(&points, *e, &mesh)));
-    let face_surfaces = Vec::from_iter((0..mesh.n_faces()).map(|_| TinyVec::new()));
     TetSet {
         mesh,
         tet_vertices,
@@ -148,7 +146,6 @@ fn init_mesh(bbox: BBox) -> TetSet {
         face_tets,
         points,
         square_edge_lengths,
-        face_surfaces,
         tet_indices: vec![0; 6],
     }
 }

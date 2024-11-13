@@ -464,11 +464,11 @@ impl<A: Allocator + Copy> Arrangement<A> {
         tets: &TetSet,
         surfs: &[usize],
     ) -> InterPt {
-        let mut boundries = TinyVec::<[usize; 3]>::new();
+        let mut boundaries = TinyVec::<[usize; 3]>::new();
         let mut inners = TinyVec::<[usize; 3]>::new();
         for &i in &self.vertices[vid].planes {
             if i < 4 {
-                boundries.push(i);
+                boundaries.push(i);
             } else {
                 inners.push(i - 4);
             }
@@ -476,17 +476,17 @@ impl<A: Allocator + Copy> Arrangement<A> {
 
         match inners.len() {
             0 => {
-                let idx = boundries[0] ^ boundries[1] ^ boundries[2];
+                let idx = boundaries[0] ^ boundaries[1] ^ boundaries[2];
                 InterPt::V(tets.tet_vertices[tid][idx])
             }
             1 => {
                 let edge_index =
-                    if boundries[0] != 0 { 0 } else { 1 } + 5 - boundries[0] - boundries[1];
+                    if boundaries[0] != 0 { 0 } else { 1 } + 5 - boundaries[0] - boundaries[1];
 
                 InterPt::ES((tets.tet_edges[tid][edge_index], surfs[inners[0]]))
             }
             2 => {
-                let fid = tets.tet_faces[tid][boundries[0]];
+                let fid = tets.tet_faces[tid][boundaries[0]];
                 InterPt::FSS((fid, surfs[inners[0]], surfs[inners[1]]))
             }
             3 => InterPt::SSS([surfs[inners[0]], surfs[inners[1]], surfs[inners[2]]]),
@@ -641,55 +641,101 @@ fn write_obj(name: &str, points: &[f64], triangles: &[usize]) {
     }
 }
 
-pub(crate) fn extract_mesh(tets: &TetSet, vals: Vec<Vec<f64>>, active_surfaces: Vec<Vec<usize>>) {
+pub(crate) fn extract_mesh(tets: &TetSet, vals: Vec<Vec<f64>>) {
     let base_tet = Arrangement::new_tet(Global);
     let mut data = ExtractMesh::new(tets.mesh.n_vertices_capacity());
 
     let mut bump = Bump::new();
+    let mut get_active_surfs = GetActiveSurf::new(vals);
     for (tid, verts) in tets.tet_vertices.iter().enumerate() {
-        let surfs = &active_surfaces[tid];
-        if surfs.is_empty()
-            && tets.tet_faces[tid]
-                .iter()
-                .all(|&fid| tets.face_surfaces[fid].is_empty())
-        {
+        bump.reset();
+
+        get_active_surfs.execute(&verts);
+        if get_active_surfs.is_empty() {
             continue;
         }
 
-        bump.reset();
-
         let mut ar = base_tet.clone_in(&bump);
-        ar.planes.reserve(ar.planes.len() + surfs.len());
-        ar.planes.extend(surfs.iter().map(|&sid| {
-            let mut tet_vals = [f64::NAN; 4];
-            for (val, &vid) in tet_vals.iter_mut().zip(verts) {
-                *val = vals[sid][vid];
-            }
-            tet_vals
-        }));
+        ar.planes
+            .reserve(ar.planes.len() + get_active_surfs.active_surfs.len());
+        ar.planes.extend(&get_active_surfs.active_planes);
 
-        for (i, &fid) in tets.tet_faces[tid].iter().enumerate() {
-            let face_surfs = &tets.face_surfaces[fid];
-            if face_surfs.is_empty() {
-                continue;
-            }
-            if tet_face_reversed(&tets.face_tets[fid], tid) {
-                ar.face_data[i]
-                    .surfaces
-                    .extend(face_surfs.iter().map(|&sid| sid));
-            } else {
-                ar.face_data[i]
-                    .surfaces
-                    .extend(face_surfs.iter().map(|&sid| -sid));
-            }
+        for (i, coplanars) in get_active_surfs.coplanar_surfs.iter().enumerate() {
+            ar.face_data[i].surfaces.extend_from_slice(coplanars);
         }
 
-        for (i, &sid) in surfs.iter().enumerate() {
+        for (i, &sid) in get_active_surfs.active_surfs.iter().enumerate() {
             ar.add_plane(i + 4, sid, &bump);
         }
 
-        ar.extract_mesh(tets, tid, surfs, &mut data);
+        ar.extract_mesh(tets, tid, &get_active_surfs.active_surfs, &mut data);
     }
 
     write_obj("123.obj", &data.points, &data.triangles);
+}
+
+struct GetActiveSurf {
+    surf_vals: Vec<Vec<f64>>,
+    active_surfs: Vec<usize>,
+    active_planes: Vec<[f64; 4]>,
+    pos_verts: Vec<usize>,
+    neg_verts: Vec<usize>,
+    zero_verts: Vec<usize>,
+    coplanar_surfs: [Vec<i64>; 4],
+}
+
+impl GetActiveSurf {
+    fn new(surf_vals: Vec<Vec<f64>>) -> Self {
+        Self {
+            surf_vals,
+            active_surfs: Vec::new(),
+            active_planes: Vec::new(),
+            pos_verts: Vec::new(),
+            neg_verts: Vec::new(),
+            zero_verts: Vec::new(),
+            coplanar_surfs: [Vec::new(), Vec::new(), Vec::new(), Vec::new()],
+        }
+    }
+
+    fn execute(&mut self, verts: &[VertexId; 4]) {
+        self.active_surfs.clear();
+        self.active_planes.clear();
+
+        self.coplanar_surfs[0].clear();
+        self.coplanar_surfs[1].clear();
+        self.coplanar_surfs[2].clear();
+        self.coplanar_surfs[3].clear();
+
+        for (sid, vals) in self.surf_vals.iter().enumerate() {
+            self.pos_verts.clear();
+            self.neg_verts.clear();
+            self.zero_verts.clear();
+            let plane = verts.map(|vid| vals[vid]);
+            for (i, &val) in plane.iter().enumerate() {
+                if val > 0.0 {
+                    self.pos_verts.push(i);
+                } else if val < 0.0 {
+                    self.neg_verts.push(i);
+                } else {
+                    self.zero_verts.push(i);
+                }
+            }
+
+            if !self.pos_verts.is_empty() && !self.neg_verts.is_empty() {
+                self.active_surfs.push(sid);
+                self.active_planes.push(plane);
+            } else if self.zero_verts.len() == 3 {
+                if !self.pos_verts.is_empty() {
+                    self.coplanar_surfs[self.pos_verts[0]].push(signed_index(sid, true));
+                } else {
+                    self.coplanar_surfs[self.neg_verts[0]].push(signed_index(sid, false));
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.active_surfs.is_empty() && self.coplanar_surfs.iter().all(|surfs| surfs.is_empty())
+    }
 }

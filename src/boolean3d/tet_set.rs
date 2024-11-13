@@ -6,7 +6,6 @@ use crate::{
 };
 
 use itertools::Itertools;
-use tinyvec::TinyVec;
 
 pub(crate) struct TetSet {
     pub(crate) mesh: SurfaceMesh<std::alloc::Global>,
@@ -16,7 +15,6 @@ pub(crate) struct TetSet {
     pub(crate) face_tets: Vec<[usize; 2]>,
     pub(crate) points: Vec<f64>,
     pub(crate) square_edge_lengths: Vec<f64>,
-    pub(crate) face_surfaces: Vec<TinyVec<[i64; 1]>>,
     pub(crate) tet_indices: Vec<usize>,
 }
 
@@ -119,7 +117,6 @@ impl TetSet {
 
         let faces_capacity = self.mesh.n_faces() + faces.len() + tet_faces_map.len();
         self.face_tets.reserve(faces_capacity);
-        self.face_surfaces.reserve(faces_capacity);
         let mut new_halfedges = Vec::with_capacity_in(oppo_verts.len(), alloc);
         new_halfedges.extend(oppo_verts.into_iter().zip(&faces).map(|(v, &fid)| {
             let hid = self.mesh.split_face(fid, new_vert, v);
@@ -129,7 +126,6 @@ impl TetSet {
                 &self.mesh,
             ));
             self.face_tets.push(self.face_tets[fid]);
-            self.face_surfaces.push(self.face_surfaces[fid].clone());
             if self.mesh.he_to(hid) != new_vert {
                 hid
             } else {
@@ -275,8 +271,6 @@ impl TetSet {
 
             result_tets.push([tid, new_tid]);
         }
-        self.face_surfaces
-            .resize(self.face_tets.len(), TinyVec::new());
         (new_vert, result_tets)
     }
 }

@@ -5,17 +5,13 @@ use hashbrown::HashSet;
 
 use bumpalo::Bump;
 use itertools::Itertools;
-use tinyvec::TinyVec;
 
 use crate::{
-    abs_index,
-    boolean3d::tet_set::tet_face_reversed,
     geometry::{Surf, Surface},
     math::{cross, cross_in, dot, square_norm, sub_short},
-    mesh::{EdgeId, FaceId, Mesh},
-    point, point_2, signed_index,
+    mesh::{EdgeId, Mesh},
+    point, point_2,
     triangle::{convex_2, convex_3},
-    INVALID_IND,
 };
 
 use super::TetSet;
@@ -52,7 +48,6 @@ impl Ord for EdgeAndLen {
 struct SubdivisionData<'a> {
     surfaces: Vec<&'a Surf>,
     vals_and_grads: Vec<Vec<[f64; 4]>>,
-    active_surfs: Vec<Vec<usize>>,
     queue: BinaryHeap<EdgeAndLen>,
 }
 
@@ -60,38 +55,27 @@ pub(super) fn adaptive_subdivide(
     tets: &mut TetSet,
     surfaces: Vec<&Surf>,
     sq_eps: f64,
-) -> (Vec<Vec<f64>>, Vec<Vec<usize>>) {
+) -> Vec<Vec<f64>> {
     let mut vals_and_grads = vec![Vec::with_capacity(tets.mesh.n_vertices()); surfaces.len()];
     for p in tets.points.chunks(3) {
         for (i, &surf) in surfaces.iter().enumerate() {
             vals_and_grads[i].push(surf.eval(p));
         }
     }
-    let active_surfs = (0..tets.tet_faces.len())
-        .map(|_| Vec::from_iter(0..surfaces.len()))
-        .collect_vec();
+    
 
     let mut data = SubdivisionData {
         surfaces,
         vals_and_grads,
-        active_surfs,
         queue: BinaryHeap::new(),
     };
 
     adaptive_subdivide_impl(tets, &mut data, sq_eps);
 
-    println!(
-        "{} coplanar faces",
-        tets.face_surfaces.iter().filter(|v| !v.is_empty()).count()
-    );
-
-    (
-        data.vals_and_grads
-            .into_iter()
-            .map(|v| v.into_iter().map(|vg| vg[0]).collect_vec())
-            .collect_vec(),
-        data.active_surfs,
-    )
+    data.vals_and_grads
+        .into_iter()
+        .map(|v| v.into_iter().map(|vg| vg[0]).collect_vec())
+        .collect_vec()
 }
 
 fn adaptive_subdivide_impl(tets: &mut TetSet, data: &mut SubdivisionData, sq_eps: f64) {
@@ -110,21 +94,12 @@ fn adaptive_subdivide_impl(tets: &mut TetSet, data: &mut SubdivisionData, sq_eps
         }
         split_bump.reset();
         let (new_vert, tet_pairs) = tets.split_edge(eid, &split_bump);
-        for vals_grads in &mut data.vals_and_grads {
-            vals_grads.push([f64::NAN; 4]);
+        let p = point(&tets.points, new_vert.0);
+
+        for (sid, surf) in data.surfaces.iter().enumerate() {
+            data.vals_and_grads[sid].push(surf.eval(p));
         }
 
-        let p = point(&tets.points, new_vert.0);
-        for &[old_tet, _] in &tet_pairs {
-            for &sid in &data.active_surfs[old_tet] {
-                let vals_grads = &mut data.vals_and_grads[sid];
-                if !vals_grads[new_vert.0][0].is_nan() {
-                    continue;
-                }
-                vals_grads[new_vert] = data.surfaces[sid].eval(p);
-            }
-            data.active_surfs.push(data.active_surfs[old_tet].clone());
-        }
         for tid in tet_pairs.into_iter().flatten() {
             check_bump.reset();
             push_longest_edge(tid, tets, data, sq_eps, &check_bump);
@@ -139,19 +114,13 @@ fn push_longest_edge(
     sq_eps: f64,
     bump: &Bump,
 ) {
-    let (mut is_subdividable, activated) = subdividable(tid, tets, data, sq_eps, bump);
-    if let Some(activated) = activated {
-        let mut iter = activated.into_iter();
-        data.active_surfs[tid].retain(|_| iter.next().unwrap());
+    if tets.tet_edges[tid]
+        .iter()
+        .all(|&eid| tets.square_edge_lengths[eid] < sq_eps)
+    {
+        return;
     }
-    if is_subdividable {
-        if tets.tet_edges[tid]
-            .iter()
-            .all(|&eid| tets.square_edge_lengths[eid] < sq_eps)
-        {
-            is_subdividable = false;
-        }
-    }
+    let is_subdividable = subdividable(tid, tets, data, sq_eps, bump);
     if is_subdividable {
         let longest_eid = *tets.tet_edges[tid]
             .iter()
@@ -193,8 +162,8 @@ fn subdividable<A: Allocator + Copy>(
     data: &mut SubdivisionData,
     sq_eps: f64,
     alloc: A,
-) -> (bool, Option<Vec<bool, A>>) {
-    let surfs: &[usize] = &data.active_surfs[tid];
+) -> bool {
+    let surfs = &data.surfaces;
     let mut active = Vec::with_capacity_in(surfs.len(), alloc);
     active.resize(surfs.len(), true);
     let verts = tets.tet_vertices[tid];
@@ -220,19 +189,12 @@ fn subdividable<A: Allocator + Copy>(
         cross(&trans_vmat[0], &trans_vmat[1]),
     ];
 
-    let get_active = |active: Vec<bool, A>, n_activated: usize| {
-        if n_activated == active.len() {
-            None
-        } else {
-            Some(active)
-        }
-    };
 
     let mut interpolant_vec = Vec::with_capacity_in(surfs.len(), alloc);
     let mut interpolant_diff_vec = Vec::with_capacity_in(surfs.len(), alloc);
     let mut val_diff_vec = Vec::with_capacity_in(surfs.len(), alloc);
-    let mut n_activated = surfs.len();
-    for (i, &sid) /*surface id*/ in surfs.iter().enumerate() {
+    let mut n_activated = 0;
+    for sid /*surface id*/ in 0..surfs.len() {
         let tet_vals_grads = verts.map(|vid| &data.vals_and_grads[sid][vid]);
 
         let mut vals = Vec::with_capacity_in(20, alloc);
@@ -269,15 +231,14 @@ fn subdividable<A: Allocator + Copy>(
         }
 
         let val_diff = [v1 - v0, v2 - v0, v3 - v0];
-        if test_distance_1(&adj_vmat, val_diff, &diffs, sq_det_vmat, sq_eps) {
-            return (true, get_active(active, n_activated));
-        } else {
-            if *vals.iter().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap() <= 0.0 ||
-                *vals.iter().min_by(|x, y| x.partial_cmp(y).unwrap()).unwrap() >= 0.0 {
-                    active[i] = false;
-                    n_activated -= 1;
-                    check_flat_surface(&vals[..4], &tets.tet_faces, &mut tets.face_surfaces, &tets.face_tets,tid, sid);
+        active[sid] = *vals.iter().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap() > 0.0 &&
+                *vals.iter().min_by(|x, y| x.partial_cmp(y).unwrap()).unwrap() < 0.0;
+        if active[sid]  {
+            
+            if test_distance_1(&adj_vmat, val_diff, &diffs, sq_det_vmat, sq_eps) {
+                return true;
             }
+            n_activated += 1;
         }
 
         interpolant_vec.push(vals);
@@ -286,7 +247,7 @@ fn subdividable<A: Allocator + Copy>(
     }
 
     if n_activated < 2 {
-        return (false, get_active(active, n_activated));
+        return false;
     }
 
     let mut activated = Vec::with_capacity_in(n_activated, alloc);
@@ -319,7 +280,7 @@ fn subdividable<A: Allocator + Copy>(
             interpolant_diff_vec[j].as_slice(),
         ];
         if test_distance_2(&adj_vmat, &h, b, sq_det_vmat, sq_eps) {
-            return (true, get_active(active, n_activated));
+            return true;
         }
     }
 
@@ -349,10 +310,10 @@ fn subdividable<A: Allocator + Copy>(
             interpolant_diff_vec[k].as_slice(),
         ];
         if test_distance_3(&adj_vmat, &h, b, sq_det_vmat, sq_eps) {
-            return (true, get_active(active, n_activated));
+            return true;
         }
     }
-    return (false, get_active(active, n_activated));
+    return false;
 }
 
 fn transpose_adjacent_mat<const N: usize>(mat: &[[f64; N]]) -> [[f64; N]; N] {
@@ -518,32 +479,3 @@ fn test_distance_3(
     return r2 * sq_det_v > det_w * det_w * sq_eps;
 }
 
-fn check_flat_surface(
-    vals: &[f64],
-    tet_faces: &[[FaceId; 4]],
-    face_surfaces: &mut [TinyVec<[i64; 1]>],
-    face_tets: &[[usize; 2]],
-    tid: usize,
-    sid: usize,
-) {
-    let mut non_zero_idx = INVALID_IND;
-    for (i, &val) in vals.iter().enumerate() {
-        if val != 0.0 {
-            if non_zero_idx != INVALID_IND {
-                return;
-            } else {
-                non_zero_idx = i;
-            }
-        }
-    }
-
-    debug_assert!(non_zero_idx != INVALID_IND);
-    let fid = tet_faces[tid][non_zero_idx];
-    let coplanars = &mut face_surfaces[fid];
-    if coplanars.iter().find(|&&s| abs_index(s) == sid).is_none() {
-        coplanars.push(signed_index(
-            sid,
-            (vals[non_zero_idx] < 0.0) == tet_face_reversed(&face_tets[fid], tid),
-        ));
-    }
-}
