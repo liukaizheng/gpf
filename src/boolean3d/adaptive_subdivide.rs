@@ -120,8 +120,7 @@ fn push_longest_edge(
     {
         return;
     }
-    let is_subdividable = subdividable(tid, tets, data, sq_eps, bump);
-    if is_subdividable {
+    if subdividable(tid, tets, data, sq_eps, bump) {
         let longest_eid = *tets.tet_edges[tid]
             .iter()
             .max_by(|&&ea, &&eb| {
@@ -158,8 +157,8 @@ const C: [[f64; 4]; 16] = [
 
 fn subdividable<A: Allocator + Copy>(
     tid: usize,
-    tets: &mut TetSet,
-    data: &mut SubdivisionData,
+    tets: &TetSet,
+    data: &SubdivisionData,
     sq_eps: f64,
     alloc: A,
 ) -> bool {

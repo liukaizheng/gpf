@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use tinyvec::{tiny_vec, TinyVec};
 
 use crate::{
+    abs_index,
     math::interpolate,
     mesh::{clone_vec_in, EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, VertexId},
     point,
@@ -12,7 +13,7 @@ use crate::{
     signed_index, INVALID_IND,
 };
 
-use super::tet_set::{tet_face_reversed, TetSet};
+use super::tet_set::TetSet;
 
 #[derive(Clone)]
 enum InterPt {
@@ -134,7 +135,7 @@ fn orient3d<A: Allocator + Copy>(
 
 impl<A: Allocator + Copy> Arrangement<A> {
     fn new_tet(alloc: A) -> Self {
-        let mesh = SurfaceMesh::new([[1, 3, 2], [0, 2, 3], [0, 3, 1], [0, 1, 2]], alloc);
+        let mesh = SurfaceMesh::new([[1, 2, 3], [0, 3, 2], [0, 1, 3], [0, 2, 1]], alloc);
         let mut vertices = Vec::with_capacity_in(4, alloc);
         vertices.extend(mesh.vertices().map(|v| {
             let mut planes = [0; 3];
@@ -641,7 +642,7 @@ fn write_obj(name: &str, points: &[f64], triangles: &[usize]) {
     }
 }
 
-pub(crate) fn extract_mesh(tets: &TetSet, vals: Vec<Vec<f64>>) {
+pub(super) fn extract_mesh(tets: &TetSet, vals: Vec<Vec<f64>>) {
     let base_tet = Arrangement::new_tet(Global);
     let mut data = ExtractMesh::new(tets.mesh.n_vertices_capacity());
 
@@ -671,7 +672,19 @@ pub(crate) fn extract_mesh(tets: &TetSet, vals: Vec<Vec<f64>>) {
         ar.extract_mesh(tets, tid, &get_active_surfs.active_surfs, &mut data);
     }
 
-    write_obj("123.obj", &data.points, &data.triangles);
+    let mut surf_triangles = vec![Vec::<usize>::new(); get_active_surfs.surf_vals.len()];
+    for (tri, parents) in data.triangles.chunks(3).zip(&data.triangle_parents) {
+        for &idx in parents {
+            let sid = abs_index(idx);
+            if idx > 0 {
+                surf_triangles[sid].extend(tri);
+            } else {
+                surf_triangles[sid].extend(tri.iter().rev());
+            }
+        }
+    }
+
+    write_obj("123.obj", &data.points, &surf_triangles[1]);
 }
 
 struct GetActiveSurf {
