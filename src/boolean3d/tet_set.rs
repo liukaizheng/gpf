@@ -81,7 +81,12 @@ impl TetSet {
             bottom_faces.push(bottom_fid);
             top_faces.push(top_fid);
             let hid = self.mesh.fv_halfedge(bottom_fid, va);
-            oppo_halfedges.push(self.mesh.he_next(hid));
+
+            if tet_face_reversed(&self.face_tets[bottom_fid], tid) {
+                oppo_halfedges.push(self.mesh.he_twin(self.mesh.he_next(hid)));
+            } else {
+                oppo_halfedges.push(self.mesh.he_next(hid));
+            }
         }
         let new_vert = self.mesh.split_edge(eid, alloc);
         let [bottom_eid, top_eid] = {
@@ -152,12 +157,8 @@ impl TetSet {
             let new_fid = self.mesh.add_face_by_halfedges(&[ha, oppo_hid, hb]);
             let new_tid = self.tet_vertices.len();
 
-            let face_reversed = tet_face_reversed(&self.face_tets[bottom_fid], tid);
-            if face_reversed {
-                self.face_tets.push([new_tid, tid]);
-            } else {
-                self.face_tets.push([tid, new_tid]);
-            }
+            // We have chose `oppo_hid` corresponding to bottom face with positive orientation
+            self.face_tets.push([tid, new_tid]);
 
             let replace = |tets: &mut [usize; 2]| {
                 for t in tets {
@@ -204,71 +205,38 @@ impl TetSet {
             let [vc, vd] = self.mesh.he_vertices(oppo_hid);
             let [ea, eb, oppo_eid] = [ha, hb, oppo_hid].map(|hid| self.mesh.he_edge(hid));
 
-            if face_reversed {
-                self.tet_vertices[tid] = [new_vert, vb, vc, vd];
-                self.tet_edges[tid] = [
-                    top_eid,
-                    ea,
-                    eb,
-                    side_faces_and_edges[0].1[0],
-                    side_faces_and_edges[1].1[0],
-                    oppo_eid,
-                ];
-                self.tet_faces[tid] = [
-                    top_fid,
-                    new_fid,
-                    side_faces_and_edges[1].0[0],
-                    side_faces_and_edges[0].0[0],
-                ];
-                self.tet_vertices.push([new_vert, va, vd, vc]);
-                self.tet_edges.push([
-                    bottom_eid,
-                    eb,
-                    ea,
-                    side_faces_and_edges[1].1[1],
-                    side_faces_and_edges[0].1[1],
-                    oppo_eid,
-                ]);
-                self.tet_faces.push([
-                    bottom_fid,
-                    new_fid,
-                    side_faces_and_edges[0].0[1],
-                    side_faces_and_edges[1].0[1],
-                ]);
-            } else {
-                self.tet_vertices[tid] = [new_vert, vb, vd, vc];
-                self.tet_edges[tid] = [
-                    top_eid,
-                    eb,
-                    ea,
-                    side_faces_and_edges[1].1[0],
-                    side_faces_and_edges[0].1[0],
-                    oppo_eid,
-                ];
-                self.tet_faces[tid] = [
-                    top_fid,
-                    new_fid,
-                    side_faces_and_edges[0].0[0],
-                    side_faces_and_edges[1].0[0],
-                ];
+            self.tet_vertices[tid] = [new_vert, vb, vd, vc];
+            self.tet_edges[tid] = [
+                top_eid,
+                eb,
+                ea,
+                side_faces_and_edges[1].1[0],
+                side_faces_and_edges[0].1[0],
+                oppo_eid,
+            ];
+            self.tet_faces[tid] = [
+                top_fid,
+                new_fid,
+                side_faces_and_edges[0].0[0],
+                side_faces_and_edges[1].0[0],
+            ];
 
-                self.tet_vertices.push([new_vert, va, vc, vd]);
-                self.tet_edges.push([
-                    bottom_eid,
-                    ea,
-                    eb,
-                    side_faces_and_edges[0].1[1],
-                    side_faces_and_edges[1].1[1],
-                    oppo_eid,
-                ]);
+            self.tet_vertices.push([new_vert, va, vc, vd]);
+            self.tet_edges.push([
+                bottom_eid,
+                ea,
+                eb,
+                side_faces_and_edges[0].1[1],
+                side_faces_and_edges[1].1[1],
+                oppo_eid,
+            ]);
 
-                self.tet_faces.push([
-                    bottom_fid,
-                    new_fid,
-                    side_faces_and_edges[1].0[1],
-                    side_faces_and_edges[0].0[1],
-                ]);
-            }
+            self.tet_faces.push([
+                bottom_fid,
+                new_fid,
+                side_faces_and_edges[1].0[1],
+                side_faces_and_edges[0].0[1],
+            ]);
             #[cfg(debug_assertions)]
             {
                 for _t in [tid, new_tid] {
