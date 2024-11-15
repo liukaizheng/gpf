@@ -86,17 +86,16 @@ struct FaceData {
     /// `cells[0]`: inner cell of this face
     /// `cells[1]`: outer cell of this face
     cells: [usize; 2],
-
-    surfaces: TinyVec<[i64; 1]>,
 }
 
 struct Arrangement<A: Allocator + Copy> {
     mesh: SurfaceMesh<A>,
     vertices: Vec<VertexData, A>,
     edges: Vec<[usize; 2], A>,
-    planes: Vec<[f64; 4], A>,
     face_data: Vec<FaceData, A>,
     cell_faces: Vec<Vec<FaceId, A>, A>,
+    planes: Vec<[f64; 4], A>,
+    plane_surfaces: Vec<Vec<i64, A>, A>,
 }
 
 fn orient3d<A: Allocator + Copy>(
@@ -164,11 +163,13 @@ impl<A: Allocator + Copy> Arrangement<A> {
         planes.push([0.0, 0.0, 1.0, 0.0]);
         planes.push([0.0, 0.0, 0.0, 1.0]);
 
+        let mut plane_surfaces = Vec::with_capacity_in(4, alloc);
+        plane_surfaces.resize(4, Vec::new_in(alloc));
+
         let mut face_data = Vec::with_capacity_in(4, alloc);
         face_data.extend((0..4).map(|pid| FaceData {
             pid,
             cells: [0, INVALID_IND],
-            surfaces: TinyVec::new(),
         }));
 
         let mut one_cell_faces = Vec::with_capacity_in(4, alloc);
@@ -182,6 +183,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
             vertices,
             edges,
             planes,
+            plane_surfaces,
             face_data,
             cell_faces,
         }
@@ -192,11 +194,17 @@ impl<A: Allocator + Copy> Arrangement<A> {
         for v in &self.cell_faces {
             cell_faces.push(clone_vec_in(v, alloc));
         }
+        let mut plane_surfaces = Vec::with_capacity_in(self.plane_surfaces.len(), alloc);
+        for surfs in &self.plane_surfaces {
+            plane_surfaces.push(clone_vec_in(surfs, alloc));
+        }
+
         Arrangement {
             mesh: self.mesh.clone_in(alloc),
             vertices: clone_vec_in(&self.vertices, alloc),
             edges: clone_vec_in(&self.edges, alloc),
             planes: clone_vec_in(&self.planes, alloc),
+            plane_surfaces,
             face_data: clone_vec_in(&self.face_data, alloc),
             cell_faces,
         }
@@ -224,7 +232,6 @@ impl<A: Allocator + Copy> Arrangement<A> {
         }));
 
         let mut coplanar_pid = INVALID_IND;
-        let mut non_zero_ori = DivNum::nan();
         for face in self.mesh.faces() {
             let fid = *face;
             let face_pid = self.face_data[fid].pid;
@@ -232,14 +239,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                 continue;
             }
 
-            if coplanar_pid != INVALID_IND {
-                debug_assert!(!non_zero_ori.is_nan());
-                if face_pid == coplanar_pid {
-                    self.face_data[fid]
-                        .surfaces
-                        .push(signed_index(sid, non_zero_ori.is_pos()));
-                }
-            } else {
+            if coplanar_pid == INVALID_IND {
                 if face.vertices().all(|v| vert_orientations[*v].is_zero()) {
                     let base_fid = *face;
                     let pid = self.face_data[base_fid].pid;
@@ -262,11 +262,9 @@ impl<A: Allocator + Copy> Arrangement<A> {
                         return DivNum::nan();
                     };
                     coplanar_pid = face_pid;
-                    non_zero_ori = non_zero_ori_fn();
+                    let non_zero_ori = non_zero_ori_fn();
                     debug_assert!(!non_zero_ori.is_nan());
-                    self.face_data[fid]
-                        .surfaces
-                        .push(signed_index(sid, non_zero_ori.is_pos()));
+                    self.plane_surfaces[coplanar_pid].push(signed_index(sid, non_zero_ori.is_pos()));
                 }
             }
         }
@@ -436,8 +434,8 @@ impl<A: Allocator + Copy> Arrangement<A> {
             self.face_data.push(FaceData {
                 pid,
                 cells: [cid, new_cid],
-                surfaces: tiny_vec!([i64; 1] => signed_index(sid, false)),
             });
+            self.plane_surfaces[pid].push(signed_index(sid, false));
 
             for &fid in &pos_cell_faces {
                 for c in &mut self.face_data[fid].cells {
@@ -463,15 +461,14 @@ impl<A: Allocator + Copy> Arrangement<A> {
         vid: VertexId,
         tid: usize,
         tets: &TetSet,
-        surfs: &[usize],
     ) -> InterPt {
         let mut boundaries = TinyVec::<[usize; 3]>::new();
         let mut inners = TinyVec::<[usize; 3]>::new();
-        for &i in &self.vertices[vid].planes {
-            if i < 4 {
-                boundaries.push(i);
+        for &pid in &self.vertices[vid].planes {
+            if pid < 4 {
+                boundaries.push(pid);
             } else {
-                inners.push(i - 4);
+                inners.push(abs_index(self.plane_surfaces[pid][0]));
             }
         }
 
@@ -484,31 +481,32 @@ impl<A: Allocator + Copy> Arrangement<A> {
                 let edge_index =
                     if boundaries[0] != 0 { 0 } else { 1 } + 5 - boundaries[0] - boundaries[1];
 
-                InterPt::ES((tets.tet_edges[tid][edge_index], surfs[inners[0]]))
+                InterPt::ES((tets.tet_edges[tid][edge_index], inners[0]))
             }
             2 => {
                 let fid = tets.tet_faces[tid][boundaries[0]];
-                InterPt::FSS((fid, surfs[inners[0]], surfs[inners[1]]))
+                InterPt::FSS((fid, inners[0], inners[1]))
             }
-            3 => InterPt::SSS([surfs[inners[0]], surfs[inners[1]], surfs[inners[2]]]),
+            3 => InterPt::SSS([inners[0], inners[1], inners[2]]),
             _ => InterPt::INVALID,
         }
     }
 
-    fn extract_mesh(&mut self, tets: &TetSet, tid: usize, surfs: &[usize], data: &mut ExtractMesh) {
+    fn extract_mesh(&mut self, tets: &TetSet, tid: usize, data: &mut ExtractMesh) {
         let alloc = self.vertices.allocator();
         let mut vertex_pts = Vec::with_capacity_in(self.mesh.n_vertices_capacity(), alloc);
         vertex_pts.resize(self.mesh.n_vertices_capacity(), InterPt::INVALID);
 
         for face in self.mesh.faces() {
             let fid = *face;
-            if self.face_data[fid].surfaces.is_empty() {
+            let pid = self.face_data[fid].pid;
+            if self.plane_surfaces[pid].is_empty() {
                 continue;
             }
             for v in face.vertices() {
                 let vid = *v;
                 if !vertex_pts[vid].valid() {
-                    vertex_pts[vid] = self.get_global_vertex(vid, tid, tets, surfs);
+                    vertex_pts[vid] = self.get_global_vertex(vid, tid, tets);
                 }
             }
         }
@@ -520,6 +518,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                 InterPt::V(vid) => {
                     if data.point_map[vid] == INVALID_IND {
                         let pid = data.points.len() / 3;
+                        data.point_map[vid] = pid;
                         data.points.extend_from_slice(point(&tets.points, vid.0));
                         pid
                     } else {
@@ -569,7 +568,9 @@ impl<A: Allocator + Copy> Arrangement<A> {
 
         for face in self.mesh.faces() {
             let fid = *face;
-            if self.face_data[fid].surfaces.is_empty() {
+            let pid = self.face_data[fid].pid;
+            let coplanar_surfs = &self.plane_surfaces[pid];
+            if coplanar_surfs.is_empty() {
                 continue;
             }
 
@@ -587,7 +588,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
 
                 data.triangles.extend_from_slice(&[v1, v2, v3]);
                 data.triangle_parents
-                    .push(self.face_data[fid].surfaces.clone());
+                    .push(TinyVec::from_iter(coplanar_surfs.clone()));
                 v2 = v3;
             }
         }
@@ -660,16 +661,17 @@ pub(super) fn extract_mesh(tets: &TetSet, vals: Vec<Vec<f64>>) {
         ar.planes
             .reserve(ar.planes.len() + get_active_surfs.active_surfs.len());
         ar.planes.extend(&get_active_surfs.active_planes);
+        ar.plane_surfaces.resize(ar.plane_surfaces.len() + get_active_surfs.active_surfs.len(), Vec::new_in(&bump));
 
         for (i, coplanars) in get_active_surfs.coplanar_surfs.iter().enumerate() {
-            ar.face_data[i].surfaces.extend_from_slice(coplanars);
+            ar.plane_surfaces[i].extend_from_slice(&coplanars);
         }
 
         for (i, &sid) in get_active_surfs.active_surfs.iter().enumerate() {
             ar.add_plane(i + 4, sid, &bump);
         }
 
-        ar.extract_mesh(tets, tid, &get_active_surfs.active_surfs, &mut data);
+        ar.extract_mesh(tets, tid, &mut data);
     }
 
     let mut surf_triangles = vec![Vec::<usize>::new(); get_active_surfs.surf_vals.len()];
@@ -684,7 +686,7 @@ pub(super) fn extract_mesh(tets: &TetSet, vals: Vec<Vec<f64>>) {
         }
     }
 
-    write_obj("123.obj", &data.points, &surf_triangles[1]);
+    write_obj("123.obj", &data.points, &data.triangles);
 }
 
 struct GetActiveSurf {

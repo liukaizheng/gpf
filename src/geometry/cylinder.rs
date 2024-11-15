@@ -1,4 +1,4 @@
-use crate::math::{dot, norm, square_norm};
+use crate::math::{dot, norm};
 
 use super::Surface;
 
