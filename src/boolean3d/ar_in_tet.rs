@@ -1,8 +1,7 @@
 use std::alloc::{Allocator, Global};
 
-use bumpalo::Bump;
 use std::collections::HashMap;
-use tinyvec::{tiny_vec, TinyVec};
+use tinyvec::TinyVec;
 
 use crate::{
     abs_index,
@@ -16,7 +15,7 @@ use crate::{
 use super::tet_set::TetSet;
 
 #[derive(Clone)]
-enum InterPt {
+pub(crate) enum InterPt {
     V(VertexId),
     ES((EdgeId, usize)),
     FSS((FaceId, usize, usize)),
@@ -264,7 +263,8 @@ impl<A: Allocator + Copy> Arrangement<A> {
                     coplanar_pid = face_pid;
                     let non_zero_ori = non_zero_ori_fn();
                     debug_assert!(!non_zero_ori.is_nan());
-                    self.plane_surfaces[coplanar_pid].push(signed_index(sid, non_zero_ori.is_pos()));
+                    self.plane_surfaces[coplanar_pid]
+                        .push(signed_index(sid, non_zero_ori.is_pos()));
                 }
             }
         }
@@ -456,12 +456,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
         }
     }
 
-    fn get_global_vertex(
-        &self,
-        vid: VertexId,
-        tid: usize,
-        tets: &TetSet,
-    ) -> InterPt {
+    fn get_global_vertex(&self, vid: VertexId, tid: usize, tets: &TetSet) -> InterPt {
         let mut boundaries = TinyVec::<[usize; 3]>::new();
         let mut inners = TinyVec::<[usize; 3]>::new();
         for &pid in &self.vertices[vid].planes {
@@ -492,7 +487,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
         }
     }
 
-    fn extract_mesh(&mut self, tets: &TetSet, tid: usize, data: &mut ExtractMesh) {
+    fn extract_mesh(&self, tets: &TetSet, tid: usize, data: &mut ExtractMesh) {
         let alloc = self.vertices.allocator();
         let mut vertex_pts = Vec::with_capacity_in(self.mesh.n_vertices_capacity(), alloc);
         vertex_pts.resize(self.mesh.n_vertices_capacity(), InterPt::INVALID);
@@ -643,48 +638,79 @@ fn write_obj(name: &str, points: &[f64], triangles: &[usize]) {
     }
 }
 
-pub(super) fn extract_mesh(tets: &TetSet, vals: Vec<Vec<f64>>) {
+pub(super) fn extract_iso_surface(tets: &TetSet, vals: Vec<Vec<f64>>) {
     let base_tet = Arrangement::new_tet(Global);
-    let mut data = ExtractMesh::new(tets.mesh.n_vertices_capacity());
 
-    let mut bump = Bump::new();
     let mut get_active_surfs = GetActiveSurf::new(vals);
-    for (tid, verts) in tets.tet_vertices.iter().enumerate() {
-        bump.reset();
 
+    let mut arrangements = Vec::with_capacity(tets.tet_vertices.len());
+    let mut active_surfaces = Vec::with_capacity(tets.tet_vertices.len());
+
+    for verts in &tets.tet_vertices {
         get_active_surfs.execute(&verts);
         if get_active_surfs.is_empty() {
-            continue;
+            arrangements.push(None);
+            active_surfaces.push(Vec::new());
+        } else {
+            let mut ar = base_tet.clone_in(Global);
+            ar.planes
+                .reserve(ar.planes.len() + get_active_surfs.active_surfs.len());
+            ar.planes.extend(&get_active_surfs.active_planes);
+            ar.plane_surfaces.resize(
+                ar.plane_surfaces.len() + get_active_surfs.active_surfs.len(),
+                Vec::new_in(Global),
+            );
+
+            for (i, coplanars) in get_active_surfs.coplanar_surfs.iter().enumerate() {
+                ar.plane_surfaces[i].extend_from_slice(&coplanars);
+            }
+            let mut tet_active_surfs = Vec::with_capacity(get_active_surfs.active_surfs.len());
+            tet_active_surfs.clone_from(&get_active_surfs.active_surfs);
+
+            arrangements.push(Some(ar));
+            active_surfaces.push(tet_active_surfs);
         }
-
-        let mut ar = base_tet.clone_in(&bump);
-        ar.planes
-            .reserve(ar.planes.len() + get_active_surfs.active_surfs.len());
-        ar.planes.extend(&get_active_surfs.active_planes);
-        ar.plane_surfaces.resize(ar.plane_surfaces.len() + get_active_surfs.active_surfs.len(), Vec::new_in(&bump));
-
-        for (i, coplanars) in get_active_surfs.coplanar_surfs.iter().enumerate() {
-            ar.plane_surfaces[i].extend_from_slice(&coplanars);
-        }
-
-        for (i, &sid) in get_active_surfs.active_surfs.iter().enumerate() {
-            ar.add_plane(i + 4, sid, &bump);
-        }
-
-        ar.extract_mesh(tets, tid, &mut data);
     }
 
-    let mut surf_triangles = vec![Vec::<usize>::new(); get_active_surfs.surf_vals.len()];
-    for (tri, parents) in data.triangles.chunks(3).zip(&data.triangle_parents) {
-        for &idx in parents {
-            let sid = abs_index(idx);
-            if idx > 0 {
-                surf_triangles[sid].extend(tri);
-            } else {
-                surf_triangles[sid].extend(tri.iter().rev());
+    for (ar, tet_active_surfs) in arrangements.iter_mut().zip(active_surfaces) {
+        if let Some(ar) = ar {
+            for (i, sid) in tet_active_surfs.into_iter().enumerate() {
+                ar.add_plane(i + 4, sid, Global);
             }
         }
     }
+    let mut data = ExtractMesh::new(tets.mesh.n_vertices_capacity());
+    for (tid, ar) in arrangements.iter().enumerate() {
+        if let Some(ar) = ar {
+            ar.extract_mesh(tets, tid, &mut data)
+        }
+    }
+
+    // for (tid, verts) in tets.tet_vertices.iter().enumerate() {
+    //     get_active_surfs.execute(&verts);
+    //     if get_active_surfs.is_empty() {
+    //         continue;
+    //     }
+
+    //     let mut ar = base_tet.clone_in(&bump);
+    //     ar.planes
+    //         .reserve(ar.planes.len() + get_active_surfs.active_surfs.len());
+    //     ar.planes.extend(&get_active_surfs.active_planes);
+    //     ar.plane_surfaces.resize(
+    //         ar.plane_surfaces.len() + get_active_surfs.active_surfs.len(),
+    //         Vec::new_in(&bump),
+    //     );
+
+    //     for (i, coplanars) in get_active_surfs.coplanar_surfs.iter().enumerate() {
+    //         ar.plane_surfaces[i].extend_from_slice(&coplanars);
+    //     }
+
+    //     for (i, &sid) in get_active_surfs.active_surfs.iter().enumerate() {
+    //         ar.add_plane(i + 4, sid, &bump);
+    //     }
+
+    //     ar.extract_mesh(tets, tid, &mut data);
+    // }
 
     write_obj("123.obj", &data.points, &data.triangles);
 }

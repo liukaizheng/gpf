@@ -5,7 +5,7 @@ mod tet_set;
 use std::collections::HashMap;
 
 use adaptive_subdivide::adaptive_subdivide;
-use ar_in_tet::extract_mesh;
+use ar_in_tet::extract_iso_surface;
 use itertools::Itertools;
 use tet_set::TetSet;
 
@@ -47,7 +47,7 @@ pub fn boolean3d(first: &SimpleBody, second: &SimpleBody, t: BooleanType, eps: f
     let mut tets = init_mesh(bbox);
     let vals = adaptive_subdivide(&mut tets, surfaces, eps * eps);
 
-    extract_mesh(&tets, vals);
+    extract_iso_surface(&tets, vals);
 
     println!("mesh n tets: {}", tets.tet_faces.len());
 }
