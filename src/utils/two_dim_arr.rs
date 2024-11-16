@@ -1,40 +1,52 @@
 use std::alloc::Allocator;
 
-struct TwoDimArr<T: Clone, A: Allocator + Copy = std::alloc::Global> {
-    data: Vec<T, A>,
-	separators: Vec<usize, A>,
+pub struct TwoDimArr<T, A: Allocator + Copy = std::alloc::Global> {
+    pub data: Vec<T, A>,
+    pub separators: Vec<usize, A>,
 }
 
-impl <T: Clone, A: Allocator + Copy> TwoDimArr<T, A> {
+impl<T, A: Allocator + Copy> TwoDimArr<T, A> {
+    #[inline]
+    pub fn new_in(alloc: A) -> Self {
+        let mut separators = Vec::new_in(alloc);
+        separators.push(0);
+        Self {
+            data: Vec::new_in(alloc),
+            separators,
+        }
+    }
 
-	#[inline]
-	pub fn new(separators: Vec<usize, A>, data: Vec<T, A>) -> Self {
-		Self { data, separators }
-	}
-
-	#[inline]
-	pub fn iter(&self) -> TwoDimArrIter<T, A> {
-		TwoDimArrIter { arr: self, idx: 0 }
-	}
+    #[inline]
+    pub fn iter(&self) -> TwoDimArrIter<T, A> {
+        TwoDimArrIter { arr: self, idx: 0 }
+    }
 }
 
-struct TwoDimArrIter<'a, T: Clone, A: Allocator + Copy> {
-	arr: &'a TwoDimArr<T, A>,
-	idx: usize,
+impl<T: Copy, A: Allocator + Copy> TwoDimArr<T, A> {
+    #[inline]
+    pub fn push<Arr: IntoIterator<Item = T>>(&mut self, arr: Arr) {
+        self.data.extend(arr);
+        self.separators.push(self.data.len());
+    }
 }
 
-impl <'a, T: Clone, A: Allocator + Copy> Iterator for TwoDimArrIter<'a, T, A> {
-	type Item = &'a [T];
+pub struct TwoDimArrIter<'a, T, A: Allocator + Copy> {
+    arr: &'a TwoDimArr<T, A>,
+    idx: usize,
+}
 
-	#[inline]
-	fn next(&mut self) -> Option<Self::Item> {
-		if self.idx + 1 < self.arr.separators.len() {
-			let start = self.arr.separators[self.idx];
-			let end = self.arr.separators[self.idx + 1];
-			self.idx += 1;
-			Some(&self.arr.data[start..end])
-		} else {
-			None
-		}
-	}
+impl<'a, T, A: Allocator + Copy> Iterator for TwoDimArrIter<'a, T, A> {
+    type Item = &'a [T];
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.idx + 1 < self.arr.separators.len() {
+            let start = self.arr.separators[self.idx];
+            let end = self.arr.separators[self.idx + 1];
+            self.idx += 1;
+            Some(&self.arr.data[start..end])
+        } else {
+            None
+        }
+    }
 }

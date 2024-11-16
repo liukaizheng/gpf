@@ -3,7 +3,7 @@ use std::alloc::Allocator;
 use super::{
     clone_vec_in,
     element::{HalfedgeId, VertexId},
-    FaceId,
+    ElementId, FaceId,
 };
 
 pub struct MeshCoreData<A: Allocator + Copy> {
@@ -84,5 +84,23 @@ impl<A: Allocator + Copy> MeshCoreData<A> {
     #[inline]
     pub(crate) fn set_f_hafledge(&mut self, fid: FaceId, hid: HalfedgeId) {
         self.f_halfedge_arr[fid] = hid;
+    }
+
+    #[inline]
+    pub(crate) fn v_min_reserve(&mut self, vid: VertexId) {
+        let len = vid.0 + 1;
+        if self.v_halfedge_arr.len() < len {
+            self.v_halfedge_arr.resize(len, HalfedgeId::default());
+        }
+    }
+
+    #[inline]
+    pub(crate) fn recount_n_vertices(&mut self) {
+        self.n_vertices = self.v_halfedge_arr.len();
+        for &hid in &self.v_halfedge_arr {
+            if !hid.valid() {
+                self.n_vertices -= 1;
+            }
+        }
     }
 }

@@ -200,3 +200,16 @@ impl<'a, M: Mesh> Iterator for FVIter<'a, M> {
         iter_next(self)
     }
 }
+
+impl<'a, M: Mesh> DoubleEndedIterator for FVIter<'a, M> {
+
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.is_end() {
+            return None;
+        } else {
+            self.he = self.mesh.he_prev(self.he);
+            return Some(Vertex::new(self.mesh, self.mesh.he_to(self.he)));
+        }
+    }
+}

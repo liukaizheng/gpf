@@ -8,7 +8,7 @@ use super::mesh_core_data::MeshCoreData;
 use hashbrown::HashMap;
 use itertools::Itertools;
 
-pub struct SurfaceMesh<A: Allocator + Copy> {
+pub struct SurfaceMesh<A: Allocator + Copy = std::alloc::Global> {
     core_data: MeshCoreData<A>,
     n_edges: usize,
     he_edge_arr: Vec<EdgeId, A>,
@@ -21,20 +21,12 @@ pub struct SurfaceMesh<A: Allocator + Copy> {
 }
 
 impl<A: Allocator + Copy> SurfaceMesh<A> {
-    pub fn new<T, U>(polygons: T, alloc: A) -> Self
+    pub fn new<U, T>(polygons: T, alloc: A) -> Self
     where
-        T: AsRef<[U]>,
         U: AsRef<[usize]>,
+        T: IntoIterator<Item = U>,
     {
-        let n_faces = polygons.as_ref().len();
-        let n_vertices = polygons
-            .as_ref()
-            .iter()
-            .map(|polygon| *polygon.as_ref().iter().max().unwrap())
-            .max()
-            .unwrap()
-            + 1;
-        let core_data = MeshCoreData::new(n_vertices, n_faces, alloc);
+        let core_data = MeshCoreData::new(0, 0, alloc);
         let mut mesh = Self {
             core_data,
             n_edges: 0,
@@ -46,20 +38,21 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
             use_implicit_twin: false,
         };
 
-        for (fid, polygon) in polygons.as_ref().iter().enumerate() {
+        for (fid, polygon) in polygons.into_iter().enumerate() {
             let mut first_hid = HalfedgeId::default();
             let mut prev_hid = first_hid;
             let mut prev_vid = VertexId::default();
 
             for (i, &b) in polygon.as_ref().iter().enumerate() {
                 let vid = b.into();
+                mesh.core_data.v_min_reserve(vid);
                 let hid = mesh.new_halfedges(1);
 
                 mesh.core_data.he_vertex_arr[hid] = vid;
                 mesh.he_face_arr[hid] = fid.into();
 
                 if i == 0 {
-                    mesh.core_data.f_halfedge_arr[fid] = hid;
+                    mesh.core_data.f_halfedge_arr.push(hid);
                     first_hid = hid;
                 } else {
                     mesh.core_data.v_halfedge_arr[prev_vid] = hid;
@@ -71,6 +64,7 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
             mesh.core_data.v_halfedge_arr[prev_vid] = first_hid;
             mesh.core_data.connect_halfedges(prev_hid, first_hid);
         }
+        mesh.core_data.recount_n_vertices();
 
         let mut edge_history = HashMap::<(usize, usize), HalfedgeId>::new();
         // build edge

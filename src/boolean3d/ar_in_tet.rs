@@ -1,8 +1,9 @@
 use std::alloc::{Allocator, Global};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tinyvec::TinyVec;
 
+use crate::utils::TwoDimArr;
 use crate::{
     abs_index,
     math::interpolate,
@@ -13,6 +14,7 @@ use crate::{
 };
 
 use super::tet_set::TetSet;
+use super::IsoSurfMesh;
 
 #[derive(Clone)]
 pub(crate) enum InterPt {
@@ -87,7 +89,7 @@ struct FaceData {
     cells: [usize; 2],
 }
 
-struct Arrangement<A: Allocator + Copy> {
+pub(crate) struct Arrangement<A: Allocator + Copy = Global> {
     mesh: SurfaceMesh<A>,
     vertices: Vec<VertexData, A>,
     edges: Vec<[usize; 2], A>,
@@ -487,7 +489,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
         }
     }
 
-    fn extract_mesh(&self, tets: &TetSet, tid: usize, data: &mut ExtractMesh) {
+    fn extract_mesh(&mut self, tets: &TetSet, tid: usize, data: &mut ExtractMesh) {
         let alloc = self.vertices.allocator();
         let mut vertex_pts = Vec::with_capacity_in(self.mesh.n_vertices_capacity(), alloc);
         vertex_pts.resize(self.mesh.n_vertices_capacity(), InterPt::INVALID);
@@ -515,6 +517,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                         let pid = data.points.len() / 3;
                         data.point_map[vid] = pid;
                         data.points.extend_from_slice(point(&tets.points, vid.0));
+                        data.iso_vertices.push(inter_pt.clone());
                         pid
                     } else {
                         data.point_map[vid]
@@ -525,6 +528,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                     std::collections::hash_map::Entry::Vacant(vacant) => {
                         let pid = data.points.len() / 3;
                         vacant.insert(pid);
+                        data.iso_vertices.push(inter_pt.clone());
                         pid
                     }
                 },
@@ -533,10 +537,14 @@ impl<A: Allocator + Copy> Arrangement<A> {
                     std::collections::hash_map::Entry::Vacant(vacant) => {
                         let pid = data.points.len() / 3;
                         vacant.insert(pid);
+                        data.iso_vertices.push(inter_pt.clone());
                         pid
                     }
                 },
-                InterPt::SSS(_) => data.points.len() / 3,
+                InterPt::SSS(_) => {
+                    data.iso_vertices.push(inter_pt.clone());
+                    data.points.len() / 3
+                }
 
                 InterPt::INVALID => INVALID_IND,
             };
@@ -561,30 +569,31 @@ impl<A: Allocator + Copy> Arrangement<A> {
             }
         }
 
+        for pid in 0..4 {
+            if !self.plane_surfaces[pid].is_empty() {
+                let tet_fid = tets.tet_faces[tid][pid];
+                if !data.tet_boundary_face_set.insert(tet_fid) {
+                    // already visited
+                    self.plane_surfaces[pid].clear();
+                }
+            }
+        }
+
         for face in self.mesh.faces() {
             let fid = *face;
             let pid = self.face_data[fid].pid;
-            let coplanar_surfs = &self.plane_surfaces[pid];
-            if coplanar_surfs.is_empty() {
-                continue;
-            }
 
-            let first_hid = self.mesh.f_halfedge(fid);
-            let mut curr_hid = first_hid;
-            let v1 = vertex_indices[self.mesh.he_to(curr_hid)];
-            curr_hid = self.mesh.he_next(curr_hid);
-            let mut v2 = vertex_indices[self.mesh.he_to(curr_hid)];
-            loop {
-                curr_hid = self.mesh.he_next(curr_hid);
-                if curr_hid == first_hid {
-                    break;
+            for &signed_sid in &self.plane_surfaces[pid] {
+                let sid = abs_index(signed_sid);
+                if signed_sid > 0 {
+                    data.iso_faces
+                        .push(face.vertices().map(|v| vertex_indices[*v]));
+                } else {
+                    data.iso_faces
+                        .push(face.vertices().map(|v| vertex_indices[*v]).rev());
                 }
-                let v3 = vertex_indices[self.mesh.he_to(curr_hid)];
-
-                data.triangles.extend_from_slice(&[v1, v2, v3]);
-                data.triangle_parents
-                    .push(TinyVec::from_iter(coplanar_surfs.clone()));
-                v2 = v3;
+                data.face_parents.push(sid);
+                data.face_positions.push((tid, fid));
             }
         }
     }
@@ -592,53 +601,33 @@ impl<A: Allocator + Copy> Arrangement<A> {
 
 struct ExtractMesh {
     points: Vec<f64>,
-    triangles: Vec<usize>,
-    triangle_parents: Vec<TinyVec<[i64; 1]>>,
+    iso_vertices: Vec<InterPt>,
+    iso_faces: TwoDimArr<usize>,
+    face_positions: Vec<(usize, FaceId)>,
+    face_parents: Vec<usize>,
     point_map: Vec<usize>,
     edge_point_map: HashMap<(EdgeId, usize), usize>,
     face_point_map: HashMap<(FaceId, usize, usize), usize>,
+    tet_boundary_face_set: HashSet<FaceId>,
 }
 
 impl ExtractMesh {
     fn new(n_vertices: usize) -> Self {
         Self {
             points: Vec::new(),
-            triangles: Vec::new(),
-            triangle_parents: Vec::new(),
+            iso_vertices: Vec::new(),
+            iso_faces: TwoDimArr::new_in(Global),
+            face_positions: Vec::new(),
+            face_parents: Vec::new(),
             point_map: vec![INVALID_IND; n_vertices],
             edge_point_map: HashMap::new(),
             face_point_map: HashMap::new(),
+            tet_boundary_face_set: HashSet::new(),
         }
     }
 }
 
-fn write_obj(name: &str, points: &[f64], triangles: &[usize]) {
-    let mut file = std::fs::File::create(name).unwrap();
-    use std::io::Write;
-    for i in 0..points.len() / 3 {
-        writeln!(
-            &mut file,
-            "v {} {} {}",
-            points[i * 3],
-            points[i * 3 + 1],
-            points[i * 3 + 2]
-        )
-        .unwrap();
-    }
-
-    for i in 0..triangles.len() / 3 {
-        writeln!(
-            &mut file,
-            "f {} {} {}",
-            triangles[i * 3] + 1,
-            triangles[i * 3 + 1] + 1,
-            triangles[i * 3 + 2] + 1
-        )
-        .unwrap();
-    }
-}
-
-pub(super) fn extract_iso_surface(tets: &TetSet, vals: Vec<Vec<f64>>) {
+pub(super) fn extract_iso_surface(tets: &TetSet, vals: Vec<Vec<f64>>) -> IsoSurfMesh {
     let base_tet = Arrangement::new_tet(Global);
 
     let mut get_active_surfs = GetActiveSurf::new(vals);
@@ -680,39 +669,19 @@ pub(super) fn extract_iso_surface(tets: &TetSet, vals: Vec<Vec<f64>>) {
         }
     }
     let mut data = ExtractMesh::new(tets.mesh.n_vertices_capacity());
-    for (tid, ar) in arrangements.iter().enumerate() {
+    for (tid, ar) in arrangements.iter_mut().enumerate() {
         if let Some(ar) = ar {
             ar.extract_mesh(tets, tid, &mut data)
         }
     }
-
-    // for (tid, verts) in tets.tet_vertices.iter().enumerate() {
-    //     get_active_surfs.execute(&verts);
-    //     if get_active_surfs.is_empty() {
-    //         continue;
-    //     }
-
-    //     let mut ar = base_tet.clone_in(&bump);
-    //     ar.planes
-    //         .reserve(ar.planes.len() + get_active_surfs.active_surfs.len());
-    //     ar.planes.extend(&get_active_surfs.active_planes);
-    //     ar.plane_surfaces.resize(
-    //         ar.plane_surfaces.len() + get_active_surfs.active_surfs.len(),
-    //         Vec::new_in(&bump),
-    //     );
-
-    //     for (i, coplanars) in get_active_surfs.coplanar_surfs.iter().enumerate() {
-    //         ar.plane_surfaces[i].extend_from_slice(&coplanars);
-    //     }
-
-    //     for (i, &sid) in get_active_surfs.active_surfs.iter().enumerate() {
-    //         ar.add_plane(i + 4, sid, &bump);
-    //     }
-
-    //     ar.extract_mesh(tets, tid, &mut data);
-    // }
-
-    write_obj("123.obj", &data.points, &data.triangles);
+    IsoSurfMesh {
+        arrangements,
+        mesh: SurfaceMesh::new(data.iso_faces.iter(), Global),
+        points: data.points,
+        iso_vertices: data.iso_vertices,
+        face_positions: data.face_positions,
+        face_parents: data.face_parents,
+    }
 }
 
 struct GetActiveSurf {
