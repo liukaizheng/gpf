@@ -1,5 +1,6 @@
 use std::alloc::{Allocator, Global};
 
+use itertools::Itertools;
 use std::collections::{HashMap, HashSet};
 use tinyvec::TinyVec;
 
@@ -74,29 +75,30 @@ impl DivNum {
 }
 
 #[derive(Clone)]
-struct VertexData {
+pub(crate) struct VertexData {
     planes: [usize; 3],
     parents: [VertexId; 2],
     vals: [DivNum; 2],
+    index: usize,
 }
 
 #[derive(Clone)]
-struct FaceData {
+pub(crate) struct FaceData {
     /// plane id
-    pid: usize,
+    pub(crate) pid: usize,
     /// `cells[0]`: inner cell of this face
     /// `cells[1]`: outer cell of this face
-    cells: [usize; 2],
+    pub(crate) cells: [usize; 2],
 }
 
 pub(crate) struct Arrangement<A: Allocator + Copy = Global> {
-    mesh: SurfaceMesh<A>,
-    vertices: Vec<VertexData, A>,
-    edges: Vec<[usize; 2], A>,
-    face_data: Vec<FaceData, A>,
-    cell_faces: Vec<Vec<FaceId, A>, A>,
-    planes: Vec<[f64; 4], A>,
-    plane_surfaces: Vec<Vec<usize, A>, A>,
+    pub(crate) mesh: SurfaceMesh<A>,
+    pub(crate) vertices: Vec<VertexData, A>,
+    pub(crate) edges: Vec<[usize; 2], A>,
+    pub(crate) face_data: Vec<FaceData, A>,
+    pub(crate) cell_faces: Vec<Vec<FaceId, A>, A>,
+    pub(crate) planes: Vec<[f64; 4], A>,
+    pub(crate) plane_surfaces: Vec<Vec<usize, A>, A>,
 }
 
 fn orient3d<A: Allocator + Copy>(
@@ -146,6 +148,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                 planes,
                 parents: [VertexId::default(); 2],
                 vals: [DivNum::nan(), DivNum::nan()],
+                index: INVALID_IND,
             }
         }));
 
@@ -300,6 +303,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                     planes: [e_planes[0], e_planes[1], pid],
                     parents: [va, vb],
                     vals: [ori1, ori2],
+                    index: INVALID_IND,
                 });
                 vert_orientations.push(DivNum::zero());
                 self.edges.push(e_planes.clone());
@@ -489,7 +493,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
     }
 
     fn extract_mesh(&mut self, tets: &TetSet, tid: usize, data: &mut ExtractMesh) {
-        let alloc = self.vertices.allocator();
+        let alloc = self.edges.allocator();
         let mut vertex_pts = Vec::with_capacity_in(self.mesh.n_vertices_capacity(), alloc);
         vertex_pts.resize(self.mesh.n_vertices_capacity(), InterPt::INVALID);
 
@@ -507,8 +511,6 @@ impl<A: Allocator + Copy> Arrangement<A> {
             }
         }
 
-        let mut vertex_indices = Vec::with_capacity_in(self.mesh.n_vertices_capacity(), alloc);
-        vertex_indices.resize(self.mesh.n_vertices_capacity(), INVALID_IND);
         for (idx, inter_pt) in vertex_pts.into_iter().enumerate() {
             let pid = match inter_pt {
                 InterPt::V(vid) => {
@@ -554,7 +556,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                         if vid.0 < 4 {
                             point(&tets.points, tets.tet_vertices[tid][vid].0)
                         } else {
-                            point(&data.points, vertex_indices[vid])
+                            point(&data.points, self.vertices[vid].index)
                         }
                     });
                     let [a1, b1] = self.vertices[idx].vals[0].data.map(|x| x.abs());
@@ -564,7 +566,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                     data.points
                         .extend_from_slice(&interpolate::<3>(pa, pb, a1b2 / (a1b2 + a2b1)));
                 }
-                vertex_indices[idx] = pid;
+                self.vertices[idx].index = pid;
             }
         }
 
@@ -586,15 +588,34 @@ impl<A: Allocator + Copy> Arrangement<A> {
                 let sid = abs_index(signed_sid);
                 if (signed_sid & 1) == 0 {
                     data.iso_faces
-                        .push(face.vertices().map(|v| vertex_indices[*v]));
+                        .push(face.vertices().map(|v| self.vertices[*v].index));
                 } else {
                     data.iso_faces
-                        .push(face.vertices().map(|v| vertex_indices[*v]).rev());
+                        .push(face.vertices().map(|v| self.vertices[*v].index).rev());
                 }
                 data.face_parents.push(sid);
                 data.face_positions.push((tid, fid));
             }
         }
+    }
+
+    pub(crate) fn find_edge(&self, fid: FaceId, idx0: usize, idx1: usize) -> EdgeId {
+        let first_hid = self.mesh.f_halfedge(fid);
+        let mut va = self.vertices[self.mesh.he_from(first_hid)].index;
+        let mut curr_hid = first_hid;
+        loop {
+            let vb = self.vertices[self.mesh.he_to(curr_hid)].index;
+            if (va == idx0 && vb == idx1) || (va == idx1 && vb == idx0) {
+                return self.mesh.he_edge(curr_hid);
+            }
+
+            curr_hid = self.mesh.he_next(curr_hid);
+            if curr_hid == first_hid {
+                break;
+            }
+            va = vb;
+        }
+        EdgeId::default()
     }
 }
 

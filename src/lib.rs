@@ -22,25 +22,30 @@ pub mod utils;
 const INVALID_IND: usize = usize::MAX;
 
 #[inline(always)]
-fn point(points: &[f64], tid: usize) -> &[f64] {
-    let start = tid * 3;
+fn point(points: &[f64], idx: usize) -> &[f64] {
+    let start = idx * 3;
     &points[start..(start + 3)]
 }
 
 #[inline(always)]
-pub fn point_2(points: &[f64], tid: usize) -> &[f64] {
-    let start = tid * 2;
+pub fn point_2(points: &[f64], idx: usize) -> &[f64] {
+    let start = idx * 2;
     &points[start..(start + 2)]
 }
 
 #[inline(always)]
 pub fn signed_index(idx: usize, reversed: bool) -> usize {
-    (idx << 1) + if reversed { 1 } else { 0 }
+    (idx << 1) | if reversed { 1 } else { 0 }
 }
 
 #[inline(always)]
 pub fn abs_index(idx: usize) -> usize {
     idx >> 1
+}
+
+#[inline(always)]
+pub fn twin_index(idx: usize) -> usize {
+    idx ^ 1
 }
 
 #[inline(always)]
