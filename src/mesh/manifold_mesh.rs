@@ -143,11 +143,6 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
     }
 
     #[inline(always)]
-    pub fn he_face(&self, hid: HalfedgeId) -> FaceId {
-        self.he_face_arr[hid]
-    }
-
-    #[inline(always)]
     pub fn he_is_boundary(&self, hid: HalfedgeId) -> bool {
         !self.he_face(hid).valid()
     }
@@ -390,6 +385,11 @@ impl<A: Allocator + Copy> Mesh for ManifoldMesh<A> {
     /// the previous halfedge of the halfedge
     fn he_prev(&self, hid: HalfedgeId) -> HalfedgeId {
         self.core_data.he_prev_arr[hid]
+    }
+
+    #[inline(always)]
+    fn he_face(&self, hid: HalfedgeId) -> FaceId {
+        self.he_face_arr[hid]
     }
 
     #[inline(always)]

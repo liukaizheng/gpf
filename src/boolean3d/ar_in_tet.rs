@@ -96,7 +96,7 @@ pub(crate) struct Arrangement<A: Allocator + Copy = Global> {
     face_data: Vec<FaceData, A>,
     cell_faces: Vec<Vec<FaceId, A>, A>,
     planes: Vec<[f64; 4], A>,
-    plane_surfaces: Vec<Vec<i64, A>, A>,
+    plane_surfaces: Vec<Vec<usize, A>, A>,
 }
 
 fn orient3d<A: Allocator + Copy>(
@@ -274,10 +274,11 @@ impl<A: Allocator + Copy> Arrangement<A> {
         if coplanar_pid != INVALID_IND {
             return;
         }
+        self.plane_surfaces[pid].push(signed_index(sid, false));
 
         self.split_edges(&mut vert_orientations, pid, alloc);
         self.split_faces(&vert_orientations, pid);
-        self.split_cells(&vert_orientations, pid, sid, alloc);
+        self.split_cells(&vert_orientations, pid, alloc);
     }
 
     fn split_edges<A1: Allocator + Copy>(
@@ -363,7 +364,6 @@ impl<A: Allocator + Copy> Arrangement<A> {
         &mut self,
         vert_orientations: &[DivNum],
         pid: usize,
-        sid: usize,
         alloc: A1,
     ) {
         let n_old_cells = self.cell_faces.len();
@@ -437,7 +437,6 @@ impl<A: Allocator + Copy> Arrangement<A> {
                 pid,
                 cells: [cid, new_cid],
             });
-            self.plane_surfaces[pid].push(signed_index(sid, false));
 
             for &fid in &pos_cell_faces {
                 for c in &mut self.face_data[fid].cells {
@@ -585,7 +584,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
 
             for &signed_sid in &self.plane_surfaces[pid] {
                 let sid = abs_index(signed_sid);
-                if signed_sid > 0 {
+                if (signed_sid & 1) == 0 {
                     data.iso_faces
                         .push(face.vertices().map(|v| vertex_indices[*v]));
                 } else {
@@ -691,7 +690,7 @@ struct GetActiveSurf {
     pos_verts: Vec<usize>,
     neg_verts: Vec<usize>,
     zero_verts: Vec<usize>,
-    coplanar_surfs: [Vec<i64>; 4],
+    coplanar_surfs: [Vec<usize>; 4],
 }
 
 impl GetActiveSurf {

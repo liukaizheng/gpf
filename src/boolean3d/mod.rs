@@ -1,11 +1,13 @@
 mod adaptive_subdivide;
 mod ar_in_tet;
+mod extract_components;
 mod tet_set;
 
 use std::collections::HashMap;
 
 use adaptive_subdivide::adaptive_subdivide;
 use ar_in_tet::{extract_iso_surface, Arrangement, InterPt};
+use extract_components::extract_components;
 use itertools::Itertools;
 use tet_set::TetSet;
 
@@ -58,6 +60,7 @@ pub fn boolean3d(first: &SimpleBody, second: &SimpleBody, t: BooleanType, eps: f
 
     let iso_surf_mesh = extract_iso_surface(&tets, vals);
     write_obj("123.obj", &iso_surf_mesh.points, &iso_surf_mesh.mesh);
+    extract_components(iso_surf_mesh);
 
     println!("mesh n tets: {}", tets.tet_faces.len());
 }

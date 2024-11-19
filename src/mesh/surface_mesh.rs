@@ -389,11 +389,6 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
         self.core_data.f_halfedge_arr[new_f] = first_new_hid;
         new_f
     }
-
-    #[inline(always)]
-    pub fn he_face(&self, hid: HalfedgeId) -> FaceId {
-        self.he_face_arr[hid]
-    }
 }
 
 #[inline(always)]
@@ -518,6 +513,11 @@ impl<A: Allocator + Copy> Mesh for SurfaceMesh<A> {
     #[inline(always)]
     fn f_halfedge(&self, fid: FaceId) -> HalfedgeId {
         self.core_data.f_halfedge_arr[fid]
+    }
+
+    #[inline(always)]
+    fn he_face(&self, hid: HalfedgeId) -> FaceId {
+        self.he_face_arr[hid]
     }
 
     #[inline(always)]

@@ -1,6 +1,6 @@
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 
-use super::{iter_next, Edge, Element, ElementId, ElementIndex, Vertex};
+use super::{iter_next, Edge, Element, ElementId, ElementIndex, Face, Vertex};
 use crate::{element_id, mesh::Mesh, INVALID_IND};
 
 use std::alloc::Allocator;
@@ -10,6 +10,7 @@ pub struct HalfedgeId(pub usize);
 
 element_id!(struct HalfedgeId);
 
+#[derive(PartialEq, Eq)]
 pub struct Halfedge<'a, M: Mesh> {
     mesh: &'a M,
     id: HalfedgeId,
@@ -50,6 +51,10 @@ impl<'a, M: Mesh> Halfedge<'a, M> {
 
     pub fn edge(&self) -> Edge<'a, M> {
         Edge::new(self.mesh, self.mesh.he_edge(self.id))
+    }
+
+    pub fn face(&self) -> Face<'a, M> {
+        Face::new(self.mesh, self.mesh.he_face(self.id))
     }
 }
 

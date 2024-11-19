@@ -100,6 +100,8 @@ pub trait Mesh: Sized {
     fn he_next_incoming(&self, hid: HalfedgeId) -> HalfedgeId;
     /// the edge of the halfedge
     fn he_edge(&self, hid: HalfedgeId) -> EdgeId;
+    /// the face of the halfedge
+    fn he_face(&self, hid: HalfedgeId) -> FaceId;
 
     /// the first halfedge of the edge
     fn e_halfedge(&self, eid: EdgeId) -> HalfedgeId;

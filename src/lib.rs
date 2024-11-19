@@ -34,13 +34,13 @@ pub fn point_2(points: &[f64], tid: usize) -> &[f64] {
 }
 
 #[inline(always)]
-pub fn signed_index(idx: usize, reversed: bool) -> i64 {
-    (if reversed { -1 } else { 1 }) * (idx as i64 + 1)
+pub fn signed_index(idx: usize, reversed: bool) -> usize {
+    (idx << 1) + if reversed { 1 } else { 0 }
 }
 
 #[inline(always)]
-pub fn abs_index(idx: i64) -> usize {
-    (idx.abs() - 1) as usize
+pub fn abs_index(idx: usize) -> usize {
+    idx >> 1
 }
 
 #[inline(always)]
