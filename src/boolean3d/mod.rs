@@ -60,7 +60,7 @@ pub fn boolean3d(first: &SimpleBody, second: &SimpleBody, t: BooleanType, eps: f
 
     let iso_surf_mesh = extract_iso_surface(&tets, vals);
     write_obj("123.obj", &iso_surf_mesh.points, &iso_surf_mesh.mesh);
-    extract_components(iso_surf_mesh);
+    extract_components(iso_surf_mesh, &tets);
 
     println!("mesh n tets: {}", tets.tet_faces.len());
 }

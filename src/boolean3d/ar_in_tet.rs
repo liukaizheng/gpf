@@ -478,8 +478,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                 InterPt::V(tets.tet_vertices[tid][idx])
             }
             1 => {
-                let edge_index =
-                    if boundaries[0] != 0 { 0 } else { 1 } + 5 - boundaries[0] - boundaries[1];
+                let edge_index = TetSet::tet_edge_index(boundaries[0], boundaries[1]);
 
                 InterPt::ES((tets.tet_edges[tid][edge_index], inners[0]))
             }

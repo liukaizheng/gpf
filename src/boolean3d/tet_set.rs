@@ -23,6 +23,15 @@ pub(crate) fn tet_face_reversed(face_tets: &[usize; 2], tid: usize) -> bool {
 }
 
 impl TetSet {
+    pub(crate) fn tet_edge_index(pa: usize, pb: usize) -> usize {
+        let min_idx = if pa < pb { pa } else { pb };
+        (if min_idx != 0 { 0 } else { 1 }) + 5 - pa - pb
+    }
+
+    pub(crate) fn tets_around_edge(&self, eid: EdgeId) -> TetsAroundEdge<'_> {
+        TetsAroundEdge::new(self, eid)
+    }
+
     pub(crate) fn split_edge<A: Allocator + Copy>(
         &mut self,
         eid: EdgeId,
@@ -259,6 +268,75 @@ impl TetSet {
             result_tets.push([tid, new_tid]);
         }
         (new_vert, result_tets)
+    }
+}
+
+pub(crate) struct TetsAroundEdge<'a> {
+    first_fid: FaceId,
+    curr_fid: FaceId,
+    tid: usize,
+    eid: EdgeId,
+    is_first: bool,
+    tets: &'a TetSet,
+}
+
+impl<'a> TetsAroundEdge<'a> {
+    fn new(tets: &'a TetSet, eid: EdgeId) -> Self {
+        let mesh = &tets.mesh;
+        let first_fid = mesh
+            .edge(eid)
+            .halfedges()
+            .map(|he| *he.face())
+            .find(|&fid| tets.face_tets[fid][1] == INVALID_IND)
+            .unwrap_or(*mesh.edge(eid).halfedge().face());
+        let tid = tets.face_tets[first_fid][0];
+        Self {
+            first_fid,
+            curr_fid: first_fid,
+            tid,
+            eid,
+            is_first: true,
+            tets,
+        }
+    }
+    fn next_self(&mut self) {
+        let tets = &self.tets;
+        let edge_index = tets.tet_edges[self.tid]
+            .iter()
+            .position(|&eid| self.eid == eid)
+            .unwrap();
+
+        const EDGE_FACE_INDICES: [[usize; 2]; 6] = [[2, 3], [1, 3], [1, 2], [0, 3], [0, 2], [0, 1]];
+
+        let tet_faces = EDGE_FACE_INDICES[edge_index].map(|idx| tets.tet_faces[self.tid][idx]);
+        debug_assert!(tet_faces[0] == self.curr_fid || tet_faces[1] == self.curr_fid);
+        self.curr_fid = if self.curr_fid == tet_faces[0] {
+            tet_faces[1]
+        } else {
+            tet_faces[0]
+        };
+
+        let cells = &tets.face_tets[self.curr_fid];
+        debug_assert!(cells[0] == self.tid || cells[1] == self.tid);
+
+        self.tid = if cells[0] == self.tid {
+            cells[1]
+        } else {
+            cells[0]
+        }
+    }
+}
+
+impl<'a> Iterator for TetsAroundEdge<'a> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.tid == INVALID_IND || (!self.is_first && self.first_fid == self.curr_fid) {
+            return None;
+        }
+        let tid = self.tid;
+        self.next_self();
+        Some(tid)
     }
 }
 
