@@ -10,7 +10,6 @@ use tinyvec::TinyVec;
 
 use crate::{
     abs_index,
-    boolean3d::tet_set,
     disjoint_set::DisjointSet,
     mesh::{EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, VertexId},
     signed_index, twin_index, INVALID_IND,
@@ -235,8 +234,14 @@ fn order_patches_around_edge<A: Allocator + Copy>(
 
     if tet_index_map.len() == 1 {
         for (tid, i) in tet_index_map {
-            let [(_, first_signed_patch), (_, last_signed_patch)] =
-                order_patches_in_tet(iso_surf_mesh, tid, &tet_patches_around_edge[i], ds, alloc);
+            let [first_signed_patch, last_signed_patch] = order_patches_in_tet(
+                iso_surf_mesh,
+                tid,
+                None,
+                &tet_patches_around_edge[i],
+                ds,
+                alloc,
+            );
             debug_assert!(first_signed_patch != INVALID_IND);
             debug_assert!(first_signed_patch != INVALID_IND);
             ds.merge(first_signed_patch, last_signed_patch);
@@ -253,16 +258,46 @@ fn order_patches_around_edge<A: Allocator + Copy>(
             }
         };
 
-        let mut faces_and_patches = Vec::with_capacity_in(tet_index_map.len(), alloc);
-        faces_and_patches.extend(tet_index_map.iter().map(|(&tid, &i)| {
-            order_patches_in_tet(iso_surf_mesh, tid, &tet_patches_around_edge[i], ds, alloc)
-        }));
-
         if let Some(tet_eid) = tet_eid {
+            let mut first_patch = INVALID_IND;
+            let mut prev_patch = INVALID_IND;
+            for [tid, plane_id] in tets.tets_around_edge(tet_eid) {
+                if let Some(&idx) = tet_index_map.get(&tid) {
+                    let tet_edge_and_patches = &tet_patches_around_edge[idx];
+                    let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
+
+                    let first_fid = ar
+                        .mesh
+                        .edge(tet_edge_and_patches.eid)
+                        .halfedges()
+                        .map(|he| *he.face())
+                        .find(|&fid| ar.face_data[fid].pid == plane_id)
+                        .unwrap();
+
+                    let [pa, pb] = order_patches_in_tet(
+                        &iso_surf_mesh,
+                        tid,
+                        Some(first_fid),
+                        tet_edge_and_patches,
+                        ds,
+                        alloc,
+                    );
+
+                    if prev_patch == INVALID_IND {
+                        first_patch = pa;
+                    } else {
+                        ds.merge(prev_patch, pa);
+                    }
+                    prev_patch = pb;
+                }
+            }
+            debug_assert!(first_patch != INVALID_IND);
+            debug_assert!(prev_patch != INVALID_IND);
+            ds.merge(prev_patch, first_patch);
         } else {
             debug_assert!(tet_index_map.len() == 2);
-            // edge is on face, there are two releated tets
-            let [tid0, tid1] = {
+            // edge is on face, there are two related tets
+            let edge_tets = {
                 let mut iter = tet_index_map.iter();
                 let tid0 = *iter.next().unwrap().0;
                 let tid1 = *iter.next().unwrap().0;
@@ -273,38 +308,117 @@ fn order_patches_around_edge<A: Allocator + Copy>(
                 }
             };
 
-            let [va, vb] = iso_surf_mesh.mesh.e_vertices(eid);
-            let vertices0 = {
-                let ar = &iso_surf_mesh.arrangements[tid0].as_ref().unwrap();
-                [faces_and_patches[0][0].0, faces_and_patches[0][1].0]
-                    .map(|fid| ar.find_halfedge(fid, va.0, vb.0))
-                    .map(|hid| {
-                        let mesh = &ar.mesh;
-                        let [v1, v2] = mesh.he_vertices(hid);
-                        [v1, v2, mesh.he_to(mesh.he_next(hid))]
-                    })
-            };
-            let vertices1 = {
-                let ar = &iso_surf_mesh.arrangements[tid1].as_ref().unwrap();
-                [faces_and_patches[1][0].0, faces_and_patches[1][1].0]
-                    .map(|fid| ar.find_halfedge(fid, va.0, vb.0))
-                    .map(|hid| {
-                        let mesh = &ar.mesh;
-                        let [v2, v1] = mesh.he_vertices(hid);
-                        [v1, v2, mesh.he_from(mesh.he_prev(hid))]
-                    })
-            };
+            let tet_bdy_faces = [
+                (edge_tets[0], tet_patches_around_edge[0].eid),
+                (edge_tets[1], tet_patches_around_edge[1].eid),
+            ]
+            .map(|(tid, eid)| {
+                let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
+                let mesh = &ar.mesh;
+                let mut bdy_faces: [FaceId; 2] = [FaceId::default(); 2];
+                for (tar, src) in bdy_faces.iter_mut().zip(
+                    mesh.edge(eid)
+                        .halfedges()
+                        .map(|he| *he.face())
+                        .filter(|&fid| ar.face_data[fid].pid < 4),
+                ) {
+                    *tar = src;
+                }
+                debug_assert!(bdy_faces[0].valid() && bdy_faces[1].valid());
+                bdy_faces
+            });
 
-            debug_assert!(vertices0[0] == vertices1[0] || vertices0[0] == vertices1[1]);
-            debug_assert!(vertices0[1] == vertices1[0] || vertices0[1] == vertices1[1]);
-
-            if vertices0[0] == vertices1[0] {
-                ds.merge(faces_and_patches[0][0].1, faces_and_patches[1][0].1);
-                ds.merge(faces_and_patches[0][1].1, faces_and_patches[1][1].1);
-            } else {
-                ds.merge(faces_and_patches[0][0].1, faces_and_patches[1][1].1);
-                ds.merge(faces_and_patches[0][1].1, faces_and_patches[1][0].1);
+            #[derive(PartialEq, Eq)]
+            enum Vert {
+                /// It's a tet vertex
+                Tet(VertexId),
+                /// It's a vertex of iso-surface
+                ISO(usize),
             }
+
+            let [va, vb] = iso_surf_mesh.mesh.e_vertices(eid);
+            let v0 = {
+                let tid = edge_tets[0];
+                let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
+                let mesh = &ar.mesh;
+                let hid = ar.find_halfedge(tet_bdy_faces[0][0], va.0, vb.0);
+
+                let v = mesh.he_to(mesh.he_next(hid));
+                if *v < 4 {
+                    Vert::Tet(tets.tet_vertices[tid][*v])
+                } else {
+                    Vert::ISO(ar.vertices[v].index)
+                }
+            };
+            let v1 = {
+                let tid = edge_tets[1];
+                let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
+                let mesh = &ar.mesh;
+                let hid = ar.find_halfedge(tet_bdy_faces[1][0], va.0, vb.0);
+                let v = mesh.he_from(mesh.he_prev(hid));
+                if *v < 4 {
+                    Vert::Tet(tets.tet_vertices[tid][*v])
+                } else {
+                    Vert::ISO(ar.vertices[v].index)
+                }
+            };
+
+            #[cfg(debug_assertions)]
+            {
+                let v01 = {
+                    let tid = edge_tets[0];
+                    let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
+                    let mesh = &ar.mesh;
+                    let hid = ar.find_halfedge(tet_bdy_faces[0][1], va.0, vb.0);
+
+                    let v = mesh.he_to(mesh.he_next(hid));
+                    if *v < 4 {
+                        Vert::Tet(tets.tet_vertices[tid][*v])
+                    } else {
+                        Vert::ISO(ar.vertices[v].index)
+                    }
+                };
+                let v11 = {
+                    let tid = edge_tets[1];
+                    let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
+                    let mesh = &ar.mesh;
+                    let hid = ar.find_halfedge(tet_bdy_faces[1][1], va.0, vb.0);
+                    let v = mesh.he_from(mesh.he_prev(hid));
+                    if *v < 4 {
+                        Vert::Tet(tets.tet_vertices[tid][*v])
+                    } else {
+                        Vert::ISO(ar.vertices[v].index)
+                    }
+                };
+
+                debug_assert!(v0 == v1 || v0 == v11);
+                debug_assert!(v01 == v1 || v01 == v11);
+            }
+
+            let [pa, pb] = order_patches_in_tet(
+                iso_surf_mesh,
+                edge_tets[0],
+                Some(tet_bdy_faces[0][0]),
+                &tet_patches_around_edge[0],
+                ds,
+                alloc,
+            );
+
+            let [pc, pd] = order_patches_in_tet(
+                iso_surf_mesh,
+                edge_tets[1],
+                Some(if v0 == v1 {
+                    tet_bdy_faces[1][1]
+                } else {
+                    tet_bdy_faces[1][0]
+                }),
+                &tet_patches_around_edge[1],
+                ds,
+                alloc,
+            );
+
+            ds.merge(pb, pc);
+            ds.merge(pd, pa);
         }
     }
     println!("there are {} shells", ds.n_groups);
@@ -313,28 +427,33 @@ fn order_patches_around_edge<A: Allocator + Copy>(
 fn order_patches_in_tet<A: Allocator + Copy>(
     iso_surf_mesh: &IsoSurfMesh,
     tid: usize,
+    first_fid: Option<FaceId>,
     tet_patches_around_edge: &TetPatchesAroundEdge<A>,
     ds: &mut DisjointSet,
     alloc: A,
-) -> [(FaceId, usize); 2] {
+) -> [usize; 2] {
     let eid = tet_patches_around_edge.eid;
     let face_patches_map = &tet_patches_around_edge.face_patches_map;
-    let ar = &iso_surf_mesh.arrangements[tid].as_ref().unwrap();
+    let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
     let mesh = &ar.mesh;
     let mut edge_faces = HashSet::new_in(alloc);
     edge_faces.extend(mesh.edge(eid).halfedges().map(|he| *he.face()));
-    let first_fid = edge_faces
-        .iter()
-        .find_map(|face| {
-            let fid = *face;
-            let cells = &ar.face_data[fid].cells;
-            if cells[0] == INVALID_IND || cells[1] == INVALID_IND {
-                Some(fid)
-            } else {
-                None
-            }
-        })
-        .unwrap_or(*mesh.edge(eid).halfedge().face());
+    let first_fid = if let Some(first_fid) = first_fid {
+        first_fid
+    } else {
+        edge_faces
+            .iter()
+            .find_map(|face| {
+                let fid = *face;
+                let cells = &ar.face_data[fid].cells;
+                if cells[0] == INVALID_IND || cells[1] == INVALID_IND {
+                    Some(fid)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(*mesh.edge(eid).halfedge().face())
+    };
     let mut curr_fid = first_fid;
     let mut curr_cid = ar.face_data[curr_fid].cells[0];
     debug_assert!(curr_cid != INVALID_IND);
@@ -343,7 +462,7 @@ fn order_patches_in_tet<A: Allocator + Copy>(
 
     let mut prev_signed_patch = INVALID_IND;
     loop {
-        if curr_cid == INVALID_IND || (curr_fid == first_fid && first_signed_patch != INVALID_IND) {
+        if curr_fid == first_fid && first_signed_patch != INVALID_IND {
             break;
         }
 
@@ -375,11 +494,16 @@ fn order_patches_in_tet<A: Allocator + Copy>(
             }
             prev_signed_patch = front_signed_patch;
         }
+
+        if curr_cid == INVALID_IND {
+            break;
+        }
         (curr_fid, curr_cid) = {
             let mut next_fid = FaceId::default();
             for &fid in &ar.cell_faces[curr_cid] {
                 if fid != curr_fid && edge_faces.contains(&fid) {
                     next_fid = fid;
+                    break;
                 }
             }
             debug_assert!(next_fid.valid());
@@ -396,8 +520,8 @@ fn order_patches_in_tet<A: Allocator + Copy>(
         };
     }
 
-    [
-        (first_fid, first_signed_patch),
-        (curr_fid, prev_signed_patch),
-    ]
+    debug_assert!(first_signed_patch != INVALID_IND);
+    debug_assert!(prev_signed_patch != INVALID_IND);
+
+    [first_signed_patch, prev_signed_patch]
 }

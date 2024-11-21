@@ -79,7 +79,7 @@ pub(crate) struct VertexData {
     planes: [usize; 3],
     parents: [VertexId; 2],
     vals: [DivNum; 2],
-    index: usize,
+    pub(crate) index: usize,
 }
 
 #[derive(Clone)]
