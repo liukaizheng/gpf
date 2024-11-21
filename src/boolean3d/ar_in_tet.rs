@@ -1,9 +1,9 @@
 use std::alloc::{Allocator, Global};
 
-use itertools::Itertools;
 use std::collections::{HashMap, HashSet};
 use tinyvec::TinyVec;
 
+use crate::mesh::HalfedgeId;
 use crate::utils::TwoDimArr;
 use crate::{
     abs_index,
@@ -598,14 +598,14 @@ impl<A: Allocator + Copy> Arrangement<A> {
         }
     }
 
-    pub(crate) fn find_edge(&self, fid: FaceId, idx0: usize, idx1: usize) -> EdgeId {
+    pub(crate) fn find_halfedge(&self, fid: FaceId, idx0: usize, idx1: usize) -> HalfedgeId {
         let first_hid = self.mesh.f_halfedge(fid);
         let mut va = self.vertices[self.mesh.he_from(first_hid)].index;
         let mut curr_hid = first_hid;
         loop {
             let vb = self.vertices[self.mesh.he_to(curr_hid)].index;
             if (va == idx0 && vb == idx1) || (va == idx1 && vb == idx0) {
-                return self.mesh.he_edge(curr_hid);
+                return curr_hid;
             }
 
             curr_hid = self.mesh.he_next(curr_hid);
@@ -614,7 +614,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
             }
             va = vb;
         }
-        EdgeId::default()
+        HalfedgeId::default()
     }
 }
 

@@ -203,7 +203,7 @@ fn order_patches_around_edge<A: Allocator + Copy>(
         match tet_index_map.entry(tid) {
             Entry::Vacant(index) => {
                 let [va, vb] = iso_surf_mesh.mesh.e_vertices(eid);
-                let tet_eid = ar.find_edge(tet_fid, va.0, vb.0);
+                let tet_eid = ar.mesh.he_edge(ar.find_halfedge(tet_fid, va.0, vb.0));
                 debug_assert!(tet_eid.valid());
                 let mut vec = TinyVec::new();
                 vec.push(signed_patch);
@@ -262,7 +262,49 @@ fn order_patches_around_edge<A: Allocator + Copy>(
         } else {
             debug_assert!(tet_index_map.len() == 2);
             // edge is on face, there are two releated tets
-            let tid1 = 
+            let [tid0, tid1] = {
+                let mut iter = tet_index_map.iter();
+                let tid0 = *iter.next().unwrap().0;
+                let tid1 = *iter.next().unwrap().0;
+                if *tet_index_map.get(&tid0).unwrap() == 0 {
+                    [tid0, tid1]
+                } else {
+                    [tid1, tid0]
+                }
+            };
+
+            let [va, vb] = iso_surf_mesh.mesh.e_vertices(eid);
+            let vertices0 = {
+                let ar = &iso_surf_mesh.arrangements[tid0].as_ref().unwrap();
+                [faces_and_patches[0][0].0, faces_and_patches[0][1].0]
+                    .map(|fid| ar.find_halfedge(fid, va.0, vb.0))
+                    .map(|hid| {
+                        let mesh = &ar.mesh;
+                        let [v1, v2] = mesh.he_vertices(hid);
+                        [v1, v2, mesh.he_to(mesh.he_next(hid))]
+                    })
+            };
+            let vertices1 = {
+                let ar = &iso_surf_mesh.arrangements[tid1].as_ref().unwrap();
+                [faces_and_patches[1][0].0, faces_and_patches[1][1].0]
+                    .map(|fid| ar.find_halfedge(fid, va.0, vb.0))
+                    .map(|hid| {
+                        let mesh = &ar.mesh;
+                        let [v2, v1] = mesh.he_vertices(hid);
+                        [v1, v2, mesh.he_from(mesh.he_prev(hid))]
+                    })
+            };
+
+            debug_assert!(vertices0[0] == vertices1[0] || vertices0[0] == vertices1[1]);
+            debug_assert!(vertices0[1] == vertices1[0] || vertices0[1] == vertices1[1]);
+
+            if vertices0[0] == vertices1[0] {
+                ds.merge(faces_and_patches[0][0].1, faces_and_patches[1][0].1);
+                ds.merge(faces_and_patches[0][1].1, faces_and_patches[1][1].1);
+            } else {
+                ds.merge(faces_and_patches[0][0].1, faces_and_patches[1][1].1);
+                ds.merge(faces_and_patches[0][1].1, faces_and_patches[1][0].1);
+            }
         }
     }
     println!("there are {} shells", ds.n_groups);
