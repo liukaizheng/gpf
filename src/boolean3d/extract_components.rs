@@ -12,7 +12,7 @@ use crate::{
     abs_index,
     disjoint_set::DisjointSet,
     mesh::{EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, VertexId},
-    signed_index, twin_index, INVALID_IND,
+    point, signed_index, twin_index, INVALID_IND,
 };
 
 use super::{tet_set::TetSet, IsoSurfMesh};
@@ -34,22 +34,72 @@ fn write_chains(name: &str, iso_surf_mesh: &IsoSurfMesh, is_chain_edge: &[bool])
     }
 }
 
+fn write_shell(name: &str, iso_surf_mesh: &IsoSurfMesh, shell: &[usize], patches: &[Vec<FaceId>]) {
+    let mesh = &iso_surf_mesh.mesh;
+    let mut vertex_map = vec![INVALID_IND; mesh.n_vertices_capacity()];
+
+    let mut points = Vec::new();
+    for &signed_pid in shell {
+        let pid = abs_index(signed_pid);
+        for &fid in &patches[pid] {
+            for v in mesh.face(fid).vertices() {
+                let vid = *v;
+                if vertex_map[vid] == INVALID_IND {
+                    vertex_map[vid] = points.len() / 3;
+                    points.extend_from_slice(point(&iso_surf_mesh.points, *vid));
+                }
+            }
+        }
+    }
+
+    let mut file = std::fs::File::create(name).unwrap();
+    use std::io::Write;
+
+    for p in points.chunks(3) {
+        writeln!(&mut file, "v {} {} {}", p[0], p[1], p[2]).unwrap();
+    }
+
+    for &signed_pid in shell {
+        let pid = abs_index(signed_pid);
+        for &fid in &patches[pid] {
+            let mut v_ids = Vec::new();
+            for v in mesh.face(fid).vertices() {
+                v_ids.push(vertex_map[*v] + 1);
+            }
+            if signed_pid & 1 == 0 {
+                v_ids.reverse();
+            }
+            writeln!(&mut file, "f {}", v_ids.iter().join(" ")).unwrap();
+        }
+    }
+}
+
 pub(super) fn extract_components(iso_surf_mesh: IsoSurfMesh, tets: &TetSet) {
     let (chains, is_chain_edge) =
         identify_chain_edge(&iso_surf_mesh.mesh, &iso_surf_mesh.face_parents);
     println!("the n chains is {}", chains.len());
     write_chains("chain.obj", &iso_surf_mesh, &is_chain_edge);
 
-    let (patch_faces, face_patches) = extract_patches(&iso_surf_mesh.mesh, &is_chain_edge);
-    println!("the n patches is {}", patch_faces.len());
+    let (patches, face_patch_arr) = extract_patches(&iso_surf_mesh.mesh, &is_chain_edge);
+    println!("the n patches is {}", patches.len());
 
-    extract_shells(
+    let (shells, patch_shell_arr) = extract_shells(
         &iso_surf_mesh,
         tets,
         &chains,
-        &face_patches,
-        patch_faces.len(),
+        &face_patch_arr,
+        patches.len() << 1,
     );
+
+    println!("the n shells is {}", shells.len());
+    for (shell_id, shell) in shells.iter().enumerate() {
+        write_shell(
+            &format!("data/mesh/shell_{}.obj", shell_id),
+            &iso_surf_mesh,
+            shell,
+            &patches,
+        );
+    }
 }
 
 fn identify_chain_edge(
@@ -159,15 +209,32 @@ fn extract_shells(
     iso_surf_mesh: &IsoSurfMesh,
     tets: &TetSet,
     chains: &[Vec<EdgeId>],
-    face_patches: &[usize],
-    n_patches: usize,
-) {
-    let mut ds = DisjointSet::new(n_patches << 1);
+    face_patch_arr: &[usize],
+    n_signed_patches: usize,
+) -> (Vec<Vec<usize>>, Vec<usize>) {
+    let mut ds = DisjointSet::new(n_signed_patches);
     let mut bump = Bump::new();
     for chain in chains {
         bump.reset();
-        order_patches_around_edge(iso_surf_mesh, tets, chain[0], face_patches, &mut ds, &bump);
+        order_patches_around_edge(
+            iso_surf_mesh,
+            tets,
+            chain[0],
+            face_patch_arr,
+            &mut ds,
+            &bump,
+        );
     }
+
+    let shells = Vec::from_iter(ds.output().into_values());
+    let mut patch_shell_arr = vec![INVALID_IND; n_signed_patches];
+    for (shell_id, shell) in shells.iter().enumerate() {
+        for &pid in shell {
+            patch_shell_arr[pid] = shell_id;
+        }
+    }
+
+    (shells, patch_shell_arr)
 }
 
 struct TetPatchesAroundEdge<A: Allocator + Copy> {
@@ -421,7 +488,6 @@ fn order_patches_around_edge<A: Allocator + Copy>(
             ds.merge(pd, pa);
         }
     }
-    println!("there are {} shells", ds.n_groups);
 }
 
 fn order_patches_in_tet<A: Allocator + Copy>(
