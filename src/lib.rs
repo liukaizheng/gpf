@@ -34,12 +34,12 @@ pub fn point_2(points: &[f64], idx: usize) -> &[f64] {
 }
 
 #[inline(always)]
-pub fn signed_index(idx: usize, reversed: bool) -> usize {
+pub fn oriented_index(idx: usize, reversed: bool) -> usize {
     (idx << 1) | if reversed { 1 } else { 0 }
 }
 
 #[inline(always)]
-pub fn abs_index(idx: usize) -> usize {
+pub fn strip_orientation(idx: usize) -> usize {
     idx >> 1
 }
 
@@ -49,7 +49,7 @@ pub fn twin_index(idx: usize) -> usize {
 }
 
 #[inline(always)]
-fn face_area_2d(points: &[f64]) -> f64 {
+pub fn face_area_2d(points: &[f64]) -> f64 {
     points
         .chunks(2)
         .circular_tuple_windows()

@@ -9,10 +9,9 @@ use itertools::Itertools;
 use tinyvec::TinyVec;
 
 use crate::{
-    abs_index,
     disjoint_set::DisjointSet,
     mesh::{EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, VertexId},
-    point, signed_index, twin_index, INVALID_IND,
+    oriented_index, point, strip_orientation, twin_index, INVALID_IND,
 };
 
 use super::{tet_set::TetSet, IsoSurfMesh};
@@ -39,8 +38,8 @@ fn write_shell(name: &str, iso_surf_mesh: &IsoSurfMesh, shell: &[usize], patches
     let mut vertex_map = vec![INVALID_IND; mesh.n_vertices_capacity()];
 
     let mut points = Vec::new();
-    for &signed_pid in shell {
-        let pid = abs_index(signed_pid);
+    for &ori_pid in shell {
+        let pid = strip_orientation(ori_pid);
         for &fid in &patches[pid] {
             for v in mesh.face(fid).vertices() {
                 let vid = *v;
@@ -59,14 +58,14 @@ fn write_shell(name: &str, iso_surf_mesh: &IsoSurfMesh, shell: &[usize], patches
         writeln!(&mut file, "v {} {} {}", p[0], p[1], p[2]).unwrap();
     }
 
-    for &signed_pid in shell {
-        let pid = abs_index(signed_pid);
+    for &ori_pid in shell {
+        let pid = strip_orientation(ori_pid);
         for &fid in &patches[pid] {
             let mut v_ids = Vec::new();
             for v in mesh.face(fid).vertices() {
                 v_ids.push(vertex_map[*v] + 1);
             }
-            if signed_pid & 1 == 0 {
+            if ori_pid & 1 == 0 {
                 v_ids.reverse();
             }
             writeln!(&mut file, "f {}", v_ids.iter().join(" ")).unwrap();
@@ -210,9 +209,9 @@ fn extract_shells(
     tets: &TetSet,
     chains: &[Vec<EdgeId>],
     face_patch_arr: &[usize],
-    n_signed_patches: usize,
+    n_ori_patches: usize,
 ) -> (Vec<Vec<usize>>, Vec<usize>) {
-    let mut ds = DisjointSet::new(n_signed_patches);
+    let mut ds = DisjointSet::new(n_ori_patches);
     let mut bump = Bump::new();
     for chain in chains {
         bump.reset();
@@ -227,7 +226,7 @@ fn extract_shells(
     }
 
     let shells = Vec::from_iter(ds.output().into_values());
-    let mut patch_shell_arr = vec![INVALID_IND; n_signed_patches];
+    let mut patch_shell_arr = vec![INVALID_IND; n_ori_patches];
     for (shell_id, shell) in shells.iter().enumerate() {
         for &pid in shell {
             patch_shell_arr[pid] = shell_id;
@@ -237,9 +236,9 @@ fn extract_shells(
     (shells, patch_shell_arr)
 }
 
-struct TetPatchesAroundEdge<A: Allocator + Copy> {
+struct TetEdgePatchData<A: Allocator + Copy> {
     eid: EdgeId,
-    face_patches_map: HashMap<FaceId, TinyVec<[usize; 1]>, DefaultHashBuilder, A>,
+    face_to_patches: HashMap<FaceId, TinyVec<[usize; 1]>, DefaultHashBuilder, A>,
 }
 
 fn order_patches_around_edge<A: Allocator + Copy>(
@@ -250,74 +249,68 @@ fn order_patches_around_edge<A: Allocator + Copy>(
     ds: &mut DisjointSet,
     alloc: A,
 ) {
-    let mut tet_patches_around_edge = Vec::new_in(alloc);
-    let mut tet_index_map = HashMap::<usize, usize, _, A>::new_in(alloc);
+    let mut tet_patch_data = Vec::new_in(alloc);
+    let mut tet_to_patch_data_index = HashMap::<usize, usize, _, A>::new_in(alloc);
     for face in iso_surf_mesh.mesh.edge(eid).halfedges().map(|he| he.face()) {
         let fid = *face;
         let (tid, tet_fid) = iso_surf_mesh.face_positions[fid];
         let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
 
-        let signed_patch = {
+        let oriented_patch_id = {
             let pid = ar.face_data[tet_fid].pid;
-            let signed_surf_id = ar.plane_surfaces[pid]
+            let oriented_surf_id = ar.plane_surfaces[pid]
                 .iter()
-                .find(|&&sid| abs_index(sid) == iso_surf_mesh.face_parents[*fid])
+                .find(|&&sid| strip_orientation(sid) == iso_surf_mesh.face_parents[*fid])
                 .unwrap();
-            signed_index(face_patches[fid], (signed_surf_id & 1) != 0)
+            oriented_index(face_patches[fid], (oriented_surf_id & 1) != 0)
         };
 
-        match tet_index_map.entry(tid) {
+        match tet_to_patch_data_index.entry(tid) {
             Entry::Vacant(index) => {
                 let [va, vb] = iso_surf_mesh.mesh.e_vertices(eid);
                 let tet_eid = ar.mesh.he_edge(ar.find_halfedge(tet_fid, va.0, vb.0));
                 debug_assert!(tet_eid.valid());
                 let mut vec = TinyVec::new();
-                vec.push(signed_patch);
-                let mut face_patches_map = HashMap::new_in(alloc);
-                face_patches_map.insert(tet_fid, vec);
-                index.insert(tet_patches_around_edge.len());
-                tet_patches_around_edge.push(TetPatchesAroundEdge {
+                vec.push(oriented_patch_id);
+                let mut face_to_patches = HashMap::new_in(alloc);
+                face_to_patches.insert(tet_fid, vec);
+                index.insert(tet_patch_data.len());
+                tet_patch_data.push(TetEdgePatchData {
                     eid: tet_eid,
-                    face_patches_map,
+                    face_to_patches,
                 });
             }
-            Entry::Occupied(index) => match tet_patches_around_edge[*index.get()]
-                .face_patches_map
-                .entry(tet_fid)
-            {
-                Entry::Occupied(mut occupied) => {
-                    occupied.get_mut().push(signed_patch);
+            Entry::Occupied(index) => {
+                match tet_patch_data[*index.get()].face_to_patches.entry(tet_fid) {
+                    Entry::Occupied(mut occupied) => {
+                        occupied.get_mut().push(oriented_patch_id);
+                    }
+                    Entry::Vacant(vacant) => {
+                        let mut vec = TinyVec::new();
+                        vec.push(oriented_patch_id);
+                        vacant.insert(vec);
+                    }
                 }
-                Entry::Vacant(vacant) => {
-                    let mut vec = TinyVec::new();
-                    vec.push(signed_patch);
-                    vacant.insert(vec);
-                }
-            },
+            }
         }
     }
 
-    debug_assert!(!tet_index_map.is_empty());
+    debug_assert!(!tet_to_patch_data_index.is_empty());
 
-    if tet_index_map.len() == 1 {
-        for (tid, i) in tet_index_map {
-            let [first_signed_patch, last_signed_patch] = order_patches_in_tet(
-                iso_surf_mesh,
-                tid,
-                None,
-                &tet_patches_around_edge[i],
-                ds,
-                alloc,
-            );
-            debug_assert!(first_signed_patch != INVALID_IND);
-            debug_assert!(first_signed_patch != INVALID_IND);
-            ds.merge(first_signed_patch, last_signed_patch);
+    if tet_to_patch_data_index.len() == 1 {
+        for (tid, i) in tet_to_patch_data_index {
+            // first and last oriented patch in the tet
+            let [first_op, last_op] =
+                order_patches_in_tet(iso_surf_mesh, tid, None, &tet_patch_data[i], ds, alloc);
+            debug_assert!(first_op != INVALID_IND);
+            debug_assert!(first_op != INVALID_IND);
+            ds.merge(first_op, last_op);
         }
     } else {
         let tet_eid = {
-            let (&tid, &i) = tet_index_map.iter().next().unwrap();
+            let (&tid, &i) = tet_to_patch_data_index.iter().next().unwrap();
             let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
-            let [pa, pb] = ar.edges[tet_patches_around_edge[i].eid];
+            let [pa, pb] = ar.edges[tet_patch_data[i].eid];
             if pa < 4 && pb < 4 {
                 Some(tets.tet_edges[tid][TetSet::tet_edge_index(pa, pb)])
             } else {
@@ -326,11 +319,11 @@ fn order_patches_around_edge<A: Allocator + Copy>(
         };
 
         if let Some(tet_eid) = tet_eid {
-            let mut first_patch = INVALID_IND;
-            let mut prev_patch = INVALID_IND;
+            let mut first_op = INVALID_IND;
+            let mut prev_op = INVALID_IND;
             for [tid, plane_id] in tets.tets_around_edge(tet_eid) {
-                if let Some(&idx) = tet_index_map.get(&tid) {
-                    let tet_edge_and_patches = &tet_patches_around_edge[idx];
+                if let Some(&idx) = tet_to_patch_data_index.get(&tid) {
+                    let tet_edge_and_patches = &tet_patch_data[idx];
                     let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
 
                     let first_fid = ar
@@ -341,7 +334,7 @@ fn order_patches_around_edge<A: Allocator + Copy>(
                         .find(|&fid| ar.face_data[fid].pid == plane_id)
                         .unwrap();
 
-                    let [pa, pb] = order_patches_in_tet(
+                    let [op1, op2] = order_patches_in_tet(
                         &iso_surf_mesh,
                         tid,
                         Some(first_fid),
@@ -350,25 +343,25 @@ fn order_patches_around_edge<A: Allocator + Copy>(
                         alloc,
                     );
 
-                    if prev_patch == INVALID_IND {
-                        first_patch = pa;
+                    if prev_op == INVALID_IND {
+                        first_op = op1;
                     } else {
-                        ds.merge(prev_patch, pa);
+                        ds.merge(prev_op, op1);
                     }
-                    prev_patch = pb;
+                    prev_op = op2;
                 }
             }
-            debug_assert!(first_patch != INVALID_IND);
-            debug_assert!(prev_patch != INVALID_IND);
-            ds.merge(prev_patch, first_patch);
+            debug_assert!(first_op != INVALID_IND);
+            debug_assert!(prev_op != INVALID_IND);
+            ds.merge(prev_op, first_op);
         } else {
-            debug_assert!(tet_index_map.len() == 2);
+            debug_assert!(tet_to_patch_data_index.len() == 2);
             // edge is on face, there are two related tets
             let edge_tets = {
-                let mut iter = tet_index_map.iter();
+                let mut iter = tet_to_patch_data_index.iter();
                 let tid0 = *iter.next().unwrap().0;
                 let tid1 = *iter.next().unwrap().0;
-                if *tet_index_map.get(&tid0).unwrap() == 0 {
+                if *tet_to_patch_data_index.get(&tid0).unwrap() == 0 {
                     [tid0, tid1]
                 } else {
                     [tid1, tid0]
@@ -376,8 +369,8 @@ fn order_patches_around_edge<A: Allocator + Copy>(
             };
 
             let tet_bdy_faces = [
-                (edge_tets[0], tet_patches_around_edge[0].eid),
-                (edge_tets[1], tet_patches_around_edge[1].eid),
+                (edge_tets[0], tet_patch_data[0].eid),
+                (edge_tets[1], tet_patch_data[1].eid),
             ]
             .map(|(tid, eid)| {
                 let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
@@ -466,7 +459,7 @@ fn order_patches_around_edge<A: Allocator + Copy>(
                 iso_surf_mesh,
                 edge_tets[0],
                 Some(tet_bdy_faces[0][0]),
-                &tet_patches_around_edge[0],
+                &tet_patch_data[0],
                 ds,
                 alloc,
             );
@@ -479,7 +472,7 @@ fn order_patches_around_edge<A: Allocator + Copy>(
                 } else {
                     tet_bdy_faces[1][0]
                 }),
-                &tet_patches_around_edge[1],
+                &tet_patch_data[1],
                 ds,
                 alloc,
             );
@@ -494,12 +487,12 @@ fn order_patches_in_tet<A: Allocator + Copy>(
     iso_surf_mesh: &IsoSurfMesh,
     tid: usize,
     first_fid: Option<FaceId>,
-    tet_patches_around_edge: &TetPatchesAroundEdge<A>,
+    tet_patches_around_edge: &TetEdgePatchData<A>,
     ds: &mut DisjointSet,
     alloc: A,
 ) -> [usize; 2] {
     let eid = tet_patches_around_edge.eid;
-    let face_patches_map = &tet_patches_around_edge.face_patches_map;
+    let face_to_patches = &tet_patches_around_edge.face_to_patches;
     let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
     let mesh = &ar.mesh;
     let mut edge_faces = HashSet::new_in(alloc);
@@ -524,15 +517,15 @@ fn order_patches_in_tet<A: Allocator + Copy>(
     let mut curr_cid = ar.face_data[curr_fid].cells[0];
     debug_assert!(curr_cid != INVALID_IND);
 
-    let mut first_signed_patch = INVALID_IND;
+    let mut first_ori_patch = INVALID_IND;
 
-    let mut prev_signed_patch = INVALID_IND;
+    let mut prev_ori_patch = INVALID_IND;
     loop {
-        if curr_fid == first_fid && first_signed_patch != INVALID_IND {
+        if curr_fid == first_fid && first_ori_patch != INVALID_IND {
             break;
         }
 
-        if let Some(patches) = face_patches_map.get(&curr_fid) {
+        if let Some(patches) = face_to_patches.get(&curr_fid) {
             let is_cell_outer_face = {
                 let cells = &ar.face_data[curr_fid].cells;
                 cells[0] == curr_cid
@@ -550,15 +543,15 @@ fn order_patches_in_tet<A: Allocator + Copy>(
                 ds.merge(twin_index(pa), pb);
             }
 
-            let back_signed_patch = oriented_patches[0];
-            let front_signed_patch = twin_index(*oriented_patches.last().unwrap());
+            let back_ori_patch = oriented_patches[0];
+            let front_ori_patch = twin_index(*oriented_patches.last().unwrap());
 
-            if prev_signed_patch == INVALID_IND {
-                first_signed_patch = back_signed_patch;
+            if prev_ori_patch == INVALID_IND {
+                first_ori_patch = back_ori_patch;
             } else {
-                ds.merge(back_signed_patch, prev_signed_patch);
+                ds.merge(back_ori_patch, prev_ori_patch);
             }
-            prev_signed_patch = front_signed_patch;
+            prev_ori_patch = front_ori_patch;
         }
 
         if curr_cid == INVALID_IND {
@@ -586,8 +579,8 @@ fn order_patches_in_tet<A: Allocator + Copy>(
         };
     }
 
-    debug_assert!(first_signed_patch != INVALID_IND);
-    debug_assert!(prev_signed_patch != INVALID_IND);
+    debug_assert!(first_ori_patch != INVALID_IND);
+    debug_assert!(prev_ori_patch != INVALID_IND);
 
-    [first_signed_patch, prev_signed_patch]
+    [first_ori_patch, prev_ori_patch]
 }

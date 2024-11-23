@@ -6,12 +6,11 @@ use tinyvec::TinyVec;
 use crate::mesh::HalfedgeId;
 use crate::utils::TwoDimArr;
 use crate::{
-    abs_index,
     math::interpolate,
     mesh::{clone_vec_in, EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, VertexId},
-    point,
+    oriented_index, point,
     predicates::det4,
-    signed_index, INVALID_IND,
+    strip_orientation, INVALID_IND,
 };
 
 use super::tet_set::TetSet;
@@ -269,7 +268,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                     let non_zero_ori = non_zero_ori_fn();
                     debug_assert!(!non_zero_ori.is_nan());
                     self.plane_surfaces[coplanar_pid]
-                        .push(signed_index(sid, non_zero_ori.is_pos()));
+                        .push(oriented_index(sid, non_zero_ori.is_pos()));
                 }
             }
         }
@@ -277,7 +276,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
         if coplanar_pid != INVALID_IND {
             return;
         }
-        self.plane_surfaces[pid].push(signed_index(sid, false));
+        self.plane_surfaces[pid].push(oriented_index(sid, false));
 
         self.split_edges(&mut vert_orientations, pid, alloc);
         self.split_faces(&vert_orientations, pid);
@@ -468,7 +467,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
             if pid < 4 {
                 boundaries.push(pid);
             } else {
-                inners.push(abs_index(self.plane_surfaces[pid][0]));
+                inners.push(strip_orientation(self.plane_surfaces[pid][0]));
             }
         }
 
@@ -583,9 +582,9 @@ impl<A: Allocator + Copy> Arrangement<A> {
             let fid = *face;
             let pid = self.face_data[fid].pid;
 
-            for &signed_sid in &self.plane_surfaces[pid] {
-                let sid = abs_index(signed_sid);
-                if (signed_sid & 1) == 0 {
+            for &oriented_sid in &self.plane_surfaces[pid] {
+                let sid = strip_orientation(oriented_sid);
+                if (oriented_sid & 1) == 0 {
                     data.iso_faces
                         .push(face.vertices().map(|v| self.vertices[*v].index));
                 } else {
@@ -755,9 +754,9 @@ impl GetActiveSurf {
                 self.active_planes.push(plane);
             } else if self.zero_verts.len() == 3 {
                 if !self.pos_verts.is_empty() {
-                    self.coplanar_surfs[self.pos_verts[0]].push(signed_index(sid, true));
+                    self.coplanar_surfs[self.pos_verts[0]].push(oriented_index(sid, true));
                 } else {
-                    self.coplanar_surfs[self.neg_verts[0]].push(signed_index(sid, false));
+                    self.coplanar_surfs[self.neg_verts[0]].push(oriented_index(sid, false));
                 }
             }
         }
