@@ -14,7 +14,7 @@ use crate::{
     oriented_index, point, strip_orientation, twin_index, INVALID_IND,
 };
 
-use super::{tet_set::TetSet, IsoSurfMesh};
+use super::{ar_in_tet::IsoVert, tet_set::TetSet, IsoSurfMesh};
 
 fn write_chains(name: &str, iso_surf_mesh: &IsoSurfMesh, is_chain_edge: &[bool]) {
     let file = std::fs::File::create(name).unwrap();
@@ -89,16 +89,6 @@ pub(super) fn extract_components(iso_surf_mesh: IsoSurfMesh, tets: &TetSet) {
         &face_patch_arr,
         patches.len() << 1,
     );
-
-    println!("the n shells is {}", shells.len());
-    for (shell_id, shell) in shells.iter().enumerate() {
-        write_shell(
-            &format!("data/mesh/shell_{}.obj", shell_id),
-            &iso_surf_mesh,
-            shell,
-            &patches,
-        );
-    }
 }
 
 fn identify_chain_edge(
@@ -211,7 +201,7 @@ fn extract_shells(
     face_patch_arr: &[usize],
     n_ori_patches: usize,
 ) -> (Vec<Vec<usize>>, Vec<usize>) {
-    let mut ds = DisjointSet::new(n_ori_patches);
+    let mut shell_ds = DisjointSet::new(n_ori_patches);
     let mut bump = Bump::new();
     for chain in chains {
         bump.reset();
@@ -220,17 +210,27 @@ fn extract_shells(
             tets,
             chain[0],
             face_patch_arr,
-            &mut ds,
+            &mut shell_ds,
             &bump,
         );
     }
 
-    let shells = Vec::from_iter(ds.output().into_values());
-    let mut patch_shell_arr = vec![INVALID_IND; n_ori_patches];
-    for (shell_id, shell) in shells.iter().enumerate() {
-        for &pid in shell {
-            patch_shell_arr[pid] = shell_id;
-        }
+    // As so far, we don't consider these shells are in different components
+    let (shells, patch_shell_arr) = shell_ds.output();
+    println!("the n shells is {}", shells.len());
+
+    // disjoin set for components
+    let mut comp_ds = DisjointSet::new(shells.len());
+    for ori_pa in (0..n_ori_patches).step_by(2) {
+        let ori_pb = ori_pa + 1;
+        comp_ds.merge(patch_shell_arr[ori_pa], patch_shell_arr[ori_pb]);
+    }
+
+    println!("the n comps is {}", comp_ds.n_groups);
+
+    if comp_ds.n_groups > 1 {
+        let vert_descent_links = tets.build_descending_vertex_links();
+        let (components, shell_to_comp_arr) = comp_ds.output();
     }
 
     (shells, patch_shell_arr)
@@ -583,4 +583,66 @@ fn order_patches_in_tet<A: Allocator + Copy>(
     debug_assert!(prev_ori_patch != INVALID_IND);
 
     [first_ori_patch, prev_ori_patch]
+}
+
+enum Extreme {
+    V([VertexId; 2]),
+    E([VertexId; 2]),
+}
+
+fn find_component_extreme(
+    iso_surf_mesh: &IsoSurfMesh,
+    tets: &TetSet,
+    components: &[Vec<usize>],
+    shell_to_comp_arr: &[usize],
+    patches: &[Vec<FaceId>],
+    patch_to_shell_arr: &[usize],
+    vert_descent_links: &[VertexId],
+) {
+    Vec::from_iter(patches.iter().enumerate().map(|(patch_id, patch)| {
+        let comp_id = shell_to_comp_arr[patch_to_shell_arr[patch_id << 1]];
+        let mut comp_extreme = [VertexId::default(); 2];
+        let mut extreme_pt: &[f64] = &[f64::MAX, f64::MAX, f64::MAX];
+        let mut extreme_eid = EdgeId::default();
+        for &fid in patch {
+            for v in iso_surf_mesh.mesh.face(fid).vertices() {
+                let vid = *v;
+                match iso_surf_mesh.iso_vertices[vid] {
+                    IsoVert::V(tet_vid) => {
+                        let next_vid = vert_descent_links[tet_vid];
+                        let pt = point(&tets.points, next_vid.0);
+                        if pt.partial_cmp(extreme_pt).unwrap().is_lt() {
+                            extreme_pt = pt;
+                            comp_extreme = [vid, next_vid];
+                            extreme_eid = EdgeId::default();
+                        }
+                    }
+                    IsoVert::ES((tet_eid, _)) => {
+                        let [va, vb] = tets.mesh.e_vertices(tet_eid);
+                        let p1 = point(&tets.points, va.0);
+                        let p2 = point(&tets.points, vb.0);
+                        if p1.partial_cmp(&p2).unwrap().is_lt() {
+                            if p1.partial_cmp(extreme_pt).unwrap().is_lt() {
+                                comp_extreme = [vb, va];
+                                extreme_pt = p1;
+                                extreme_eid = tet_eid;
+                            }
+                        } else {
+                            if p2.partial_cmp(extreme_pt).unwrap().is_lt() {
+                                comp_extreme = [va, vb];
+                                extreme_pt = p2;
+                                extreme_eid = tet_eid;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if extreme_eid.valid() {
+            Extreme::E([comp_extreme[0], comp_extreme[1]])
+        } else {
+            Extreme::V([comp_extreme[0], comp_extreme[1]])
+        }
+    }));
 }

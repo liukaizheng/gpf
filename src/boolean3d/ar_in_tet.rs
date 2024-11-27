@@ -17,7 +17,7 @@ use super::tet_set::TetSet;
 use super::IsoSurfMesh;
 
 #[derive(Clone)]
-pub(crate) enum InterPt {
+pub(crate) enum IsoVert {
     V(VertexId),
     ES((EdgeId, usize)),
     FSS((FaceId, usize, usize)),
@@ -25,11 +25,11 @@ pub(crate) enum InterPt {
     INVALID,
 }
 
-impl InterPt {
+impl IsoVert {
     #[inline]
     fn valid(&self) -> bool {
         match self {
-            InterPt::INVALID => false,
+            IsoVert::INVALID => false,
             _ => true,
         }
     }
@@ -460,7 +460,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
         }
     }
 
-    fn get_global_vertex(&self, vid: VertexId, tid: usize, tets: &TetSet) -> InterPt {
+    fn get_global_vertex(&self, vid: VertexId, tid: usize, tets: &TetSet) -> IsoVert {
         let mut boundaries = TinyVec::<[usize; 3]>::new();
         let mut inners = TinyVec::<[usize; 3]>::new();
         for &pid in &self.vertices[vid].planes {
@@ -474,26 +474,26 @@ impl<A: Allocator + Copy> Arrangement<A> {
         match inners.len() {
             0 => {
                 let idx = boundaries[0] ^ boundaries[1] ^ boundaries[2];
-                InterPt::V(tets.tet_vertices[tid][idx])
+                IsoVert::V(tets.tet_vertices[tid][idx])
             }
             1 => {
                 let edge_index = TetSet::tet_edge_index(boundaries[0], boundaries[1]);
 
-                InterPt::ES((tets.tet_edges[tid][edge_index], inners[0]))
+                IsoVert::ES((tets.tet_edges[tid][edge_index], inners[0]))
             }
             2 => {
                 let fid = tets.tet_faces[tid][boundaries[0]];
-                InterPt::FSS((fid, inners[0], inners[1]))
+                IsoVert::FSS((fid, inners[0], inners[1]))
             }
-            3 => InterPt::SSS([inners[0], inners[1], inners[2]]),
-            _ => InterPt::INVALID,
+            3 => IsoVert::SSS([inners[0], inners[1], inners[2]]),
+            _ => IsoVert::INVALID,
         }
     }
 
     fn extract_mesh(&mut self, tets: &TetSet, tid: usize, data: &mut ExtractMesh) {
         let alloc = self.edges.allocator();
         let mut vertex_pts = Vec::with_capacity_in(self.mesh.n_vertices_capacity(), alloc);
-        vertex_pts.resize(self.mesh.n_vertices_capacity(), InterPt::INVALID);
+        vertex_pts.resize(self.mesh.n_vertices_capacity(), IsoVert::INVALID);
 
         for face in self.mesh.faces() {
             let fid = *face;
@@ -511,7 +511,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
 
         for (idx, inter_pt) in vertex_pts.into_iter().enumerate() {
             let pid = match inter_pt {
-                InterPt::V(vid) => {
+                IsoVert::V(vid) => {
                     if data.point_map[vid] == INVALID_IND {
                         let pid = data.points.len() / 3;
                         data.point_map[vid] = pid;
@@ -522,7 +522,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                         data.point_map[vid]
                     }
                 }
-                InterPt::ES(key) => match data.edge_point_map.entry(key) {
+                IsoVert::ES(key) => match data.edge_point_map.entry(key) {
                     std::collections::hash_map::Entry::Occupied(occupied) => *occupied.get(),
                     std::collections::hash_map::Entry::Vacant(vacant) => {
                         let pid = data.points.len() / 3;
@@ -531,7 +531,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                         pid
                     }
                 },
-                InterPt::FSS(key) => match data.face_point_map.entry(key) {
+                IsoVert::FSS(key) => match data.face_point_map.entry(key) {
                     std::collections::hash_map::Entry::Occupied(occupied) => *occupied.get(),
                     std::collections::hash_map::Entry::Vacant(vacant) => {
                         let pid = data.points.len() / 3;
@@ -540,12 +540,12 @@ impl<A: Allocator + Copy> Arrangement<A> {
                         pid
                     }
                 },
-                InterPt::SSS(_) => {
+                IsoVert::SSS(_) => {
                     data.iso_vertices.push(inter_pt.clone());
                     data.points.len() / 3
                 }
 
-                InterPt::INVALID => INVALID_IND,
+                IsoVert::INVALID => INVALID_IND,
             };
 
             if pid != INVALID_IND {
@@ -619,7 +619,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
 
 struct ExtractMesh {
     points: Vec<f64>,
-    iso_vertices: Vec<InterPt>,
+    iso_vertices: Vec<IsoVert>,
     iso_faces: TwoDimArr<usize>,
     face_positions: Vec<(usize, FaceId)>,
     face_parents: Vec<usize>,

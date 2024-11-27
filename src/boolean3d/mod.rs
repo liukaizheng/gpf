@@ -6,7 +6,7 @@ mod tet_set;
 use std::collections::HashMap;
 
 use adaptive_subdivide::adaptive_subdivide;
-use ar_in_tet::{extract_iso_surface, Arrangement, InterPt};
+use ar_in_tet::{extract_iso_surface, Arrangement, IsoVert};
 use extract_components::extract_components;
 use itertools::Itertools;
 use tet_set::TetSet;
@@ -38,7 +38,7 @@ struct IsoSurfMesh {
     arrangements: Vec<Option<Arrangement>>,
     mesh: SurfaceMesh,
     points: Vec<f64>,
-    iso_vertices: Vec<InterPt>,
+    iso_vertices: Vec<IsoVert>,
     face_positions: Vec<(usize, FaceId)>,
     face_parents: Vec<usize>,
 }

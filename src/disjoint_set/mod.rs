@@ -45,12 +45,22 @@ impl DisjointSet {
         return self.parent[x];
     }
 
-    pub fn output(&mut self) -> HashMap<usize, Vec<usize>> {
-        let mut result = HashMap::<usize, Vec<usize>>::new();
+    pub fn output(&mut self) -> (Vec<Vec<usize>>, Vec<usize>) {
+        let mut group_to_elements = HashMap::<usize, Vec<usize>>::with_capacity(self.n_groups);
         for i in 0..self.parent.len() {
             let p = self.find_set(i);
-            result.entry(p).or_insert(vec![]).push(i);
+            group_to_elements.entry(p).or_insert(vec![]).push(i);
         }
-        result
+
+        let mut groups = Vec::with_capacity(self.n_groups);
+        let mut ele_groups = vec![0; self.parent.len()];
+        for (gid, group) in group_to_elements.into_values().enumerate() {
+            for &element in &group {
+                ele_groups[element] = gid;
+            }
+            groups.push(group);
+        }
+
+        (groups, ele_groups)
     }
 }

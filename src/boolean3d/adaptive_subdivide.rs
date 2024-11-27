@@ -62,7 +62,6 @@ pub(super) fn adaptive_subdivide(
             vals_and_grads[i].push(surf.eval(p));
         }
     }
-    
 
     let mut data = SubdivisionData {
         surfaces,
@@ -188,7 +187,6 @@ fn subdividable<A: Allocator + Copy>(
         cross(&trans_vmat[0], &trans_vmat[1]),
     ];
 
-
     let mut interpolant_vec = Vec::with_capacity_in(surfs.len(), alloc);
     let mut interpolant_diff_vec = Vec::with_capacity_in(surfs.len(), alloc);
     let mut val_diff_vec = Vec::with_capacity_in(surfs.len(), alloc);
@@ -233,7 +231,7 @@ fn subdividable<A: Allocator + Copy>(
         active[sid] = *vals.iter().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap() > 0.0 &&
                 *vals.iter().min_by(|x, y| x.partial_cmp(y).unwrap()).unwrap() < 0.0;
         if active[sid]  {
-            
+
             if test_distance_1(&adj_vmat, val_diff, &diffs, sq_det_vmat, sq_eps) {
                 return true;
             }
@@ -477,4 +475,3 @@ fn test_distance_3(
 
     return r2 * sq_det_v > det_w * det_w * sq_eps;
 }
-

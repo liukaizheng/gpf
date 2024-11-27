@@ -865,13 +865,7 @@ impl BSPComplex {
         let mut edge_groups = Vec::new();
         let mut edge_in_group = vec![INVALID_IND; self.edge_data.len()];
 
-        let group_map = ds.output();
-        let mut face_in_group = vec![INVALID_IND; self.face_data.len()];
-        for (&id, new_faces) in &group_map {
-            for &new_fid in new_faces {
-                face_in_group[f_new_to_old[new_fid]] = id;
-            }
-        }
+        let (groups, face_in_group) = ds.output();
         let edge_face_groups = Vec::from_iter(edge_faces.iter().map(|faces| {
             let mut groups = Vec::from_iter(faces.into_iter().map(|&fid| face_in_group[fid]));
             groups.sort_unstable();
@@ -879,7 +873,7 @@ impl BSPComplex {
             groups
         }));
 
-        Vec::from_iter(group_map.into_values().map(|indices| {
+        Vec::from_iter(groups.into_iter().map(|indices| {
             bump.reset();
             let mut tid = INVALID_IND;
             let mut base_fid = FaceId::default();

@@ -1,7 +1,7 @@
 use std::alloc::Allocator;
 
 use crate::{
-    mesh::{square_edge_length, EdgeId, FaceId, Mesh, SurfaceMesh, VertexId},
+    mesh::{square_edge_length, EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, VertexId},
     point, INVALID_IND,
 };
 
@@ -31,6 +31,31 @@ impl TetSet {
     /// return tet and its start face index
     pub(crate) fn tets_around_edge(&self, eid: EdgeId) -> TetsAroundEdge<'_> {
         TetsAroundEdge::new(self, eid)
+    }
+
+    pub(crate) fn build_descending_vertex_links(&self) -> Vec<VertexId> {
+        let mut descent_links = vec![VertexId::default(); self.mesh.n_vertices()];
+        for tet_verts in &self.tet_vertices {
+            let min_idx = tet_verts
+                .map(|vid| point(&self.points, vid.0))
+                .into_iter()
+                .enumerate()
+                .min_by(|&(_, pa), &(_, pb)| pa.partial_cmp(&pb).unwrap())
+                .unwrap()
+                .0;
+            let min_v = tet_verts[min_idx];
+
+            for &vid in tet_verts {
+                if vid == min_v {
+                    continue;
+                }
+                let next_vid = descent_links[vid];
+                if !next_vid.valid() {
+                    descent_links[vid] = min_v;
+                }
+            }
+        }
+        descent_links
     }
 
     pub(crate) fn split_edge<A: Allocator + Copy>(
