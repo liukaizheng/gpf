@@ -10,9 +10,7 @@ use itertools::Itertools;
 use tinyvec::TinyVec;
 
 use crate::{
-    disjoint_set::DisjointSet,
-    mesh::{EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, Vertex, VertexId},
-    oriented_index, point, strip_orientation, twin_index, INVALID_IND,
+    disjoint_set::DisjointSet, is_positive, mesh::{EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, Vertex, VertexId}, oriented_index, point, strip_orientation, twin_index, INVALID_IND
 };
 
 use super::{ar_in_tet::IsoVert, tet_set::TetSet, IsoSurfMesh};
@@ -264,11 +262,11 @@ fn order_patches_around_edge<A: Allocator + Copy>(
 
         let oriented_patch_id = {
             let pid = ar.face_data[tet_fid].pid;
-            let oriented_surf_id = ar.plane_surfaces[pid]
+            let oriented_surf_id = *ar.plane_surfaces[pid]
                 .iter()
                 .find(|&&sid| strip_orientation(sid) == iso_surf_mesh.face_parents[*fid])
                 .unwrap();
-            oriented_index(face_patches[fid], (oriented_surf_id & 1) != 0)
+            oriented_index(face_patches[fid], !is_positive(oriented_surf_id))
         };
 
         match tet_to_patch_data_index.entry(tid) {
@@ -302,6 +300,15 @@ fn order_patches_around_edge<A: Allocator + Copy>(
     }
 
     debug_assert!(!tet_to_patch_data_index.is_empty());
+
+    // sort patches for combining unconnected components
+    for tet_patches in &mut tet_patch_data {
+        for patches in tet_patches.face_to_patches.values_mut() {
+            if patches.len() > 1 {
+                patches.sort_unstable();
+            }
+        }
+    }
 
     if tet_to_patch_data_index.len() == 1 {
         for (tid, i) in tet_to_patch_data_index {
@@ -545,6 +552,10 @@ fn order_patches_in_tet<A: Allocator + Copy>(
                 }
             }));
 
+            if oriented_patches.len() > 1 {
+                // start from the patch with the same orientation as the face
+            }
+
             for (&pa, &pb) in oriented_patches.iter().tuple_windows() {
                 ds.merge(twin_index(pa), pb);
             }
@@ -684,7 +695,7 @@ fn find_component_outer_orient_patch(
 ) {
     let (tid, outer_fid) = get_component_tet(iso_surf_mesh, tets, start_vid, end_vid);
     let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
-    if ar.has_srf_on(outer_fid) {}
+    if !ar.plane_surfaces.is_empty() {}
 }
 
 fn get_component_tet(
@@ -697,7 +708,7 @@ fn get_component_tet(
         if let Some(ar) = &iso_surf_mesh.arrangements[tid] {
             let mesh = &ar.mesh;
             for he in mesh.vertex(start_vid).incoming_halfedges() {
-                if ar.has_srf_on(*he.face()) {
+                if !ar.plane_surfaces.is_empty() {
                     return true;
                 }
             }

@@ -220,12 +220,6 @@ impl<A: Allocator + Copy> Arrangement<A> {
         cells[0] == cid
     }
 
-    #[inline]
-    pub(crate) fn has_srf_on(&self, fid: FaceId) -> bool {
-        let pid = self.face_data[fid].pid;
-        self.plane_surfaces[pid].iter().any(|&sid| sid >= 8)
-    }
-
     fn add_plane<A1: Allocator + Copy>(&mut self, pid: usize, sid: usize, alloc: A1) {
         let mut vert_orientations = Vec::with_capacity_in(self.mesh.n_vertices_capacity(), alloc);
         vert_orientations.extend(self.mesh.vertices().map(|v| {
