@@ -49,6 +49,11 @@ pub fn twin_index(idx: usize) -> usize {
 }
 
 #[inline(always)]
+pub fn is_positive(idx: usize) -> bool {
+    idx & 1 == 0
+}
+
+#[inline(always)]
 pub fn face_area_2d(points: &[f64]) -> f64 {
     points
         .chunks(2)

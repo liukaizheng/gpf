@@ -1,3 +1,4 @@
+use core::panicking::panic;
 use std::{alloc::Allocator, collections::VecDeque};
 
 use bumpalo::Bump;
@@ -10,7 +11,7 @@ use tinyvec::TinyVec;
 
 use crate::{
     disjoint_set::DisjointSet,
-    mesh::{EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, VertexId},
+    mesh::{EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, Vertex, VertexId},
     oriented_index, point, strip_orientation, twin_index, INVALID_IND,
 };
 
@@ -86,6 +87,7 @@ pub(super) fn extract_components(iso_surf_mesh: IsoSurfMesh, tets: &TetSet) {
         &iso_surf_mesh,
         tets,
         &chains,
+        &patches,
         &face_patch_arr,
         patches.len() << 1,
     );
@@ -198,6 +200,7 @@ fn extract_shells(
     iso_surf_mesh: &IsoSurfMesh,
     tets: &TetSet,
     chains: &[Vec<EdgeId>],
+    patches: &[Vec<FaceId>],
     face_patch_arr: &[usize],
     n_ori_patches: usize,
 ) -> (Vec<Vec<usize>>, Vec<usize>) {
@@ -231,6 +234,9 @@ fn extract_shells(
     if comp_ds.n_groups > 1 {
         let vert_descent_links = tets.build_descending_vertex_links();
         let (components, shell_to_comp_arr) = comp_ds.output();
+
+        let (tet_vert_iso_vert_arr, component_extremes) =
+            find_component_extremes(iso_surf_mesh, tets, &components, patches);
     }
 
     (shells, patch_shell_arr)
@@ -585,64 +591,163 @@ fn order_patches_in_tet<A: Allocator + Copy>(
     [first_ori_patch, prev_ori_patch]
 }
 
-enum Extreme {
-    V([VertexId; 2]),
-    E([VertexId; 2]),
-}
-
-fn find_component_extreme(
+fn find_component_extremes(
     iso_surf_mesh: &IsoSurfMesh,
     tets: &TetSet,
     components: &[Vec<usize>],
-    shell_to_comp_arr: &[usize],
     patches: &[Vec<FaceId>],
-    patch_to_shell_arr: &[usize],
-    vert_descent_links: &[VertexId],
-) {
-    Vec::from_iter(patches.iter().enumerate().map(|(patch_id, patch)| {
-        let comp_id = shell_to_comp_arr[patch_to_shell_arr[patch_id << 1]];
-        let mut comp_extreme = [VertexId::default(); 2];
+) -> (Vec<VertexId>, Vec<VertexId>) {
+    let mut patch_visited = vec![false; patches.len()];
+    let mut tet_vert_to_iso_vert_arr = vec![VertexId::default(); tets.mesh.n_vertices()];
+    let component_extremes = Vec::from_iter(components.iter().map(|ori_patches| {
         let mut extreme_pt: &[f64] = &[f64::MAX, f64::MAX, f64::MAX];
-        let mut extreme_eid = EdgeId::default();
-        for &fid in patch {
-            for v in iso_surf_mesh.mesh.face(fid).vertices() {
-                let vid = *v;
-                match iso_surf_mesh.iso_vertices[vid] {
-                    IsoVert::V(tet_vid) => {
-                        let next_vid = vert_descent_links[tet_vid];
-                        let pt = point(&tets.points, next_vid.0);
-                        if pt.partial_cmp(extreme_pt).unwrap().is_lt() {
-                            extreme_pt = pt;
-                            comp_extreme = [vid, next_vid];
-                            extreme_eid = EdgeId::default();
-                        }
-                    }
-                    IsoVert::ES((tet_eid, _)) => {
-                        let [va, vb] = tets.mesh.e_vertices(tet_eid);
-                        let p1 = point(&tets.points, va.0);
-                        let p2 = point(&tets.points, vb.0);
-                        if p1.partial_cmp(&p2).unwrap().is_lt() {
-                            if p1.partial_cmp(extreme_pt).unwrap().is_lt() {
-                                comp_extreme = [vb, va];
-                                extreme_pt = p1;
-                                extreme_eid = tet_eid;
+        let mut extreme_vid = VertexId::default();
+        for &op in ori_patches {
+            let patch_id = strip_orientation(op);
+            if patch_visited[patch_id] {
+                continue;
+            }
+            patch_visited[patch_id] = true;
+            for &fid in &patches[patch_id] {
+                for v in iso_surf_mesh.mesh.face(fid).vertices() {
+                    let vid = *v;
+                    match iso_surf_mesh.iso_vertices[vid] {
+                        IsoVert::V(tet_vid) => {
+                            if tet_vert_to_iso_vert_arr[tet_vid].valid() {
+                                continue;
                             }
-                        } else {
-                            if p2.partial_cmp(extreme_pt).unwrap().is_lt() {
-                                comp_extreme = [va, vb];
-                                extreme_pt = p2;
-                                extreme_eid = tet_eid;
+                            tet_vert_to_iso_vert_arr[tet_vid] = vid;
+                            let pt = point(&tets.points, tet_vid.0);
+                            if pt.partial_cmp(extreme_pt).unwrap().is_lt() {
+                                extreme_pt = pt;
+                                extreme_vid = vid;
                             }
                         }
+                        IsoVert::ES((tet_eid, _)) => {
+                            let [va, vb] = tets.mesh.e_vertices(tet_eid);
+                            let p1 = point(&tets.points, va.0);
+                            let p2 = point(&tets.points, vb.0);
+                            let min_pt = if p1.partial_cmp(&p2).unwrap().is_lt() {
+                                p1
+                            } else {
+                                p2
+                            };
+
+                            if min_pt.partial_cmp(extreme_pt).unwrap().is_lt() {
+                                extreme_pt = min_pt;
+                                extreme_vid = vid;
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
         }
-        if extreme_eid.valid() {
-            Extreme::E([comp_extreme[0], comp_extreme[1]])
-        } else {
-            Extreme::V([comp_extreme[0], comp_extreme[1]])
-        }
+        debug_assert!(extreme_vid.valid());
+        extreme_vid
     }));
+    (tet_vert_to_iso_vert_arr, component_extremes)
+}
+
+fn identify_orient_patches_across_components(
+    iso_surf_mesh: &IsoSurfMesh,
+    tets: &TetSet,
+    components: &[Vec<usize>],
+    patches: &[Vec<FaceId>],
+    component_extremes: Vec<VertexId>,
+) {
+    for (comp_id, extreme) in component_extremes.into_iter().enumerate() {
+        match iso_surf_mesh.iso_vertices[extreme] {
+            IsoVert::V(tet_vid) => {
+                let pt = point(&tets.points, tet_vid.0);
+            }
+            IsoVert::ES((tet_eid, _)) => {
+                let [va, vb] = tets.mesh.e_vertices(tet_eid);
+                let p1 = point(&tets.points, va.0);
+                let p2 = point(&tets.points, vb.0);
+                let min_pt = if p1.partial_cmp(&p2).unwrap().is_lt() {
+                    p1
+                } else {
+                    p2
+                };
+            }
+            _ => {}
+        }
+    }
+}
+
+fn find_component_outer_orient_patch(
+    iso_surf_mesh: &IsoSurfMesh,
+    tets: &TetSet,
+    start_vid: VertexId,
+    end_vid: VertexId,
+) {
+    let (tid, outer_fid) = get_component_tet(iso_surf_mesh, tets, start_vid, end_vid);
+    let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
+    if ar.has_srf_on(outer_fid) {}
+}
+
+fn get_component_tet(
+    iso_surf_mesh: &IsoSurfMesh,
+    tets: &TetSet,
+    start_vid: VertexId,
+    end_vid: VertexId,
+) -> (usize, FaceId) {
+    let is_component_tet = |tid: usize| -> bool {
+        if let Some(ar) = &iso_surf_mesh.arrangements[tid] {
+            let mesh = &ar.mesh;
+            for he in mesh.vertex(start_vid).incoming_halfedges() {
+                if ar.has_srf_on(*he.face()) {
+                    return true;
+                }
+            }
+            false
+        } else {
+            false
+        }
+    };
+
+    let (t_start_fid, start_tid) = {
+        let eid = tets.mesh.e_from_va_vb(start_vid, end_vid);
+        let fid = *tets.mesh.edge(eid).halfedge().face();
+        debug_assert!(fid.valid());
+        (fid, tets.face_tets[fid][0])
+    };
+    if is_component_tet(start_tid) {
+        return (start_tid, t_start_fid);
+    }
+    let mut visited_tets = HashSet::with_capacity(4);
+    visited_tets.insert(start_tid);
+    let mut queue = VecDeque::new();
+    queue.push_back(start_tid);
+
+    while !queue.is_empty() {
+        let curr_tid = queue.pop_front().unwrap();
+        let vert_pos = tets.tet_vertices[curr_tid]
+            .iter()
+            .position(|&vid| vid == start_vid)
+            .unwrap();
+        let tet_faces = &tets.tet_faces[curr_tid];
+        for i in 1..4 {
+            let fid = tet_faces[(vert_pos + i) % 4];
+            let face_tets = tets.face_tets[fid];
+            let tid = face_tets[0] ^ face_tets[1] ^ curr_tid;
+
+            if visited_tets.contains(&tid) {
+                continue;
+            }
+
+            if is_component_tet(tid) {
+                return (tid, fid);
+            }
+
+            visited_tets.insert(tid);
+            queue.push_back(tid);
+        }
+    }
+
+    panic!(
+        "Failed to find the tet which intersects with vertex {} component",
+        start_vid.0
+    );
 }
