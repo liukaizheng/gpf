@@ -214,6 +214,12 @@ impl<A: Allocator + Copy> Arrangement<A> {
     }
 
     #[inline]
+    pub(crate) fn has_srf_on(&self, fid: FaceId) -> bool {
+        let pid = self.face_data[fid].pid;
+        !self.plane_surfaces[pid].is_empty()
+    }
+
+    #[inline]
     fn is_face_inner_cell(&self, fid: FaceId, cid: usize) -> bool {
         let cells = &self.face_data[fid].cells;
         debug_assert!(cells[0] == cid || cells[1] == cid);

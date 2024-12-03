@@ -1,4 +1,3 @@
-use core::panicking::panic;
 use std::{alloc::Allocator, collections::VecDeque};
 
 use bumpalo::Bump;
@@ -10,10 +9,13 @@ use itertools::Itertools;
 use tinyvec::TinyVec;
 
 use crate::{
-    disjoint_set::DisjointSet, is_positive, mesh::{EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, Vertex, VertexId}, oriented_index, point, strip_orientation, twin_index, INVALID_IND
+    disjoint_set::DisjointSet,
+    is_positive,
+    mesh::{EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, VertexId},
+    oriented_index, point, strip_orientation, twin_index, INVALID_IND,
 };
 
-use super::{ar_in_tet::IsoVert, tet_set::TetSet, IsoSurfMesh};
+use super::{ar_in_tet::IsoVert, tet_set::TetSet, Arrangement, IsoSurfMesh};
 
 fn write_chains(name: &str, iso_surf_mesh: &IsoSurfMesh, is_chain_edge: &[bool]) {
     let file = std::fs::File::create(name).unwrap();
@@ -553,7 +555,10 @@ fn order_patches_in_tet<A: Allocator + Copy>(
             }));
 
             if oriented_patches.len() > 1 {
-                // start from the patch with the same orientation as the face
+                if oriented_patches[0] != patches[0] {
+                    // make sure the first patch (with minimum index as we have sorted the patches) points to the same cell as the face
+                    oriented_patches.reverse();
+                }
             }
 
             for (&pa, &pb) in oriented_patches.iter().tuple_windows() {
@@ -690,12 +695,21 @@ fn identify_orient_patches_across_components(
 fn find_component_outer_orient_patch(
     iso_surf_mesh: &IsoSurfMesh,
     tets: &TetSet,
+    face_patch_arr: &[usize],
     start_vid: VertexId,
     end_vid: VertexId,
-) {
+) -> usize {
     let (tid, outer_fid) = get_component_tet(iso_surf_mesh, tets, start_vid, end_vid);
     let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
-    if !ar.plane_surfaces.is_empty() {}
+    let outer_face_pid = tets.tet_faces[tid]
+        .iter()
+        .position(|&fid| fid == outer_fid)
+        .unwrap();
+    if ar.plane_surfaces[outer_face_pid].is_empty() {
+        0
+    } else {
+        get_face_patch_in_tet(iso_surf_mesh, ar, outer_face_pid.into(), face_patch_arr)
+    }
 }
 
 fn get_component_tet(
@@ -708,7 +722,7 @@ fn get_component_tet(
         if let Some(ar) = &iso_surf_mesh.arrangements[tid] {
             let mesh = &ar.mesh;
             for he in mesh.vertex(start_vid).incoming_halfedges() {
-                if !ar.plane_surfaces.is_empty() {
+                if ar.has_srf_on(*he.face()) {
                     return true;
                 }
             }
@@ -761,4 +775,47 @@ fn get_component_tet(
         "Failed to find the tet which intersects with vertex {} component",
         start_vid.0
     );
+}
+
+fn get_face_patch_in_tet(
+    iso_surf_mesh: &IsoSurfMesh,
+    ar: &Arrangement,
+    tet_fid: FaceId,
+    face_patch_arr: &[usize],
+) -> usize {
+    let pid = ar.face_data[tet_fid].pid;
+    debug_assert!(!ar.plane_surfaces[pid].is_empty());
+    let hid = *ar.mesh.face(tet_fid).halfedge();
+    let [va, vb] = ar.mesh.he_vertices(hid);
+    let vc = ar.mesh.he_to(ar.mesh.he_next(hid));
+
+    let [va, vb, vc] = [va, vb, vc].map(|vid| ar.vertices[vid].index.into());
+
+    let eid = iso_surf_mesh.mesh.e_from_va_vb(va, vb);
+    let faces = TinyVec::<[FaceId; 1]>::from_iter(
+        iso_surf_mesh.mesh.edge(eid).halfedges().filter_map(|he| {
+            if *he.next().to() == vc || *he.prev().from() == vc {
+                debug_assert!(iso_surf_mesh.face_positions[*he.face()].1 == tet_fid);
+                Some(*he.face())
+            } else {
+                None
+            }
+        }),
+    );
+
+    debug_assert!(!faces.is_empty());
+
+    let plane_surfs = &ar.plane_surfaces[pid];
+    faces
+        .iter()
+        .map(|&fid| {
+            let surf_id = iso_surf_mesh.face_parents[fid];
+            let oriented_sid = *plane_surfs
+                .iter()
+                .find(|&&sid| strip_orientation(sid) == surf_id)
+                .unwrap();
+            oriented_index(face_patch_arr[fid], !is_positive(oriented_sid))
+        })
+        .min()
+        .unwrap()
 }
