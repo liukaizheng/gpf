@@ -28,6 +28,20 @@ impl TetSet {
         (if min_idx != 0 { 0 } else { 1 }) + 5 - pa - pb
     }
 
+    pub(crate) fn tet_vert_index(&self, tid: usize, vid: VertexId) -> usize {
+        self.tet_vertices[tid]
+            .iter()
+            .position(|&v| v == vid)
+            .unwrap()
+    }
+
+    pub(crate) fn tet_face_index(&self, tid: usize, fid: FaceId) -> usize {
+        self.tet_faces[tid]
+            .iter()
+            .position(|&f| f == fid)
+            .unwrap()
+    }
+
     /// return tet and its start face index
     pub(crate) fn tets_around_edge(&self, eid: EdgeId) -> TetsAroundEdge<'_> {
         TetsAroundEdge::new(self, eid)

@@ -668,14 +668,22 @@ fn find_component_extremes(
 fn identify_orient_patches_across_components(
     iso_surf_mesh: &IsoSurfMesh,
     tets: &TetSet,
-    components: &[Vec<usize>],
-    patches: &[Vec<FaceId>],
+    vert_descent_links: &[VertexId],
+    face_patch_arr: &[usize],
     component_extremes: Vec<VertexId>,
 ) {
     for (comp_id, extreme) in component_extremes.into_iter().enumerate() {
-        match iso_surf_mesh.iso_vertices[extreme] {
+        let(curr_component_patch, next_vid) = match iso_surf_mesh.iso_vertices[extreme] {
             IsoVert::V(tet_vid) => {
-                let pt = point(&tets.points, tet_vid.0);
+                let mut next_vid = vert_descent_links[tet_vid];
+                debug_assert!(next_vid.valid());
+                (find_component_outer_path_for_vert(
+                    iso_surf_mesh,
+                    tets,
+                    &face_patch_arr,
+                    tet_vid,
+                    next_vid,
+                ), next_vid)
             }
             IsoVert::ES((tet_eid, _)) => {
                 let [va, vb] = tets.mesh.e_vertices(tet_eid);
@@ -687,37 +695,18 @@ fn identify_orient_patches_across_components(
                     p2
                 };
             }
-            _ => {}
-        }
+            _ => panic!("unexpected extreme vertex")
+        };
     }
 }
 
-fn find_component_outer_orient_patch(
+fn find_component_outer_path_for_vert(
     iso_surf_mesh: &IsoSurfMesh,
     tets: &TetSet,
     face_patch_arr: &[usize],
     start_vid: VertexId,
     end_vid: VertexId,
 ) -> usize {
-    let (tid, outer_fid) = get_component_tet(iso_surf_mesh, tets, start_vid, end_vid);
-    let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
-    let outer_face_pid = tets.tet_faces[tid]
-        .iter()
-        .position(|&fid| fid == outer_fid)
-        .unwrap();
-    if ar.plane_surfaces[outer_face_pid].is_empty() {
-        0
-    } else {
-        get_face_patch_in_tet(iso_surf_mesh, ar, outer_face_pid.into(), face_patch_arr)
-    }
-}
-
-fn get_component_tet(
-    iso_surf_mesh: &IsoSurfMesh,
-    tets: &TetSet,
-    start_vid: VertexId,
-    end_vid: VertexId,
-) -> (usize, FaceId) {
     let is_component_tet = |tid: usize| -> bool {
         if let Some(ar) = &iso_surf_mesh.arrangements[tid] {
             let mesh = &ar.mesh;
@@ -732,55 +721,127 @@ fn get_component_tet(
         }
     };
 
-    let (t_start_fid, start_tid) = {
+    let start_tid = {
         let eid = tets.mesh.e_from_va_vb(start_vid, end_vid);
         let fid = *tets.mesh.edge(eid).halfedge().face();
         debug_assert!(fid.valid());
-        (fid, tets.face_tets[fid][0])
+        tets.face_tets[fid][0]
     };
     if is_component_tet(start_tid) {
-        return (start_tid, t_start_fid);
+        let t_start_vid_idx = tets.tet_vert_index(start_tid, start_vid);
+        let t_end_vid_idx = tets.tet_vert_index(start_tid, end_vid);
+        let ar = iso_surf_mesh.arrangements[start_tid].as_ref().unwrap();
+
+        let mut t_bottom_fid = FaceId::default();
+        for he in ar.mesh.vertex(t_end_vid_idx.into()).incoming_halfedges() {
+            let fid = *he.face();
+            if ar.face_data[fid].pid == t_start_vid_idx {
+                t_bottom_fid = fid;
+                break;
+            }
+        }
+        debug_assert!(t_bottom_fid.valid());
+
+        let cid = ar.face_data[t_bottom_fid].cells[0];
+        let t_surf_fid = ar.find_cell_surf_face(cid);
+        debug_assert!(t_surf_fid.valid());
+        return get_face_patch_in_tet(iso_surf_mesh, ar, t_surf_fid, !ar.is_face_inner_cell(t_surf_fid, cid), face_patch_arr);
     }
-    let mut visited_tets = HashSet::with_capacity(4);
-    visited_tets.insert(start_tid);
-    let mut queue = VecDeque::new();
-    queue.push_back(start_tid);
 
-    while !queue.is_empty() {
-        let curr_tid = queue.pop_front().unwrap();
-        let vert_pos = tets.tet_vertices[curr_tid]
-            .iter()
-            .position(|&vid| vid == start_vid)
-            .unwrap();
-        let tet_faces = &tets.tet_faces[curr_tid];
-        for i in 1..4 {
-            let fid = tet_faces[(vert_pos + i) % 4];
-            let face_tets = tets.face_tets[fid];
-            let tid = face_tets[0] ^ face_tets[1] ^ curr_tid;
+    let get_component_tet_and_face = || {
+        let mut visited_tets = HashSet::with_capacity(4);
+        visited_tets.insert(start_tid);
+        let mut queue = VecDeque::new();
+        queue.push_back(start_tid);
 
-            if visited_tets.contains(&tid) {
-                continue;
+        while !queue.is_empty() {
+            let curr_tid = queue.pop_front().unwrap();
+            let vert_pos = tets.tet_vert_index(curr_tid, start_vid);
+            let tet_faces = &tets.tet_faces[curr_tid];
+            for i in 1..4 {
+                let fid = tet_faces[(vert_pos + i) % 4];
+                let face_tets = tets.face_tets[fid];
+                let tid = face_tets[0] ^ face_tets[1] ^ curr_tid;
+
+                if visited_tets.contains(&tid) {
+                    continue;
+                }
+
+                if is_component_tet(tid) {
+                    return (tid, fid);
+                }
+
+                visited_tets.insert(tid);
+                queue.push_back(tid);
             }
+        }
+        (INVALID_IND, FaceId::default())
+    };
 
-            if is_component_tet(tid) {
-                return (tid, fid);
-            }
+    let (start_tid, start_fid) = get_component_tet_and_face();
+    debug_assert!(start_tid != INVALID_IND);
+    let ar = iso_surf_mesh.arrangements[start_tid].as_ref().unwrap();
+    let t_start_fid = tets.tet_face_index(start_tid, start_fid).into();
+    if ar.has_srf_on(t_start_fid) {
+        return get_face_patch_in_tet(iso_surf_mesh, ar, t_start_fid, false, face_patch_arr);
+    } else {
+        let cid = ar.face_data[t_start_fid].cells[0];
+        let t_surf_fid = ar.find_cell_surf_face(cid);
+        debug_assert!(t_surf_fid.valid());
+        return get_face_patch_in_tet(iso_surf_mesh, ar, t_surf_fid, !ar.is_face_inner_cell(t_surf_fid, cid), face_patch_arr);
+    }
+}
 
-            visited_tets.insert(tid);
-            queue.push_back(tid);
+fn find_component_outer_patch_for_edge(
+    iso_surf_mesh: &IsoSurfMesh,
+    tets: &TetSet,
+    face_patch_arr: &[usize],
+    t_eid: EdgeId,
+    t_curr_vid: VertexId,
+    t_next_vid: VertexId,
+) -> usize {
+    let tid = {
+        let fid = *tets.mesh.edge(t_eid).halfedge().face();
+        tets.face_tets[fid][0]
+    };
+    debug_assert!(tid != INVALID_IND);
+    debug_assert!(iso_surf_mesh.arrangements[tid].is_some());
+
+    get_patch_from_bottom_face(iso_surf_mesh, tets, tid, face_patch_arr, t_curr_vid, t_next_vid)
+}
+
+fn get_patch_from_bottom_face(
+    iso_surf_mesh: &IsoSurfMesh,
+    tets: &TetSet,
+    tid: usize,
+    face_patch_arr: &[usize],
+    t_curr_vid: VertexId,
+    t_next_vid: VertexId,
+) -> usize {
+    let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
+    let curr_vid_idx = tets.tet_vert_index(tid, t_curr_vid);
+    let next_vid = tets.tet_vert_index(tid, t_next_vid).into();
+
+    let mut bottom_fid = FaceId::default();
+    for he in ar.mesh.vertex(next_vid).incoming_halfedges() {
+        let fid = *he.face();
+        if ar.face_data[fid].pid == curr_vid_idx {
+            bottom_fid = fid;
+            break;
         }
     }
+    debug_assert!(bottom_fid.valid());
 
-    panic!(
-        "Failed to find the tet which intersects with vertex {} component",
-        start_vid.0
-    );
+    let cid = ar.face_data[bottom_fid].cells[0];
+    let surf_fid = ar.find_cell_surf_face(cid);
+    get_face_patch_in_tet(iso_surf_mesh, ar, surf_fid, !ar.is_face_inner_cell(surf_fid, cid), face_patch_arr)
 }
 
 fn get_face_patch_in_tet(
     iso_surf_mesh: &IsoSurfMesh,
     ar: &Arrangement,
     tet_fid: FaceId,
+    reversed: bool,
     face_patch_arr: &[usize],
 ) -> usize {
     let pid = ar.face_data[tet_fid].pid;
@@ -806,16 +867,28 @@ fn get_face_patch_in_tet(
     debug_assert!(!faces.is_empty());
 
     let plane_surfs = &ar.plane_surfaces[pid];
-    faces
-        .iter()
-        .map(|&fid| {
-            let surf_id = iso_surf_mesh.face_parents[fid];
-            let oriented_sid = *plane_surfs
+    let get_oriented_patch = |fid: FaceId| {
+        let surf_id = iso_surf_mesh.face_parents[fid];
+        let oriented_sid = *plane_surfs
+            .iter()
+            .find(|&&sid| strip_orientation(sid) == surf_id)
+            .unwrap();
+        oriented_index(face_patch_arr[fid], !is_positive(oriented_sid))
+    };
+
+    if reversed {
+        twin_index(
+            faces
                 .iter()
-                .find(|&&sid| strip_orientation(sid) == surf_id)
-                .unwrap();
-            oriented_index(face_patch_arr[fid], !is_positive(oriented_sid))
-        })
-        .min()
-        .unwrap()
+                .map(|&fid| get_oriented_patch(fid))
+                .max()
+                .unwrap(),
+        )
+    } else {
+        faces
+            .iter()
+            .map(|&fid| get_oriented_patch(fid))
+            .min()
+            .unwrap()
+    }
 }
