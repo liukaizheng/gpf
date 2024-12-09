@@ -234,10 +234,26 @@ fn extract_shells(
 
     if comp_ds.n_groups > 1 {
         let vert_descent_links = tets.build_descending_vertex_links();
-        let (components, shell_to_comp_arr) = comp_ds.output();
+        let (components, shell_comp_arr) = comp_ds.output();
 
-        let (tet_vert_iso_vert_arr, component_extremes) =
+        let (tet_vert_iso_elem_arr, component_extremes) =
             find_component_extremes(iso_surf_mesh, tets, &components, patches);
+
+        let connect_info = ConnectInfo {
+            face_patch_arr: &face_patch_arr,
+            patch_shell_arr: &patch_shell_arr,
+            shell_component_arr: &shell_comp_arr,
+        };
+
+        let outer_patch = get_outer_patch(
+            iso_surf_mesh,
+            tets,
+            &mut shell_ds,
+            vert_descent_links,
+            connect_info,
+            component_extremes,
+            tet_vert_iso_elem_arr,
+        );
     }
 
     (shells, patch_shell_arr)
@@ -608,14 +624,34 @@ fn order_patches_in_tet<A: Allocator + Copy>(
     [first_ori_patch, prev_ori_patch]
 }
 
+struct ConnectInfo<'a> {
+    face_patch_arr: &'a [usize],
+    patch_shell_arr: &'a [usize],
+    shell_component_arr: &'a [usize],
+}
+
+impl<'a> ConnectInfo<'a> {
+    #[inline]
+    fn get_component_id(&self, fid: FaceId) -> usize {
+        self.shell_component_arr[self.patch_shell_arr[self.face_patch_arr[fid] << 1]]
+    }
+}
+
+#[derive(Clone, Copy)]
+enum IsoElem {
+    V(VertexId),
+    E(EdgeId),
+    None,
+}
+
 fn find_component_extremes(
     iso_surf_mesh: &IsoSurfMesh,
     tets: &TetSet,
     components: &[Vec<usize>],
     patches: &[Vec<FaceId>],
-) -> (Vec<VertexId>, Vec<VertexId>) {
+) -> (Vec<IsoElem>, Vec<VertexId>) {
     let mut patch_visited = vec![false; patches.len()];
-    let mut tet_vert_to_iso_vert_arr = vec![VertexId::default(); tets.mesh.n_vertices()];
+    let mut tet_vert_to_iso_elem_arr = vec![IsoElem::None; tets.mesh.n_vertices()];
     let component_extremes = Vec::from_iter(components.iter().map(|ori_patches| {
         let mut extreme_pt: &[f64] = &[f64::MAX, f64::MAX, f64::MAX];
         let mut extreme_vid = VertexId::default();
@@ -629,26 +665,33 @@ fn find_component_extremes(
                 for v in iso_surf_mesh.mesh.face(fid).vertices() {
                     let vid = *v;
                     match iso_surf_mesh.iso_vertices[vid] {
-                        IsoVert::V(tet_vid) => {
-                            if tet_vert_to_iso_vert_arr[tet_vid].valid() {
-                                continue;
+                        IsoVert::V(tet_vid) => match tet_vert_to_iso_elem_arr[tet_vid] {
+                            IsoElem::V(_) => {}
+                            IsoElem::None | IsoElem::E(_) => {
+                                tet_vert_to_iso_elem_arr[tet_vid] = IsoElem::V(vid);
+                                let pt = point(&tets.points, tet_vid.0);
+                                if pt.partial_cmp(extreme_pt).unwrap().is_lt() {
+                                    extreme_pt = pt;
+                                    extreme_vid = vid;
+                                }
                             }
-                            tet_vert_to_iso_vert_arr[tet_vid] = vid;
-                            let pt = point(&tets.points, tet_vid.0);
-                            if pt.partial_cmp(extreme_pt).unwrap().is_lt() {
-                                extreme_pt = pt;
-                                extreme_vid = vid;
-                            }
-                        }
+                        },
                         IsoVert::ES((tet_eid, _)) => {
                             let [va, vb] = tets.mesh.e_vertices(tet_eid);
                             let p1 = point(&tets.points, va.0);
                             let p2 = point(&tets.points, vb.0);
-                            let min_pt = if p1.partial_cmp(&p2).unwrap().is_lt() {
-                                p1
+                            let (min_pt, max_vid) = if p1.partial_cmp(&p2).unwrap().is_lt() {
+                                (p1, vb)
                             } else {
-                                p2
+                                (p2, va)
                             };
+
+                            match tet_vert_to_iso_elem_arr[max_vid] {
+                                IsoElem::V(_) | IsoElem::E(_) => {}
+                                IsoElem::None => {
+                                    tet_vert_to_iso_elem_arr[max_vid] = IsoElem::E(tet_eid);
+                                }
+                            }
 
                             if min_pt.partial_cmp(extreme_pt).unwrap().is_lt() {
                                 extreme_pt = min_pt;
@@ -663,54 +706,184 @@ fn find_component_extremes(
         debug_assert!(extreme_vid.valid());
         extreme_vid
     }));
-    (tet_vert_to_iso_vert_arr, component_extremes)
+    (tet_vert_to_iso_elem_arr, component_extremes)
 }
 
-fn identify_orient_patches_across_components(
+fn get_outer_patch(
     iso_surf_mesh: &IsoSurfMesh,
     tets: &TetSet,
-    vert_descent_links: &[VertexId],
-    face_patch_arr: &[usize],
+    ds: &mut DisjointSet,
+    vert_descent_links: Vec<VertexId>,
+    info: ConnectInfo,
     component_extremes: Vec<VertexId>,
-) {
-    // for (comp_id, extreme) in component_extremes.into_iter().enumerate() {
-    //     let (curr_component_patch, next_vid) = match iso_surf_mesh.iso_vertices[extreme] {
-    //         IsoVert::V(tet_vid) => {
-    //             let mut next_vid = vert_descent_links[tet_vid];
-    //             debug_assert!(next_vid.valid());
-    //             (
-    //                 find_component_outer_path_for_vert(
-    //                     iso_surf_mesh,
-    //                     tets,
-    //                     &face_patch_arr,
-    //                     tet_vid,
-    //                     next_vid,
-    //                 ),
-    //                 next_vid,
-    //             )
-    //         }
-    //         IsoVert::ES((tet_eid, _)) => {
-    //             let [va, vb] = tets.mesh.e_vertices(tet_eid);
-    //             let p1 = point(&tets.points, va.0);
-    //             let p2 = point(&tets.points, vb.0);
-    //             let min_pt = if p1.partial_cmp(&p2).unwrap().is_lt() {
-    //                 p1
-    //             } else {
-    //                 p2
-    //             };
-    //         }
-    //         _ => panic!("unexpected extreme vertex"),
-    //     };
-    // }
+    tet_vert_to_iso_elem_arr: Vec<IsoElem>,
+) -> usize {
+    for (comp_id, extreme) in component_extremes.into_iter().enumerate() {
+        let (curr_oriented_patch, t_prev_vid, t_next_vid) = match iso_surf_mesh.iso_vertices
+            [extreme]
+        {
+            IsoVert::V(tet_vid) => {
+                let next_vid = vert_descent_links[tet_vid];
+                debug_assert!(next_vid.valid());
+                (
+                    find_component_outer_path_for_vert(
+                        iso_surf_mesh,
+                        tets,
+                        Some(ds),
+                        &info,
+                        comp_id,
+                        tet_vid,
+                        next_vid,
+                    ),
+                    tet_vid,
+                    next_vid,
+                )
+            }
+            IsoVert::ES((tet_eid, _)) => {
+                let [va, vb] = tets.mesh.e_vertices(tet_eid);
+                let p1 = point(&tets.points, va.0);
+                let p2 = point(&tets.points, vb.0);
+                let [min_vid, max_vid] = if p1.partial_cmp(&p2).unwrap().is_lt() {
+                    [va, vb]
+                } else {
+                    [vb, va]
+                };
+                let start_vid =
+                    find_closest_vid_on_edge(iso_surf_mesh, tets, &info, tet_eid, min_vid, comp_id);
+                debug_assert!(start_vid.valid());
+                (
+                    find_component_outer_patch_for_edge(
+                        iso_surf_mesh,
+                        tets,
+                        Some(ds),
+                        &info,
+                        comp_id,
+                        tet_eid,
+                        start_vid,
+                    ),
+                    max_vid,
+                    min_vid,
+                )
+            }
+            _ => panic!("unexpected extreme vertex"),
+        };
+
+        if curr_oriented_patch != INVALID_IND {
+            let mut prev_vid = t_prev_vid;
+            let mut curr_vid = t_next_vid;
+            loop {
+                let next_vid = vert_descent_links[curr_vid];
+                if !next_vid.valid() {
+                    return curr_oriented_patch;
+                }
+
+                match tet_vert_to_iso_elem_arr[curr_vid] {
+                    IsoElem::V(vid) => {
+                        let next_oriented_patch = find_component_outer_path_for_vert(
+                            iso_surf_mesh,
+                            tets,
+                            None,
+                            &info,
+                            comp_id,
+                            curr_vid,
+                            prev_vid,
+                        );
+                        debug_assert!(next_oriented_patch != INVALID_IND);
+                        ds.merge(curr_oriented_patch, next_oriented_patch);
+                        break;
+                    }
+                    IsoElem::E(eid) => {
+                        let start_vid = find_closest_vid_on_edge(
+                            iso_surf_mesh,
+                            tets,
+                            &info,
+                            eid,
+                            curr_vid,
+                            comp_id,
+                        );
+                        let next_oriented_patch = find_component_outer_patch_for_edge(
+                            iso_surf_mesh,
+                            tets,
+                            Some(ds),
+                            &info,
+                            comp_id,
+                            eid,
+                            start_vid,
+                        );
+                        ds.merge(curr_oriented_patch, next_oriented_patch);
+                        break;
+                    }
+                    IsoElem::None => {
+                        prev_vid = curr_vid;
+                        curr_vid = next_vid;
+                    }
+                }
+            }
+        }
+    }
+    INVALID_IND
+}
+
+fn find_closest_vid_on_edge(
+    iso_surf_mesh: &IsoSurfMesh,
+    tets: &TetSet,
+    info: &ConnectInfo,
+    t_eid: EdgeId,
+    t_start_vid: VertexId,
+    comp_id: usize,
+) -> VertexId {
+    let tid = {
+        let fid = *tets.mesh.edge(t_eid).halfedge().face();
+        debug_assert!(fid.valid());
+        tets.face_tets[fid][0]
+    };
+
+    debug_assert!(iso_surf_mesh.arrangements[tid].is_some());
+    let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
+    let mut start_vid = VertexId(tets.tet_vert_index(tid, t_start_vid));
+
+    let edge_index = tets.tet_edges[tid]
+        .iter()
+        .position(|&eid| eid == eid)
+        .unwrap();
+    let base_edge_planes = EDGE_FACE_INDICES[edge_index];
+    loop {
+        let curr_hid = ar
+            .mesh
+            .vertex(start_vid)
+            .outgoing_halfedges()
+            .map(|he| *he)
+            .find(|&hid| {
+                let eid = ar.mesh.he_edge(hid);
+                let mut edge_planes = ar.edges[eid];
+                edge_planes.sort();
+                base_edge_planes == edge_planes
+            });
+        if let Some(curr_hid) = curr_hid {
+            let vid = ar.mesh.he_to(curr_hid);
+            for he in ar.mesh.vertex(vid).incoming_halfedges() {
+                let fid = *he.face();
+                let iso_fid = ar.face_data[fid].iso_fid;
+                if iso_fid.valid() {
+                    let curr_comp_id = info.get_component_id(iso_fid);
+                    if comp_id == INVALID_IND || curr_comp_id == comp_id {
+                        return ar.vertices[vid].index.into();
+                    }
+                }
+            }
+            start_vid = vid;
+        } else {
+            break;
+        }
+    }
+    VertexId::default()
 }
 
 fn find_component_outer_path_for_vert(
     iso_surf_mesh: &IsoSurfMesh,
     tets: &TetSet,
-    ds: &mut DisjointSet,
-    face_patch_arr: &[usize],
-    patch_shell_arr: &[usize],
-    shell_component_arr: &[usize],
+    ds: Option<&mut DisjointSet>,
+    info: &ConnectInfo,
     comp_id: usize,
     t_start_vid: VertexId,
     t_end_vid: VertexId,
@@ -744,63 +917,15 @@ fn find_component_outer_path_for_vert(
         let descent_eid_planes = EDGE_FACE_INDICES[TetSet::tet_edge_index(start_vid.0, end_vid.0)];
         let ar = iso_surf_mesh.arrangements[start_tid].as_ref().unwrap();
 
-        let mut descent_hid = HalfedgeId::default();
-        for he in ar.mesh.vertex(start_vid).outgoing_halfedges() {
-            let hid = *he;
-            let eid = ar.mesh.he_edge(hid);
-            let mut edge_planes = ar.edges[eid];
-            edge_planes.sort();
-            if edge_planes == descent_eid_planes {
-                descent_hid = hid;
-                break;
-            }
-        }
-
-        debug_assert!(descent_hid.valid());
-
-        let cid = ar.face_data[ar.mesh.he_face(descent_hid)].cells[0];
-
-        let mut curr_comp_fid = FaceId::default();
-        let mut next_comp_fid = FaceId::default();
-        for &fid in &ar.cell_faces[cid] {
-            if curr_comp_fid.valid() && next_comp_fid.valid() {
-                break;
-            }
-            let iso_fid = ar.face_data[fid].iso_fid;
-            if !iso_fid.valid() {
-                continue;
-            }
-
-            let curr_comp_id = shell_component_arr[patch_shell_arr[face_patch_arr[iso_fid]] << 1];
-            if curr_comp_id == comp_id {
-                curr_comp_fid = fid;
-            } else {
-                next_comp_fid = fid;
-            }
-        }
-
-        debug_assert!(curr_comp_fid.valid());
-        let curr_comp_oriented_patch = get_face_patch_in_tet(
+        return find_component_outer_patch_for_edge_vert(
             iso_surf_mesh,
+            descent_eid_planes,
             ar,
-            curr_comp_fid,
-            !ar.is_face_inner_cell(curr_comp_fid, cid),
-            face_patch_arr,
+            ds,
+            info,
+            comp_id,
+            start_vid,
         );
-
-        if next_comp_fid.valid() {
-            let next_comp_oriented_patch = get_face_patch_in_tet(
-                iso_surf_mesh,
-                ar,
-                next_comp_fid,
-                !ar.is_face_inner_cell(next_comp_fid, cid),
-                face_patch_arr,
-            );
-            ds.merge(curr_comp_oriented_patch, next_comp_oriented_patch);
-            return INVALID_IND;
-        } else {
-            return curr_comp_oriented_patch;
-        }
     }
 
     let get_component_tet_and_face = || {
@@ -840,10 +965,15 @@ fn find_component_outer_path_for_vert(
     {
         let start_iso_fid = ar.face_data[start_fid].iso_fid;
         if start_iso_fid.valid() {
-            let start_comp_id =
-                shell_component_arr[patch_shell_arr[face_patch_arr[start_iso_fid]] << 1];
-            if start_comp_id == comp_id {
-                return get_face_patch_in_tet(iso_surf_mesh, ar, start_fid, false, face_patch_arr);
+            let start_comp_id = info.get_component_id(start_iso_fid);
+            if (start_comp_id == comp_id) == ds.is_some() {
+                return get_face_patch_in_tet(
+                    iso_surf_mesh,
+                    ar,
+                    start_fid,
+                    false,
+                    info.face_patch_arr,
+                );
             }
         }
     }
@@ -857,15 +987,14 @@ fn find_component_outer_path_for_vert(
         for &fid in &ar.cell_faces[curr_cid] {
             let iso_fid = ar.face_data[fid].iso_fid;
             if iso_fid.valid() {
-                let curr_comp_id =
-                    shell_component_arr[patch_shell_arr[face_patch_arr[iso_fid]] << 1];
-                if curr_comp_id == comp_id {
+                let curr_comp_id = info.get_component_id(iso_fid);
+                if (curr_comp_id == comp_id) == ds.is_some() {
                     return get_face_patch_in_tet(
                         iso_surf_mesh,
                         ar,
                         fid,
                         !ar.is_face_inner_cell(fid, curr_cid),
-                        face_patch_arr,
+                        info.face_patch_arr,
                     );
                 }
             }
@@ -878,17 +1007,17 @@ fn find_component_outer_path_for_vert(
             }
         }
     }
-
     panic!("can't find the component patch");
 }
 
 fn find_component_outer_patch_for_edge(
     iso_surf_mesh: &IsoSurfMesh,
     tets: &TetSet,
-    face_patch_arr: &[usize],
+    ds: Option<&mut DisjointSet>,
+    info: &ConnectInfo,
+    comp_id: usize,
     t_eid: EdgeId,
-    t_curr_vid: VertexId,
-    t_next_vid: VertexId,
+    iso_start_vid: VertexId,
 ) -> usize {
     let tid = {
         let fid = *tets.mesh.edge(t_eid).halfedge().face();
@@ -897,47 +1026,107 @@ fn find_component_outer_patch_for_edge(
     debug_assert!(tid != INVALID_IND);
     debug_assert!(iso_surf_mesh.arrangements[tid].is_some());
 
-    get_patch_from_bottom_face(
-        iso_surf_mesh,
-        tets,
-        tid,
-        face_patch_arr,
-        t_curr_vid,
-        t_next_vid,
-    )
-}
-
-fn get_patch_from_bottom_face(
-    iso_surf_mesh: &IsoSurfMesh,
-    tets: &TetSet,
-    tid: usize,
-    face_patch_arr: &[usize],
-    t_curr_vid: VertexId,
-    t_next_vid: VertexId,
-) -> usize {
     let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
-    let curr_vid_idx = tets.tet_vert_index(tid, t_curr_vid);
-    let next_vid = tets.tet_vert_index(tid, t_next_vid).into();
-
-    let mut bottom_fid = FaceId::default();
-    for he in ar.mesh.vertex(next_vid).incoming_halfedges() {
-        let fid = *he.face();
-        if ar.face_data[fid].pid == curr_vid_idx {
-            bottom_fid = fid;
+    let mut start_vid = VertexId::default();
+    for v in ar.mesh.vertices() {
+        let vid = *v;
+        if ar.vertices[vid].index == iso_start_vid.0 {
+            start_vid = vid;
             break;
         }
     }
-    debug_assert!(bottom_fid.valid());
+    debug_assert!(start_vid.valid());
 
-    let cid = ar.face_data[bottom_fid].cells[0];
-    let surf_fid = ar.find_cell_surf_face(cid);
-    get_face_patch_in_tet(
+    let edge_index = tets.tet_edges[tid]
+        .iter()
+        .position(|&eid| eid == t_eid)
+        .unwrap();
+    return find_component_outer_patch_for_edge_vert(
         iso_surf_mesh,
+        EDGE_FACE_INDICES[edge_index],
         ar,
-        surf_fid,
-        !ar.is_face_inner_cell(surf_fid, cid),
-        face_patch_arr,
-    )
+        ds,
+        info,
+        comp_id,
+        start_vid,
+    );
+}
+
+fn find_component_outer_patch_for_edge_vert(
+    iso_surf_mesh: &IsoSurfMesh,
+    descent_eid_planes: [usize; 2],
+    ar: &Arrangement,
+    ds: Option<&mut DisjointSet>,
+    info: &ConnectInfo,
+    comp_id: usize,
+    start_vid: VertexId,
+) -> usize {
+    let mut descent_hid = HalfedgeId::default();
+    for he in ar.mesh.vertex(start_vid).outgoing_halfedges() {
+        let hid = *he;
+        let eid = ar.mesh.he_edge(hid);
+        let mut edge_planes = ar.edges[eid];
+        edge_planes.sort();
+        if edge_planes == descent_eid_planes {
+            descent_hid = hid;
+            break;
+        }
+    }
+
+    debug_assert!(descent_hid.valid());
+
+    let cid = ar.face_data[ar.mesh.he_face(descent_hid)].cells[0];
+
+    let mut curr_comp_fid = FaceId::default();
+    let mut next_comp_fid = FaceId::default();
+    for &fid in &ar.cell_faces[cid] {
+        if curr_comp_fid.valid() && next_comp_fid.valid() {
+            break;
+        }
+        let iso_fid = ar.face_data[fid].iso_fid;
+        if !iso_fid.valid() {
+            continue;
+        }
+
+        let curr_comp_id = info.get_component_id(curr_comp_fid);
+        if curr_comp_id == comp_id {
+            curr_comp_fid = fid;
+        } else {
+            next_comp_fid = fid;
+        }
+    }
+    if let Some(ds) = ds {
+        debug_assert!(curr_comp_fid.valid());
+        let curr_comp_oriented_patch = get_face_patch_in_tet(
+            iso_surf_mesh,
+            ar,
+            curr_comp_fid,
+            !ar.is_face_inner_cell(curr_comp_fid, cid),
+            info.face_patch_arr,
+        );
+        if next_comp_fid.valid() {
+            let next_comp_oriented_patch = get_face_patch_in_tet(
+                iso_surf_mesh,
+                ar,
+                next_comp_fid,
+                !ar.is_face_inner_cell(next_comp_fid, cid),
+                info.face_patch_arr,
+            );
+            ds.merge(curr_comp_oriented_patch, next_comp_oriented_patch);
+            return INVALID_IND;
+        } else {
+            return curr_comp_oriented_patch;
+        }
+    } else {
+        debug_assert!(next_comp_fid.valid());
+        return get_face_patch_in_tet(
+            iso_surf_mesh,
+            ar,
+            next_comp_fid,
+            !ar.is_face_inner_cell(next_comp_fid, cid),
+            info.face_patch_arr,
+        );
+    }
 }
 
 fn get_face_patch_in_tet(
