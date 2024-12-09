@@ -84,6 +84,10 @@ pub(super) fn extract_components(iso_surf_mesh: IsoSurfMesh, tets: &TetSet) {
     let (patches, face_patch_arr) = extract_patches(&iso_surf_mesh.mesh, &is_chain_edge);
     println!("the n patches is {}", patches.len());
 
+    for i in 0..patches.len() {
+        write_shell(&format!("data/patch/patch_{}.obj", i), &iso_surf_mesh, &[i << 1], &patches);
+    }
+
     let (shells, patch_shell_arr) = extract_shells(
         &iso_surf_mesh,
         tets,
@@ -810,7 +814,7 @@ fn get_outer_patch(
                             tets,
                             None,
                             &info,
-                            comp_id,
+                            INVALID_IND,
                             eid,
                             curr_vid,
                         );
@@ -852,7 +856,7 @@ fn find_closest_vid_on_edge(
         .position(|&eid| t_eid == eid)
         .unwrap();
     let base_edge_planes = EDGE_FACE_INDICES[edge_index];
-    let mut prev_hid = HalfedgeId::default();
+    let mut prev_eid = EdgeId::default();
     loop {
         let curr_hid = ar
             .mesh
@@ -860,7 +864,7 @@ fn find_closest_vid_on_edge(
             .outgoing_halfedges()
             .map(|he| *he)
             .find(|&hid| {
-                if hid == prev_hid {
+                if ar.mesh.he_edge(hid) == prev_eid {
                     return false;
                 }
                 let eid = ar.mesh.he_edge(hid);
@@ -881,11 +885,12 @@ fn find_closest_vid_on_edge(
                 }
             }
             start_vid = vid;
-            prev_hid = curr_hid;
+            prev_eid = ar.mesh.he_edge(curr_hid);
         } else {
             break;
         }
     }
+    debug_assert!(false);
     (tid, HalfedgeId::default())
 }
 
@@ -1013,7 +1018,7 @@ fn find_component_outer_path_for_vert(
                         iso_surf_mesh,
                         ar,
                         fid,
-                        !ar.is_face_inner_cell(fid, curr_cid),
+                        ar.is_face_inner_cell(fid, curr_cid),
                         info.face_patch_arr,
                     );
                 }
@@ -1088,7 +1093,7 @@ fn find_component_outer_patch_for_edge_vert(
             iso_surf_mesh,
             ar,
             curr_comp_fid,
-            !ar.is_face_inner_cell(curr_comp_fid, cid),
+            ar.is_face_inner_cell(curr_comp_fid, cid),
             info.face_patch_arr,
         );
         if next_comp_fid.valid() {
@@ -1096,7 +1101,7 @@ fn find_component_outer_patch_for_edge_vert(
                 iso_surf_mesh,
                 ar,
                 next_comp_fid,
-                !ar.is_face_inner_cell(next_comp_fid, cid),
+                ar.is_face_inner_cell(next_comp_fid, cid),
                 info.face_patch_arr,
             );
             ds.merge(curr_comp_oriented_patch, next_comp_oriented_patch);
@@ -1110,7 +1115,7 @@ fn find_component_outer_patch_for_edge_vert(
             iso_surf_mesh,
             ar,
             next_comp_fid,
-            !ar.is_face_inner_cell(next_comp_fid, cid),
+            ar.is_face_inner_cell(next_comp_fid, cid),
             info.face_patch_arr,
         );
     }

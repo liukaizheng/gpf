@@ -28,14 +28,14 @@ fn test1() {
 
 #[test]
 fn test_component() {
-    let bbox = BBox::new(-1.0, -1.0, -1.0, 1.0, 1.0, 1.0);
+    let bbox = BBox::new(-0.2, -0.2, -0.2, 1.0, 1.0, 1.0);
     let body1 = SimpleBody::new(vec![
         Surf::Sphere(Sphere::new(0.0, 0.0, 0.0, 0.2)),
         Surf::Sphere(Sphere::new(0.0, 0.0, 0.0, 0.1)),
         Surf::Sphere(Sphere::new(0.5, 0.0, 0.0, 0.2)),
-        Surf::Sphere(Sphere::new(0.4, 0.0, 0.0, 0.15)),
+        Surf::Sphere(Sphere::new(0.4, 0.0, 0.0, 0.2)),
     ], bbox);
     let body2 = SimpleBody::new(vec![], BBox::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0));
 
-    boolean3d(&body1, &body2, BooleanType::Union, 0.1);
+    boolean3d(&body1, &body2, BooleanType::Union, 0.0001);
 }
