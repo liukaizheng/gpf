@@ -36,10 +36,7 @@ impl TetSet {
     }
 
     pub(crate) fn tet_face_index(&self, tid: usize, fid: FaceId) -> usize {
-        self.tet_faces[tid]
-            .iter()
-            .position(|&f| f == fid)
-            .unwrap()
+        self.tet_faces[tid].iter().position(|&f| f == fid).unwrap()
     }
 
     /// return tet and its start face index
@@ -322,7 +319,8 @@ pub(crate) struct TetsAroundEdge<'a> {
     tets: &'a TetSet,
 }
 
-const EDGE_FACE_INDICES: [[usize; 2]; 6] = [[2, 3], [1, 3], [1, 2], [0, 3], [0, 2], [0, 1]];
+pub(crate) const EDGE_FACE_INDICES: [[usize; 2]; 6] =
+    [[2, 3], [1, 3], [1, 2], [0, 3], [0, 2], [0, 1]];
 
 impl<'a> TetsAroundEdge<'a> {
     fn new(tets: &'a TetSet, eid: EdgeId) -> Self {

@@ -3,6 +3,7 @@ use std::alloc::{Allocator, Global};
 use std::collections::{HashMap, HashSet};
 use tinyvec::TinyVec;
 
+use crate::is_positive;
 use crate::mesh::HalfedgeId;
 use crate::utils::TwoDimArr;
 use crate::{
@@ -56,7 +57,6 @@ impl DivNum {
     fn is_pos(&self) -> bool {
         return self.data[0] > 0.0;
     }
-
     #[inline(always)]
     fn is_neg(&self) -> bool {
         return self.data[0] < 0.0;
@@ -88,6 +88,7 @@ pub(crate) struct FaceData {
     /// `cells[0]`: inner cell of this face
     /// `cells[1]`: outer cell of this face
     pub(crate) cells: [usize; 2],
+    pub(crate) iso_fid: FaceId,
 }
 
 pub(crate) struct Arrangement<A: Allocator + Copy = Global> {
@@ -173,6 +174,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
         face_data.extend((0..4).map(|pid| FaceData {
             pid,
             cells: [0, INVALID_IND],
+            iso_fid: FaceId::default(),
         }));
 
         let mut one_cell_faces = Vec::with_capacity_in(4, alloc);
@@ -457,6 +459,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
             self.face_data.push(FaceData {
                 pid,
                 cells: [cid, new_cid],
+                iso_fid: FaceId::default(),
             });
 
             for &fid in &pos_cell_faces {
@@ -602,7 +605,8 @@ impl<A: Allocator + Copy> Arrangement<A> {
 
             for &oriented_sid in &self.plane_surfaces[pid] {
                 let sid = strip_orientation(oriented_sid);
-                if (oriented_sid & 1) == 0 {
+                self.face_data[fid].iso_fid = FaceId::from(data.iso_faces.len());
+                if is_positive(oriented_sid) {
                     data.iso_faces
                         .push(face.vertices().map(|v| self.vertices[*v].index));
                 } else {

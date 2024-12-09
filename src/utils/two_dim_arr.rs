@@ -20,6 +20,11 @@ impl<T, A: Allocator + Copy> TwoDimArr<T, A> {
     pub fn iter(&self) -> TwoDimArrIter<T, A> {
         TwoDimArrIter { arr: self, idx: 0 }
     }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.separators.len() - 1
+    }
 }
 
 impl<T: Copy, A: Allocator + Copy> TwoDimArr<T, A> {
