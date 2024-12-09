@@ -1,7 +1,6 @@
-use gpf::{boolean3d::{boolean3d, BooleanType, SimpleBody}, geometry::{BBox, Cylinder, Plane, Surf}};
+use gpf::{boolean3d::{boolean3d, BooleanType, SimpleBody}, geometry::{BBox, Cylinder, Plane, Sphere, Surf}};
 
 #[test]
-
 fn test1() {
 	let body1 = {
 		let left = Surf::Plane(Plane::new(-0.5, 0.0, 0.0, -1.0, 0.0, 0.0));
@@ -24,5 +23,19 @@ fn test1() {
 		let bbox = BBox::new(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
 		SimpleBody::new(vec![left, right, bottom, top, front, back], bbox)
 	};
-	boolean3d(&body1, &body2, BooleanType::Union, 1e-3);
+	boolean3d(&body1, &body2, BooleanType::Union, 0.001);
+}
+
+#[test]
+fn test_component() {
+    let bbox = BBox::new(-1.0, -1.0, -1.0, 1.0, 1.0, 1.0);
+    let body1 = SimpleBody::new(vec![
+        Surf::Sphere(Sphere::new(0.0, 0.0, 0.0, 0.2)),
+        Surf::Sphere(Sphere::new(0.0, 0.0, 0.0, 0.1)),
+        Surf::Sphere(Sphere::new(0.5, 0.0, 0.0, 0.2)),
+        Surf::Sphere(Sphere::new(0.4, 0.0, 0.0, 0.15)),
+    ], bbox);
+    let body2 = SimpleBody::new(vec![], BBox::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0));
+
+    boolean3d(&body1, &body2, BooleanType::Union, 0.1);
 }

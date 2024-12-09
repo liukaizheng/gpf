@@ -52,7 +52,7 @@ impl DisjointSet {
             group_to_elements.entry(p).or_insert(vec![]).push(i);
         }
 
-        let mut groups = Vec::with_capacity(self.n_groups);
+        /*let mut groups = Vec::with_capacity(self.n_groups);
         let mut ele_groups = vec![0; self.parent.len()];
         for (gid, group) in group_to_elements.into_values().enumerate() {
             for &element in &group {
@@ -61,6 +61,19 @@ impl DisjointSet {
             groups.push(group);
         }
 
+        (groups, ele_groups)*/
+
+        let mut _values = group_to_elements.into_values().collect::<Vec<Vec<usize>>>();
+        _values.sort_unstable();
+        let mut groups = Vec::with_capacity(self.n_groups);
+        let mut ele_groups = vec![0; self.parent.len()];
+        for (gid, group) in _values.into_iter().enumerate() {
+            for &element in &group {
+                ele_groups[element] = gid;
+            }
+            groups.push(group);
+
+        }
         (groups, ele_groups)
     }
 }
