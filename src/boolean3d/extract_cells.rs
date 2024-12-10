@@ -760,7 +760,7 @@ fn get_outer_patch(
                     let next_vid = vert_descent_links[tet_vid];
                     debug_assert!(next_vid.valid());
                     (
-                        find_component_outer_path_for_vert(
+                        find_component_patch_at_vertex(
                             iso_surf_mesh,
                             tets,
                             Some(ds),
@@ -783,7 +783,7 @@ fn get_outer_patch(
                         [vb, va]
                     };
                     (
-                        find_component_outer_patch_for_edge(
+                        find_component_patch_at_edge(
                             iso_surf_mesh,
                             tets,
                             Some(ds),
@@ -810,8 +810,8 @@ fn get_outer_patch(
                 }
 
                 match tet_vert_to_iso_elem_arr[curr_vid] {
-                    IsoElem::V(vid) => {
-                        let next_oriented_patch = find_component_outer_path_for_vert(
+                    IsoElem::V(_) => {
+                        let next_oriented_patch = find_component_patch_at_vertex(
                             iso_surf_mesh,
                             tets,
                             None,
@@ -825,7 +825,7 @@ fn get_outer_patch(
                         break;
                     }
                     IsoElem::E(eid) => {
-                        let next_oriented_patch = find_component_outer_patch_for_edge(
+                        let next_oriented_patch = find_component_patch_at_edge(
                             iso_surf_mesh,
                             tets,
                             None,
@@ -910,7 +910,7 @@ fn find_closest_vid_on_edge(
     (tid, HalfedgeId::default())
 }
 
-fn find_component_outer_path_for_vert(
+fn find_component_patch_at_vertex(
     iso_surf_mesh: &IsoSurfMesh,
     tets: &TetSet,
     ds: Option<&mut DisjointSet>,
@@ -959,7 +959,7 @@ fn find_component_outer_path_for_vert(
         }
         debug_assert!(descent_hid.valid());
 
-        return find_component_outer_patch_for_edge_vert(
+        return locate_component_patch_from_halfedge(
             iso_surf_mesh,
             ar,
             ds,
@@ -1008,7 +1008,7 @@ fn find_component_outer_path_for_vert(
         if start_iso_fid.valid() {
             let start_comp_id = info.get_component_id(start_iso_fid);
             if (start_comp_id == comp_id) == ds.is_some() {
-                return get_face_patch_in_tet(
+                return resolve_oriented_face_patch(
                     iso_surf_mesh,
                     ar,
                     start_fid,
@@ -1030,7 +1030,7 @@ fn find_component_outer_path_for_vert(
             if iso_fid.valid() {
                 let curr_comp_id = info.get_component_id(iso_fid);
                 if (curr_comp_id == comp_id) == ds.is_some() {
-                    return get_face_patch_in_tet(
+                    return resolve_oriented_face_patch(
                         iso_surf_mesh,
                         ar,
                         fid,
@@ -1051,7 +1051,7 @@ fn find_component_outer_path_for_vert(
     panic!("can't find the component patch");
 }
 
-fn find_component_outer_patch_for_edge(
+fn find_component_patch_at_edge(
     iso_surf_mesh: &IsoSurfMesh,
     tets: &TetSet,
     ds: Option<&mut DisjointSet>,
@@ -1066,7 +1066,7 @@ fn find_component_outer_patch_for_edge(
 
     let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
 
-    return find_component_outer_patch_for_edge_vert(
+    return locate_component_patch_from_halfedge(
         iso_surf_mesh,
         ar,
         ds,
@@ -1076,7 +1076,7 @@ fn find_component_outer_patch_for_edge(
     );
 }
 
-fn find_component_outer_patch_for_edge_vert(
+fn locate_component_patch_from_halfedge(
     iso_surf_mesh: &IsoSurfMesh,
     ar: &Arrangement,
     ds: Option<&mut DisjointSet>,
@@ -1105,7 +1105,7 @@ fn find_component_outer_patch_for_edge_vert(
     }
     if let Some(ds) = ds {
         debug_assert!(curr_comp_fid.valid());
-        let curr_comp_oriented_patch = get_face_patch_in_tet(
+        let curr_comp_oriented_patch = resolve_oriented_face_patch(
             iso_surf_mesh,
             ar,
             curr_comp_fid,
@@ -1113,7 +1113,7 @@ fn find_component_outer_patch_for_edge_vert(
             info.face_patch_arr,
         );
         if next_comp_fid.valid() {
-            let next_comp_oriented_patch = get_face_patch_in_tet(
+            let next_comp_oriented_patch = resolve_oriented_face_patch(
                 iso_surf_mesh,
                 ar,
                 next_comp_fid,
@@ -1127,7 +1127,7 @@ fn find_component_outer_patch_for_edge_vert(
         }
     } else {
         debug_assert!(next_comp_fid.valid());
-        return get_face_patch_in_tet(
+        return resolve_oriented_face_patch(
             iso_surf_mesh,
             ar,
             next_comp_fid,
@@ -1137,7 +1137,7 @@ fn find_component_outer_patch_for_edge_vert(
     }
 }
 
-fn get_face_patch_in_tet(
+fn resolve_oriented_face_patch(
     iso_surf_mesh: &IsoSurfMesh,
     ar: &Arrangement,
     tet_fid: FaceId,
