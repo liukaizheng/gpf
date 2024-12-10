@@ -70,12 +70,14 @@ fn write_shell(name: &str, iso_surf_mesh: &IsoSurfMesh, shell: &[usize], patches
             if ori_pid & 1 == 0 {
                 v_ids.reverse();
             }
-            writeln!(&mut file, "f {}", v_ids.iter().join(" ")).unwrap();
+            for (va, vb) in v_ids[1..].iter().tuple_windows() {
+                writeln!(&mut file, "f {} {} {}", v_ids[0], va, vb).unwrap();
+            }
         }
     }
 }
 
-pub(super) fn extract_components(iso_surf_mesh: IsoSurfMesh, tets: &TetSet) {
+pub(super) fn extract_cells(iso_surf_mesh: IsoSurfMesh, tets: &TetSet) {
     let (chains, is_chain_edge) =
         identify_chain_edge(&iso_surf_mesh.mesh, &iso_surf_mesh.face_parents);
     println!("the n chains is {}", chains.len());
@@ -84,7 +86,7 @@ pub(super) fn extract_components(iso_surf_mesh: IsoSurfMesh, tets: &TetSet) {
     let (patches, face_patch_arr) = extract_patches(&iso_surf_mesh.mesh, &is_chain_edge);
     println!("the n patches is {}", patches.len());
 
-    let (shells, patch_shell_arr) = extract_shells(
+    let (cells, patch_cell_arr) = extract_cells_impl(
         &iso_surf_mesh,
         tets,
         &chains,
@@ -211,7 +213,7 @@ fn extract_patches(mesh: &SurfaceMesh, is_chain_edge: &[bool]) -> (Vec<Vec<FaceI
     (patch_faces, face_patches)
 }
 
-fn extract_shells(
+fn extract_cells_impl(
     iso_surf_mesh: &IsoSurfMesh,
     tets: &TetSet,
     chains: &[Vec<EdgeId>],
@@ -285,7 +287,7 @@ fn extract_shells(
         );
     }
 
-    (shells, patch_shell_arr)
+    (cells, patch_cell_arr)
 }
 
 struct TetEdgePatchData<A: Allocator + Copy> {
