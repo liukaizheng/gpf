@@ -1,7 +1,7 @@
 use hashbrown::HashMap;
 
 pub struct DisjointSet {
-    parent: Vec<usize>,
+    pub parent: Vec<usize>,
     rank: Vec<usize>,
     pub n_groups: usize,
 }
@@ -38,7 +38,7 @@ impl DisjointSet {
         self.link(x, y);
     }
 
-    fn find_set(&mut self, x: usize) -> usize {
+    pub fn find_set(&mut self, x: usize) -> usize {
         if x != self.parent[x] {
             self.parent[x] = self.find_set(self.parent[x]);
         }

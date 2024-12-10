@@ -216,24 +216,6 @@ impl<A: Allocator + Copy> Arrangement<A> {
     }
 
     #[inline]
-    pub(crate) fn has_srf_on(&self, fid: FaceId) -> bool {
-        let pid = self.face_data[fid].pid;
-        !self.plane_surfaces[pid].is_empty()
-    }
-
-    pub(crate) fn find_cell_surf_face(&self, cid: usize) -> FaceId {
-        debug_assert!(cid != INVALID_IND);
-        let mut surf_fid = FaceId::default();
-        for &fid in &self.cell_faces[cid] {
-            if self.has_srf_on(fid) {
-                surf_fid = fid;
-                break;
-            }
-        }
-        surf_fid
-    }
-
-    #[inline]
     pub(crate) fn is_face_inner_cell(&self, fid: FaceId, cid: usize) -> bool {
         let cells = &self.face_data[fid].cells;
         debug_assert!(cells[0] == cid || cells[1] == cid);

@@ -53,16 +53,17 @@ pub fn boolean3d(first: &SimpleBody, second: &SimpleBody, t: BooleanType, eps: f
     bbox.merge(&first.bbox);
     bbox.merge(&second.bbox);
     bbox.scale(1.1);
-    bbox.min = [-0.5, -0.5, -0.5];
-    bbox.max = [2.0, 2.0, 2.0];
+    // bbox.min = [-0.5, -0.5, -0.5];
+    // bbox.max = [2.0, 2.0, 2.0];
+
     let mut tets = init_mesh(bbox);
     let vals = adaptive_subdivide(&mut tets, surfaces, eps * eps);
 
     let iso_surf_mesh = extract_iso_surface(&tets, vals);
     write_obj("123.obj", &iso_surf_mesh.points, &iso_surf_mesh.mesh);
-    extract_components(iso_surf_mesh, &tets);
-
     println!("mesh n tets: {}", tets.tet_faces.len());
+
+    extract_components(iso_surf_mesh, &tets);
 }
 
 fn init_mesh(bbox: BBox) -> TetSet {
