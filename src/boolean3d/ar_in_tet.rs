@@ -78,7 +78,7 @@ pub(crate) struct VertexData {
     planes: [usize; 3],
     parents: [VertexId; 2],
     vals: [DivNum; 2],
-    pub(crate) index: usize,
+    pub(crate) iso_vid: VertexId,
 }
 
 #[derive(Clone)]
@@ -148,7 +148,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                 planes,
                 parents: [VertexId::default(); 2],
                 vals: [DivNum::nan(), DivNum::nan()],
-                index: INVALID_IND,
+                iso_vid: VertexId::default(),
             }
         }));
 
@@ -304,7 +304,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                     planes: [e_planes[0], e_planes[1], pid],
                     parents: [va, vb],
                     vals: [ori1, ori2],
-                    index: INVALID_IND,
+                    iso_vid: VertexId::default(),
                 });
                 vert_orientations.push(DivNum::zero());
                 self.edges.push(e_planes.clone());
@@ -557,7 +557,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                         if vid.0 < 4 {
                             point(&tets.points, tets.tet_vertices[tid][vid].0)
                         } else {
-                            point(&data.points, self.vertices[vid].index)
+                            point(&data.points, self.vertices[vid].iso_vid.0)
                         }
                     });
                     let [a1, b1] = self.vertices[idx].vals[0].data.map(|x| x.abs());
@@ -567,7 +567,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                     data.points
                         .extend_from_slice(&interpolate::<3>(pa, pb, a1b2 / (a1b2 + a2b1)));
                 }
-                self.vertices[idx].index = pid;
+                self.vertices[idx].iso_vid = pid.into();
             }
         }
 
@@ -590,10 +590,10 @@ impl<A: Allocator + Copy> Arrangement<A> {
                 self.face_data[fid].iso_fid = FaceId::from(data.iso_faces.len());
                 if is_positive(oriented_sid) {
                     data.iso_faces
-                        .push(face.vertices().map(|v| self.vertices[*v].index));
+                        .push(face.vertices().map(|v| self.vertices[*v].iso_vid.0));
                 } else {
                     data.iso_faces
-                        .push(face.vertices().map(|v| self.vertices[*v].index).rev());
+                        .push(face.vertices().map(|v| self.vertices[*v].iso_vid.0).rev());
                 }
                 data.face_parents.push(sid);
                 data.face_positions.push((tid, fid));
@@ -601,13 +601,13 @@ impl<A: Allocator + Copy> Arrangement<A> {
         }
     }
 
-    pub(crate) fn find_halfedge(&self, fid: FaceId, idx0: usize, idx1: usize) -> HalfedgeId {
+    pub(crate) fn find_halfedge(&self, fid: FaceId, v0: VertexId, v1: VertexId) -> HalfedgeId {
         let first_hid = self.mesh.f_halfedge(fid);
-        let mut va = self.vertices[self.mesh.he_from(first_hid)].index;
+        let mut va = self.vertices[self.mesh.he_from(first_hid)].iso_vid;
         let mut curr_hid = first_hid;
         loop {
-            let vb = self.vertices[self.mesh.he_to(curr_hid)].index;
-            if (va == idx0 && vb == idx1) || (va == idx1 && vb == idx0) {
+            let vb = self.vertices[self.mesh.he_to(curr_hid)].iso_vid;
+            if (va == v0 && vb == v1) || (va == v1 && vb == v0) {
                 return curr_hid;
             }
 

@@ -81,7 +81,7 @@ pub(super) fn extract_cells(iso_surf_mesh: IsoSurfMesh, tets: &TetSet) {
     let (chains, is_chain_edge) =
         identify_chain_edge(&iso_surf_mesh.mesh, &iso_surf_mesh.face_parents);
     println!("the n chains is {}", chains.len());
-    write_chains("chain.obj", &iso_surf_mesh, &is_chain_edge);
+    // write_chains("chain.obj", &iso_surf_mesh, &is_chain_edge);
 
     let (patches, face_patch_arr) = extract_patches(&iso_surf_mesh.mesh, &is_chain_edge);
     println!("the n patches is {}", patches.len());
@@ -322,7 +322,7 @@ fn order_patches_around_edge<A: Allocator + Copy>(
         match tet_to_patch_data_index.entry(tid) {
             Entry::Vacant(index) => {
                 let [va, vb] = iso_surf_mesh.mesh.e_vertices(eid);
-                let tet_eid = ar.mesh.he_edge(ar.find_halfedge(tet_fid, va.0, vb.0));
+                let tet_eid = ar.mesh.he_edge(ar.find_halfedge(tet_fid, va, vb));
                 debug_assert!(tet_eid.valid());
                 let mut vec = TinyVec::new();
                 vec.push(oriented_patch_id);
@@ -456,7 +456,7 @@ fn order_patches_around_edge<A: Allocator + Copy>(
                 /// It's a tet vertex
                 Tet(VertexId),
                 /// It's a vertex of iso-surface
-                ISO(usize),
+                ISO(VertexId),
             }
 
             let [va, vb] = iso_surf_mesh.mesh.e_vertices(eid);
@@ -464,25 +464,25 @@ fn order_patches_around_edge<A: Allocator + Copy>(
                 let tid = edge_tets[0];
                 let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
                 let mesh = &ar.mesh;
-                let hid = ar.find_halfedge(tet_bdy_faces[0][0], va.0, vb.0);
+                let hid = ar.find_halfedge(tet_bdy_faces[0][0], va, vb);
 
                 let v = mesh.he_to(mesh.he_next(hid));
                 if *v < 4 {
                     Vert::Tet(tets.tet_vertices[tid][*v])
                 } else {
-                    Vert::ISO(ar.vertices[v].index)
+                    Vert::ISO(ar.vertices[v].iso_vid)
                 }
             };
             let v1 = {
                 let tid = edge_tets[1];
                 let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
                 let mesh = &ar.mesh;
-                let hid = ar.find_halfedge(tet_bdy_faces[1][0], va.0, vb.0);
+                let hid = ar.find_halfedge(tet_bdy_faces[1][0], va, vb);
                 let v = mesh.he_from(mesh.he_prev(hid));
                 if *v < 4 {
                     Vert::Tet(tets.tet_vertices[tid][*v])
                 } else {
-                    Vert::ISO(ar.vertices[v].index)
+                    Vert::ISO(ar.vertices[v].iso_vid)
                 }
             };
 
@@ -492,25 +492,25 @@ fn order_patches_around_edge<A: Allocator + Copy>(
                     let tid = edge_tets[0];
                     let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
                     let mesh = &ar.mesh;
-                    let hid = ar.find_halfedge(tet_bdy_faces[0][1], va.0, vb.0);
+                    let hid = ar.find_halfedge(tet_bdy_faces[0][1], va, vb);
 
                     let v = mesh.he_to(mesh.he_next(hid));
                     if *v < 4 {
                         Vert::Tet(tets.tet_vertices[tid][*v])
                     } else {
-                        Vert::ISO(ar.vertices[v].index)
+                        Vert::ISO(ar.vertices[v].iso_vid)
                     }
                 };
                 let v11 = {
                     let tid = edge_tets[1];
                     let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
                     let mesh = &ar.mesh;
-                    let hid = ar.find_halfedge(tet_bdy_faces[1][1], va.0, vb.0);
+                    let hid = ar.find_halfedge(tet_bdy_faces[1][1], va, vb);
                     let v = mesh.he_from(mesh.he_prev(hid));
                     if *v < 4 {
                         Vert::Tet(tets.tet_vertices[tid][*v])
                     } else {
-                        Vert::ISO(ar.vertices[v].index)
+                        Vert::ISO(ar.vertices[v].iso_vid)
                     }
                 };
 
@@ -670,7 +670,7 @@ impl<'a> ConnectInfo<'a> {
 
 #[derive(Clone, Copy)]
 enum IsoElem {
-    V(VertexId),
+    V,
     E(EdgeId),
     None,
 }
@@ -699,9 +699,9 @@ fn find_component_extremes(
                         let vid = *v;
                         match iso_surf_mesh.iso_vertices[vid] {
                             IsoVert::V(tet_vid) => match tet_vert_to_iso_elem_arr[tet_vid] {
-                                IsoElem::V(_) => {}
+                                IsoElem::V => {}
                                 IsoElem::None | IsoElem::E(_) => {
-                                    tet_vert_to_iso_elem_arr[tet_vid] = IsoElem::V(vid);
+                                    tet_vert_to_iso_elem_arr[tet_vid] = IsoElem::V;
                                     let pt = point(&tets.points, tet_vid.0);
                                     if pt.partial_cmp(extreme_pt).unwrap().is_lt() {
                                         extreme_pt = pt;
@@ -720,7 +720,7 @@ fn find_component_extremes(
                                 };
 
                                 match tet_vert_to_iso_elem_arr[max_vid] {
-                                    IsoElem::V(_) | IsoElem::E(_) => {}
+                                    IsoElem::V | IsoElem::E(_) => {}
                                     IsoElem::None => {
                                         tet_vert_to_iso_elem_arr[max_vid] = IsoElem::E(tet_eid);
                                     }
@@ -810,7 +810,7 @@ fn get_outer_patch(
                 }
 
                 match tet_vert_to_iso_elem_arr[curr_vid] {
-                    IsoElem::V(_) => {
+                    IsoElem::V => {
                         let next_oriented_patch = find_component_patch_at_vertex(
                             iso_surf_mesh,
                             tets,
@@ -1150,7 +1150,7 @@ fn resolve_oriented_face_patch(
     let [va, vb] = ar.mesh.he_vertices(hid);
     let vc = ar.mesh.he_to(ar.mesh.he_next(hid));
 
-    let [va, vb, vc] = [va, vb, vc].map(|vid| ar.vertices[vid].index.into());
+    let [va, vb, vc] = [va, vb, vc].map(|vid| ar.vertices[vid].iso_vid);
 
     let eid = iso_surf_mesh.mesh.e_from_va_vb(va, vb);
     let faces = TinyVec::<[FaceId; 1]>::from_iter(

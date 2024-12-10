@@ -14,7 +14,7 @@ fn write_obj(name: &str, points: &[f64], hull: &[usize]) {
     }
 }
 
-/*#[test]
+#[test]
 fn test_convex_2() {
     let rng = SmallRng::seed_from_u64(5489);
     let uniform = Uniform::new_inclusive(-1.0, 1.0);
@@ -22,7 +22,7 @@ fn test_convex_2() {
     let points = Vec::from_iter(rng.sample_iter(uniform).take(n_points * 2));
 
     let hull = convex_2(&points, std::alloc::Global);
-    // write_obj("convex_2.obj", &points, &hull);
+    write_obj("convex_2.obj", &points, &hull);
 }
 
 #[test]
@@ -32,7 +32,7 @@ fn test_convex_colinear() {
 
     let hull = convex_2(&points, std::alloc::Global);
     println!("{:?}", hull);
-}*/
+}
 
 #[test]
 fn test_convex_2_bug() {
