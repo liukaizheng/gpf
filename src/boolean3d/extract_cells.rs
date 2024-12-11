@@ -849,7 +849,7 @@ fn get_outer_patch(
     outer_oriented_patch
 }
 
-fn find_closest_vid_on_edge(
+fn find_first_component_intersection_on_edge(
     iso_surf_mesh: &IsoSurfMesh,
     tets: &TetSet,
     info: &ConnectInfo,
@@ -1060,20 +1060,19 @@ fn find_component_patch_at_edge(
     t_eid: EdgeId,
     t_start_vid: VertexId,
 ) -> usize {
-    let (tid, descent_hid) =
-        find_closest_vid_on_edge(iso_surf_mesh, tets, &info, t_eid, t_start_vid, comp_id);
+    let (tid, descent_hid) = find_first_component_intersection_on_edge(
+        iso_surf_mesh,
+        tets,
+        &info,
+        t_eid,
+        t_start_vid,
+        comp_id,
+    );
     debug_assert!(descent_hid.valid());
 
     let ar = iso_surf_mesh.arrangements[tid].as_ref().unwrap();
 
-    return locate_component_patch_from_halfedge(
-        iso_surf_mesh,
-        ar,
-        ds,
-        info,
-        comp_id,
-        descent_hid,
-    );
+    return locate_component_patch_from_halfedge(iso_surf_mesh, ar, ds, info, comp_id, descent_hid);
 }
 
 fn locate_component_patch_from_halfedge(
