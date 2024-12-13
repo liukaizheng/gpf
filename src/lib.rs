@@ -9,7 +9,6 @@
 use itertools::Itertools;
 
 pub mod boolean3d;
-pub mod disjoint_set;
 pub mod geometry;
 pub mod graphcut;
 pub mod math;

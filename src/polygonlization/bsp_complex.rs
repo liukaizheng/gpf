@@ -1,4 +1,3 @@
-use core::panic;
 use std::{alloc::Allocator, array::from_fn, ops::Deref};
 
 use bumpalo::Bump;
@@ -7,7 +6,6 @@ use std::collections::{HashMap, HashSet};
 
 use super::{conforming_mesh::Constraints, point};
 use crate::{
-    disjoint_set::DisjointSet,
     graphcut::{ArcBuilder, MaxFlow, PushRelabelFifo},
     math::{cross_in, norm, sub_in},
     mesh::{EdgeId, ElementId, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
@@ -17,6 +15,7 @@ use crate::{
         Orientation, Point3D,
     },
     triangle::{triangulate, TetMesh},
+    utils::DisjointSet,
     INVALID_IND,
 };
 

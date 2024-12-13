@@ -9,11 +9,7 @@ use itertools::Itertools;
 use tinyvec::TinyVec;
 
 use crate::{
-    boolean3d::tet_set::EDGE_FACE_INDICES,
-    disjoint_set::DisjointSet,
-    is_positive,
-    mesh::{EdgeId, ElementId, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
-    oriented_index, point, strip_orientation, twin_index, INVALID_IND,
+    boolean3d::tet_set::EDGE_FACE_INDICES, is_positive, mesh::{EdgeId, ElementId, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId}, oriented_index, point, strip_orientation, twin_index, utils::DisjointSet, INVALID_IND
 };
 
 use super::{ar_in_tet::IsoVert, tet_set::TetSet, Arrangement, IsoSurfMesh};
