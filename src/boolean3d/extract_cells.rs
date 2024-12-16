@@ -9,7 +9,12 @@ use itertools::Itertools;
 use tinyvec::TinyVec;
 
 use crate::{
-    boolean3d::tet_set::EDGE_FACE_INDICES, is_positive, mesh::{EdgeId, ElementId, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId}, oriented_index, point, strip_orientation, twin_index, utils::DisjointSet, INVALID_IND
+    boolean3d::tet_set::EDGE_FACE_INDICES,
+    is_positive,
+    mesh::{EdgeId, ElementId, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
+    oriented_index, point, strip_orientation, twin_index,
+    utils::DisjointSet,
+    INVALID_IND,
 };
 
 use super::{ar_in_tet::IsoVert, tet_set::TetSet, Arrangement, IsoSurfMesh};
@@ -82,7 +87,7 @@ pub(super) fn extract_cells(iso_surf_mesh: IsoSurfMesh, tets: &TetSet) {
     let (patches, face_patch_arr) = extract_patches(&iso_surf_mesh.mesh, &is_chain_edge);
     println!("the n patches is {}", patches.len());
 
-    let (cells, patch_cell_arr) = extract_cells_impl(
+    let (mut cells, patch_cell_arr) = extract_cells_impl(
         &iso_surf_mesh,
         tets,
         &chains,
@@ -90,6 +95,7 @@ pub(super) fn extract_cells(iso_surf_mesh: IsoSurfMesh, tets: &TetSet) {
         &face_patch_arr,
         patches.len() << 1,
     );
+    remove_unused_patches(&iso_surf_mesh, &mut cells, &patch_cell_arr);
 }
 
 fn identify_chain_edge(
@@ -273,7 +279,7 @@ fn extract_cells_impl(
         n_ori_patches,
         outer_patch,
     );
-    println!("the n shells is {}", cells.len());
+    println!("the n cells is {}", cells.len());
     for (shell_id, shell) in cells.iter().enumerate() {
         write_shell(
             &format!("data/mesh/shell_{}.obj", shell_id),
@@ -1222,4 +1228,27 @@ fn extract_cells_by_removing_boundary_patches(
         cells.push(cell);
     }
     (cells, patch_to_cell_arr)
+}
+
+fn remove_unused_patches(
+    iso_surf_mesh: &IsoSurfMesh,
+    cells: &mut [Vec<usize>],
+    old_patch_cell_arr: &[usize],
+) {
+    let mut patch_indices = vec![INVALID_IND; old_patch_cell_arr.len() >> 1];
+    for (new_patch_id, old_patch_id) in old_patch_cell_arr
+        .chunks(2)
+        .enumerate()
+        .filter_map(|(patch_id, patch_cells)| {
+            if patch_cells[0] != INVALID_IND || patch_cells[1] != INVALID_IND {
+                Some(patch_id)
+            } else {
+                None
+            }
+        })
+        .enumerate()
+    {
+        patch_indices[old_patch_id] = new_patch_id;
+    }
+    println!("the n patches is {}", patch_indices.len());
 }

@@ -64,6 +64,7 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
             mesh.core_data.v_halfedge_arr[prev_vid] = first_hid;
             mesh.core_data.connect_halfedges(prev_hid, first_hid);
         }
+        mesh.core_data.n_faces = mesh.core_data.f_halfedge_arr.len();
         mesh.core_data.recount_n_vertices();
 
         let mut edge_history = HashMap::<(usize, usize), HalfedgeId>::new();

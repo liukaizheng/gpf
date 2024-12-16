@@ -1,4 +1,4 @@
-use std::alloc::Allocator;
+use std::{alloc::Allocator, ops::Index};
 
 pub struct TwoDimArr<T, A: Allocator + Copy = std::alloc::Global> {
     pub data: Vec<T, A>,
@@ -32,6 +32,17 @@ impl<T: Copy, A: Allocator + Copy> TwoDimArr<T, A> {
     pub fn push<Arr: IntoIterator<Item = T>>(&mut self, arr: Arr) {
         self.data.extend(arr);
         self.separators.push(self.data.len());
+    }
+}
+
+impl<T, A: Allocator + Copy> Index<usize> for TwoDimArr<T, A> {
+    type Output = [T];
+
+    #[inline]
+    fn index(&self, idx: usize) -> &Self::Output {
+        let start = self.separators[idx];
+        let end = self.separators[idx + 1];
+        &self.data[start..end]
     }
 }
 

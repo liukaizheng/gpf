@@ -1,7 +1,10 @@
 mod adaptive_subdivide;
 mod ar_in_tet;
+mod brep;
 mod extract_cells;
 mod tet_set;
+
+pub use brep::BrepModel;
 
 use std::collections::HashMap;
 
@@ -16,17 +19,6 @@ use crate::{
     mesh::{square_edge_length, EdgeId, ElementId, FaceId, Mesh, SurfaceMesh},
     INVALID_IND,
 };
-
-pub struct SimpleBody {
-    surfaces: Vec<Surf>,
-    bbox: BBox,
-}
-
-impl SimpleBody {
-    pub fn new(surfaces: Vec<Surf>, bbox: BBox) -> SimpleBody {
-        SimpleBody { surfaces, bbox }
-    }
-}
 
 pub enum BooleanType {
     Union,
@@ -43,21 +35,20 @@ struct IsoSurfMesh {
     face_parents: Vec<usize>,
 }
 
-pub fn boolean3d(first: &SimpleBody, second: &SimpleBody, t: BooleanType, eps: f64) {
-    let surfaces = first
-        .surfaces
-        .iter()
-        .chain(second.surfaces.iter())
-        .collect_vec();
+pub fn boolean3d(
+    first: BrepModel,
+    second: BrepModel,
+    t: BooleanType,
+    surfaces: Vec<Surf>,
+    eps: f64,
+) {
     let mut bbox = BBox::default();
     bbox.merge(&first.bbox);
     bbox.merge(&second.bbox);
     bbox.scale(1.1);
-    // bbox.min = [-0.5, -0.5, -0.5];
-    // bbox.max = [2.0, 2.0, 2.0];
 
     let mut tets = init_mesh(bbox);
-    let vals = adaptive_subdivide(&mut tets, surfaces, eps * eps);
+    let vals = adaptive_subdivide(&mut tets, &surfaces, eps * eps);
 
     let iso_surf_mesh = extract_iso_surface(&tets, vals);
     write_obj("123.obj", &iso_surf_mesh.points, &iso_surf_mesh.mesh);

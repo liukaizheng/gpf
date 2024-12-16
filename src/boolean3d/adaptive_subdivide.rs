@@ -46,19 +46,19 @@ impl Ord for EdgeAndLen {
 }
 
 struct SubdivisionData<'a> {
-    surfaces: Vec<&'a Surf>,
+    surfaces: &'a [Surf],
     vals_and_grads: Vec<Vec<[f64; 4]>>,
     queue: BinaryHeap<EdgeAndLen>,
 }
 
 pub(super) fn adaptive_subdivide(
     tets: &mut TetSet,
-    surfaces: Vec<&Surf>,
+    surfaces: &[Surf],
     sq_eps: f64,
 ) -> Vec<Vec<f64>> {
     let mut vals_and_grads = vec![Vec::with_capacity(tets.mesh.n_vertices()); surfaces.len()];
     for p in tets.points.chunks(3) {
-        for (i, &surf) in surfaces.iter().enumerate() {
+        for (i, surf) in surfaces.iter().enumerate() {
             vals_and_grads[i].push(surf.eval(p));
         }
     }

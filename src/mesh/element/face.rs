@@ -208,8 +208,10 @@ impl<'a, M: Mesh> DoubleEndedIterator for FVIter<'a, M> {
         if self.is_end() {
             return None;
         } else {
+            let ret = Some(Vertex::new(self.mesh, self.mesh.he_to(self.he)));
             self.he = self.mesh.he_prev(self.he);
-            return Some(Vertex::new(self.mesh, self.mesh.he_to(self.he)));
+            self.just_start = false;
+            ret
         }
     }
 }
