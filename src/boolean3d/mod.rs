@@ -3,6 +3,7 @@ mod ar_in_tet;
 mod brep;
 mod extract_cells;
 mod tet_set;
+mod resolve_boolean;
 
 pub use brep::BrepModel;
 
@@ -54,7 +55,8 @@ pub fn boolean3d(
     write_obj("123.obj", &iso_surf_mesh.points, &iso_surf_mesh.mesh);
     println!("mesh n tets: {}", tets.tet_faces.len());
 
-    extract_cells(iso_surf_mesh, &tets);
+    let model_data = extract_cells(iso_surf_mesh, &tets, surfaces.len());
+    model_data.resolve();
 }
 
 fn init_mesh(bbox: BBox) -> TetSet {

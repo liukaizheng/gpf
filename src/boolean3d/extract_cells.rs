@@ -13,11 +13,13 @@ use crate::{
     is_positive,
     mesh::{EdgeId, ElementId, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     oriented_index, point, strip_orientation, twin_index,
-    utils::DisjointSet,
+    utils::{DisjointSet, TwoDimArr},
     INVALID_IND,
 };
 
-use super::{ar_in_tet::IsoVert, tet_set::TetSet, Arrangement, IsoSurfMesh};
+use super::{
+    ar_in_tet::IsoVert, resolve_boolean::ModelData, tet_set::TetSet, Arrangement, IsoSurfMesh,
+};
 
 fn write_chains(name: &str, iso_surf_mesh: &IsoSurfMesh, is_chain_edge: &[bool]) {
     let file = std::fs::File::create(name).unwrap();
@@ -36,8 +38,13 @@ fn write_chains(name: &str, iso_surf_mesh: &IsoSurfMesh, is_chain_edge: &[bool])
     }
 }
 
-fn write_shell(name: &str, iso_surf_mesh: &IsoSurfMesh, shell: &[usize], patches: &[Vec<FaceId>]) {
-    let mesh = &iso_surf_mesh.mesh;
+fn write_shell(
+    name: &str,
+    mesh: &SurfaceMesh,
+    all_points: &[f64],
+    shell: &[usize],
+    patches: &[Vec<FaceId>],
+) {
     let mut vertex_map = vec![INVALID_IND; mesh.n_vertices_capacity()];
 
     let mut points = Vec::new();
@@ -48,7 +55,7 @@ fn write_shell(name: &str, iso_surf_mesh: &IsoSurfMesh, shell: &[usize], patches
                 let vid = *v;
                 if vertex_map[vid] == INVALID_IND {
                     vertex_map[vid] = points.len() / 3;
-                    points.extend_from_slice(point(&iso_surf_mesh.points, *vid));
+                    points.extend_from_slice(point(&all_points, *vid));
                 }
             }
         }
@@ -78,7 +85,11 @@ fn write_shell(name: &str, iso_surf_mesh: &IsoSurfMesh, shell: &[usize], patches
     }
 }
 
-pub(super) fn extract_cells(iso_surf_mesh: IsoSurfMesh, tets: &TetSet) {
+pub(super) fn extract_cells(
+    iso_surf_mesh: IsoSurfMesh,
+    tets: &TetSet,
+    n_surfaces: usize,
+) -> ModelData {
     let (chains, is_chain_edge) =
         identify_chain_edge(&iso_surf_mesh.mesh, &iso_surf_mesh.face_parents);
     println!("the n chains is {}", chains.len());
@@ -87,7 +98,7 @@ pub(super) fn extract_cells(iso_surf_mesh: IsoSurfMesh, tets: &TetSet) {
     let (patches, face_patch_arr) = extract_patches(&iso_surf_mesh.mesh, &is_chain_edge);
     println!("the n patches is {}", patches.len());
 
-    let (mut cells, patch_cell_arr) = extract_cells_impl(
+    let (cells, patch_cell_arr) = extract_cells_impl(
         &iso_surf_mesh,
         tets,
         &chains,
@@ -95,7 +106,7 @@ pub(super) fn extract_cells(iso_surf_mesh: IsoSurfMesh, tets: &TetSet) {
         &face_patch_arr,
         patches.len() << 1,
     );
-    remove_unused_patches(&iso_surf_mesh, &mut cells, &patch_cell_arr);
+    remove_unused_patches(&iso_surf_mesh, cells, &patches, &patch_cell_arr, n_surfaces)
 }
 
 fn identify_chain_edge(
@@ -280,14 +291,15 @@ fn extract_cells_impl(
         outer_patch,
     );
     println!("the n cells is {}", cells.len());
-    for (shell_id, shell) in cells.iter().enumerate() {
-        write_shell(
-            &format!("data/mesh/shell_{}.obj", shell_id),
-            iso_surf_mesh,
-            shell,
-            patches,
-        );
-    }
+    // for (shell_id, shell) in cells.iter().enumerate() {
+    //     write_shell(
+    //         &format!("data/mesh/shell_{}.obj", shell_id),
+    //         &iso_surf_mesh.mesh,
+    //         &iso_surf_mesh.points,
+    //         shell,
+    //         patches,
+    //     );
+    // }
 
     (cells, patch_cell_arr)
 }
@@ -1232,9 +1244,19 @@ fn extract_cells_by_removing_boundary_patches(
 
 fn remove_unused_patches(
     iso_surf_mesh: &IsoSurfMesh,
-    cells: &mut [Vec<usize>],
+    mut cells: Vec<Vec<usize>>,
+    old_patches: &[Vec<FaceId>],
     old_patch_cell_arr: &[usize],
-) {
+    n_surfaces: usize,
+) -> ModelData {
+    let mut points = Vec::new();
+    let mut faces = TwoDimArr::<usize>::new();
+    let mut patches = Vec::new();
+    let mut face_patch_arr = Vec::new();
+    let mut patch_surface_arr = Vec::new();
+
+    let mut point_indices = vec![INVALID_IND; iso_surf_mesh.mesh.n_vertices()];
+    let mut face_indices = vec![INVALID_IND; iso_surf_mesh.mesh.n_faces()];
     let mut patch_indices = vec![INVALID_IND; old_patch_cell_arr.len() >> 1];
     for (new_patch_id, old_patch_id) in old_patch_cell_arr
         .chunks(2)
@@ -1249,6 +1271,64 @@ fn remove_unused_patches(
         .enumerate()
     {
         patch_indices[old_patch_id] = new_patch_id;
+        patch_surface_arr.push(iso_surf_mesh.face_parents[old_patches[old_patch_id][0]]);
+
+        let mut patch = Vec::with_capacity(old_patches[old_patch_id].len());
+        for &old_fid in &old_patches[old_patch_id] {
+            let new_fid = faces.len();
+            face_indices[old_fid] = new_fid;
+            patch.push(FaceId(new_fid));
+            faces.push(iso_surf_mesh.mesh.face(old_fid).vertices().map(|v| {
+                let vid = *v;
+                if point_indices[vid] == INVALID_IND {
+                    point_indices[vid] = points.len() / 3;
+                    points.extend_from_slice(point(&iso_surf_mesh.points, vid.0));
+                }
+                point_indices[vid]
+            }));
+            face_patch_arr.push(new_patch_id);
+        }
+        patches.push(patch);
     }
-    println!("the n patches is {}", patch_indices.len());
+
+    let mut surface_patches = vec![Vec::new(); n_surfaces];
+    for (patch_id, &surface_id) in patch_surface_arr.iter().enumerate() {
+        surface_patches[surface_id].push(patch_id);
+    }
+
+    let mesh = SurfaceMesh::new(faces.iter(), std::alloc::Global);
+    for cell in cells.iter_mut() {
+        for oriented_patch_id in cell.iter_mut() {
+            let patch_id = strip_orientation(*oriented_patch_id);
+            debug_assert!(patch_indices[patch_id] != INVALID_IND);
+            *oriented_patch_id =
+                oriented_index(patch_indices[patch_id], !is_positive(*oriented_patch_id));
+        }
+    }
+    let mut patch_cell_arr = vec![INVALID_IND; patches.len() << 1];
+    for (cid, cell) in cells.iter().enumerate() {
+        for &patch_id in cell {
+            patch_cell_arr[patch_id] = cid;
+        }
+    }
+    for (shell_id, shell) in cells.iter().enumerate() {
+        write_shell(
+            &format!("data/mesh/shell_{}.obj", shell_id),
+            &mesh,
+            &points,
+            shell,
+            &patches,
+        );
+    }
+
+    ModelData {
+        points,
+        face_patch_arr,
+        patch_surface_arr,
+        surface_patches,
+        patches,
+        cells,
+        patch_cell_arr,
+        mesh,
+    }
 }

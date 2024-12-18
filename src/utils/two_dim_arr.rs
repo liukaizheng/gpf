@@ -5,6 +5,13 @@ pub struct TwoDimArr<T, A: Allocator + Copy = std::alloc::Global> {
     pub separators: Vec<usize, A>,
 }
 
+impl<T> TwoDimArr<T, std::alloc::Global> {
+    #[inline]
+    pub fn new() -> Self {
+        Self::new_in(std::alloc::Global)
+    }
+}
+
 impl<T, A: Allocator + Copy> TwoDimArr<T, A> {
     #[inline]
     pub fn new_in(alloc: A) -> Self {
