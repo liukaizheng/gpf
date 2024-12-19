@@ -2,8 +2,9 @@ use std::alloc::Allocator;
 
 use crate::{
     geometry::BBox,
-    mesh::{Mesh, SurfaceMesh},
-    utils::TwoDimArr,
+    mesh::{Mesh, SurfaceMesh, VertexId},
+    point_3, strip_orientation,
+    utils::{Bitmask, TwoDimArr},
     INVALID_IND,
 };
 
@@ -13,7 +14,7 @@ type LoopId = crate::mesh::FaceId;
 pub struct FaceId(usize);
 
 pub struct BrepModel<A: Allocator + Copy = std::alloc::Global> {
-    mesh: SurfaceMesh<A>,
+    pub(crate) mesh: SurfaceMesh<A>,
     loop_faces: Vec<FaceId, A>,
     face_loops: TwoDimArr<LoopId, A>,
     points: Vec<f64, A>,
@@ -85,5 +86,23 @@ impl<A: Allocator + Copy> BrepModel<A> {
             bbox,
             face_surfaces,
         }
+    }
+
+    pub fn v_mask(&self, vid: VertexId, n_surfaces: usize) -> Bitmask {
+        let mut mask = Bitmask::new(n_surfaces);
+        for l in self
+            .mesh
+            .vertex(vid)
+            .incoming_halfedges()
+            .map(|he| he.face())
+        {
+            mask.set(strip_orientation(self.face_surfaces[self.loop_faces[*l].0]));
+        }
+        mask
+    }
+
+    #[inline]
+    pub fn v_point(&self, vid: VertexId) -> &[f64] {
+        point_3(&self.points, vid.0)
     }
 }

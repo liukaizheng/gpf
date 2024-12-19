@@ -2,8 +2,8 @@ mod adaptive_subdivide;
 mod ar_in_tet;
 mod brep;
 mod extract_cells;
-mod tet_set;
 mod resolve_boolean;
+mod tet_set;
 
 pub use brep::BrepModel;
 
@@ -21,12 +21,6 @@ use crate::{
     INVALID_IND,
 };
 
-pub enum BooleanType {
-    Union,
-    Intersection,
-    Difference,
-}
-
 struct IsoSurfMesh {
     arrangements: Vec<Option<Arrangement>>,
     mesh: SurfaceMesh,
@@ -36,16 +30,14 @@ struct IsoSurfMesh {
     face_parents: Vec<usize>,
 }
 
-pub fn boolean3d(
-    first: BrepModel,
-    second: BrepModel,
-    t: BooleanType,
-    surfaces: Vec<Surf>,
-    eps: f64,
-) {
+pub fn boolean3d<F>(models: Vec<BrepModel>, surfaces: Vec<Surf>, bool_func: F, eps: f64)
+where
+    F: Fn(&[bool]) -> bool,
+{
     let mut bbox = BBox::default();
-    bbox.merge(&first.bbox);
-    bbox.merge(&second.bbox);
+    for model in &models {
+        bbox.merge(&model.bbox);
+    }
     bbox.scale(1.1);
 
     let mut tets = init_mesh(bbox);
@@ -56,7 +48,7 @@ pub fn boolean3d(
     println!("mesh n tets: {}", tets.tet_faces.len());
 
     let model_data = extract_cells(iso_surf_mesh, &tets, surfaces.len());
-    model_data.resolve();
+    model_data.resolve(models);
 }
 
 fn init_mesh(bbox: BBox) -> TetSet {

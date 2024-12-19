@@ -1,5 +1,5 @@
 use gpf::{
-    boolean3d::{boolean3d, BooleanType, BrepModel},
+    boolean3d::{boolean3d, BrepModel},
     geometry::{BBox, Cylinder, Plane, Surf},
 };
 
@@ -41,7 +41,7 @@ fn test_boolean1() {
             vec![1, 2, 4, 7, 6],
         ];
         let face_loops = vec![vec![0], vec![1], vec![2], vec![3], vec![4], vec![5]];
-        let face_surfaces = vec![4, 1, 5, 0, 2, 3];
+        let face_surfaces = vec![8, 2, 10, 0, 4, 6];
         BrepModel::new(
             loops,
             face_loops,
@@ -74,7 +74,7 @@ fn test_boolean1() {
         ];
         let face_loops = vec![vec![0], vec![1], vec![2], vec![3], vec![4], vec![5]];
 
-        let face_surfaces = vec![6, 7, 8, 9, 10, 11];
+        let face_surfaces = vec![12, 14, 16, 18, 20, 22];
         BrepModel::new(
             loops,
             face_loops,
@@ -84,6 +84,16 @@ fn test_boolean1() {
         )
     };
 
-    boolean3d(model1, model2, BooleanType::Union, surfaces, 0.001);
-
+    boolean3d(
+        vec![model1, model2],
+        surfaces,
+        |is_kept_arr| {
+            is_kept_arr
+                .iter()
+                .map(|&e| e)
+                .reduce(|res, e| (res | e))
+                .unwrap()
+        },
+        0.1,
+    );
 }

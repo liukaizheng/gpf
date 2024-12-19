@@ -1,4 +1,6 @@
-use std::ops::{Add, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Index, Not, Rem, Shl, Shr, Sub};
+use std::ops::{
+    Add, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Index, Not, Rem, Shl, Shr, Sub,
+};
 
 use tinyvec::{Array, TinyVec};
 
@@ -17,6 +19,7 @@ pub trait BitBlock:
     + BitAndAssign
     + PartialEq
     + Eq
+    + std::hash::Hash
 {
     /// How many bits it has
     fn bits() -> usize;
@@ -66,7 +69,7 @@ bit_block_impl! {
     (usize, core::mem::size_of::<usize>() * 8)
 }
 
-#[derive(Clone)]
+#[derive(Clone, Hash, PartialEq, Eq)]
 pub struct Bitmask<A: Array = [usize; 1]>
 where
     A::Item: BitBlock,
@@ -84,7 +87,6 @@ where
         let data = TinyVec::from_iter((0..n).map(|_| A::Item::zero()));
         Self { data }
     }
-
 
     #[inline]
     pub fn set(&mut self, i: usize) {
@@ -113,10 +115,9 @@ where
             .map(|(&a, &b)| (a & b).count_ones())
             .sum()
     }
-
 }
 
-impl <A: Array> Index<usize> for Bitmask<A>
+impl<A: Array> Index<usize> for Bitmask<A>
 where
     A::Item: BitBlock,
 {
@@ -133,7 +134,6 @@ where
             &true
         }
     }
-
 }
 
 #[cfg(test)]
