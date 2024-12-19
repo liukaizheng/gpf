@@ -11,13 +11,13 @@ pub use manifold_mesh::*;
 pub use mesh::*;
 pub use surface_mesh::*;
 
-use crate::point;
+use crate::point_3;
 
 #[inline]
 pub fn square_edge_length<M: Mesh>(points: &[f64], eid: EdgeId, mesh: &M) -> f64 {
     let [va, vb] = mesh.e_vertices(eid);
-    let pa = point(points, va.0);
-    let pb = point(points, vb.0);
+    let pa = point_3(points, va.0);
+    let pb = point_3(points, vb.0);
     pa.iter().zip(pb).map(|(a, b)| a - b).map(|x| x * x).sum()
 }
 

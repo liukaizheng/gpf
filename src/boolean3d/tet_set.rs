@@ -2,7 +2,7 @@ use std::alloc::Allocator;
 
 use crate::{
     mesh::{square_edge_length, EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, VertexId},
-    point, INVALID_IND,
+    point_3, INVALID_IND,
 };
 
 pub(crate) struct TetSet {
@@ -48,7 +48,7 @@ impl TetSet {
         let mut descent_links = vec![VertexId::default(); self.mesh.n_vertices()];
         for tet_verts in &self.tet_vertices {
             let min_idx = tet_verts
-                .map(|vid| point(&self.points, vid.0))
+                .map(|vid| point_3(&self.points, vid.0))
                 .into_iter()
                 .enumerate()
                 .min_by(|&(_, pa), &(_, pb)| pa.partial_cmp(&pb).unwrap())
@@ -145,8 +145,8 @@ impl TetSet {
         };
         {
             // update points
-            let pa = point(&self.points, va.0);
-            let pb = point(&self.points, vb.0);
+            let pa = point_3(&self.points, va.0);
+            let pb = point_3(&self.points, vb.0);
             self.points.extend_from_slice(&[
                 (pa[0] + pb[0]) * 0.5,
                 (pa[1] + pb[1]) * 0.5,
@@ -287,7 +287,7 @@ impl TetSet {
             {
                 for _t in [tid, new_tid] {
                     let _verts = &self.tet_vertices[_t];
-                    let _pts = _verts.map(|vid| point(&self.points, vid.0));
+                    let _pts = _verts.map(|vid| point_3(&self.points, vid.0));
                     let _ori = crate::predicates::orient3d::orient3d_eeee(
                         &_pts[0], &_pts[1], &_pts[2], &_pts[3], alloc,
                     );

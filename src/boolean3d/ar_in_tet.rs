@@ -9,7 +9,7 @@ use crate::utils::TwoDimArr;
 use crate::{
     math::interpolate,
     mesh::{clone_vec_in, EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, VertexId},
-    oriented_index, point,
+    oriented_index, point_3,
     predicates::det4,
     strip_orientation, INVALID_IND,
 };
@@ -518,7 +518,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
                     if data.point_map[vid] == INVALID_IND {
                         let pid = data.points.len() / 3;
                         data.point_map[vid] = pid;
-                        data.points.extend_from_slice(point(&tets.points, vid.0));
+                        data.points.extend_from_slice(point_3(&tets.points, vid.0));
                         data.iso_vertices.push(inter_pt.clone());
                         pid
                     } else {
@@ -555,9 +555,9 @@ impl<A: Allocator + Copy> Arrangement<A> {
                 if pid * 3 >= data.points.len() {
                     let [pa, pb] = self.vertices[idx].parents.map(|vid| {
                         if vid.0 < 4 {
-                            point(&tets.points, tets.tet_vertices[tid][vid].0)
+                            point_3(&tets.points, tets.tet_vertices[tid][vid].0)
                         } else {
-                            point(&data.points, self.vertices[vid].iso_vid.0)
+                            point_3(&data.points, self.vertices[vid].iso_vid.0)
                         }
                     });
                     let [a1, b1] = self.vertices[idx].vals[0].data.map(|x| x.abs());

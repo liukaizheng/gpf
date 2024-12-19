@@ -2,7 +2,7 @@ use std::{alloc::Allocator, collections::VecDeque};
 
 use crate::{
     mesh::{ElementId, FaceId, HalfedgeId, ManifoldMesh, Mesh, VertexId},
-    point,
+    point_3,
     predicates::{max_comp_in_tri_normal, miss_alignment, orient3d::orient3d_eeee, Orientation},
 };
 
@@ -25,14 +25,14 @@ pub fn convex_3<A: Allocator + Copy>(
     indices.extend(0..n_points);
 
     indices.sort_unstable_by(|&i, &j| {
-        let pa = point(points, i);
-        let pb = point(points, j);
+        let pa = point_3(points, i);
+        let pb = point_3(points, j);
         pa.partial_cmp(pb).unwrap()
     });
 
     indices.dedup_by(|i, j| {
-        let pa = point(points, *i);
-        let pb = point(points, *j);
+        let pa = point_3(points, *i);
+        let pb = point_3(points, *j);
         pa[0] == pb[0] && pa[1] == pb[1] && pa[2] == pb[2]
     });
 
@@ -53,16 +53,16 @@ pub fn convex_3<A: Allocator + Copy>(
         triangles
     } else {
         let axis = max_comp_in_tri_normal(
-            point(points, indices[0]),
-            point(points, indices[1]),
-            point(points, indices[colinear_len]),
+            point_3(points, indices[0]),
+            point_3(points, indices[1]),
+            point_3(points, indices[colinear_len]),
             alloc,
         );
 
         let mut points_2d = Vec::new_in(alloc);
 
         points_2d.extend(indices[..coplanar_len].into_iter().flat_map(|&idx| {
-            let p = point(points, idx);
+            let p = point_3(points, idx);
             [p[(axis + 1) % 3], p[(axis + 2) % 3]]
         }));
         let mut triangles = Vec::new_in(alloc);
@@ -96,10 +96,10 @@ pub fn convex_3<A: Allocator + Copy>(
 }
 
 fn hull_1<A: Allocator + Copy>(points: &[f64], indices: &[usize], alloc: A) -> usize {
-    let pa = point(points, indices[0]);
-    let pb = point(points, indices[1]);
+    let pa = point_3(points, indices[0]);
+    let pb = point_3(points, indices[1]);
     for i in 2..indices.len() {
-        let pc = point(points, indices[i]);
+        let pc = point_3(points, indices[i]);
         if miss_alignment(pa, pb, pc, alloc) {
             return i;
         }
@@ -108,11 +108,11 @@ fn hull_1<A: Allocator + Copy>(points: &[f64], indices: &[usize], alloc: A) -> u
 }
 
 fn hull_2<A: Allocator + Copy>(points: &[f64], indices: &[usize], start: usize, alloc: A) -> usize {
-    let pa = point(points, indices[0]);
-    let pb = point(points, indices[1]);
-    let pc = point(points, indices[start]);
+    let pa = point_3(points, indices[0]);
+    let pb = point_3(points, indices[1]);
+    let pc = point_3(points, indices[start]);
     for i in (start + 1)..indices.len() {
-        let pd = point(points, indices[i]);
+        let pd = point_3(points, indices[i]);
         if orient3d_eeee(pa, pb, pc, pd, alloc) != Orientation::Zero {
             return i;
         }
@@ -128,10 +128,10 @@ fn hull_3<A: Allocator + Copy>(
     alloc: A,
 ) -> ManifoldMesh<A> {
     let is_neg = {
-        let pa = point(points, triangles[0]);
-        let pb = point(points, triangles[1]);
-        let pc = point(points, triangles[2]);
-        let pd = point(points, indices[start]);
+        let pa = point_3(points, triangles[0]);
+        let pb = point_3(points, triangles[1]);
+        let pc = point_3(points, triangles[2]);
+        let pd = point_3(points, indices[start]);
         orient3d_eeee(pa, pb, pc, pd, alloc) == Orientation::Positive
     };
 
@@ -161,16 +161,16 @@ fn hull_3<A: Allocator + Copy>(
     let mut kept_faces = Vec::new_in(alloc);
     let mut prev_vid = indices[start].into();
     for &pid in &indices[(start + 1)..] {
-        let pd = point(points, pid);
+        let pd = point_3(points, pid);
         let vid = pid.into();
         let visible = |fid: FaceId| {
             let he = mesh.face(fid).halfedge();
 
-            let pa = point(points, he.to().0);
+            let pa = point_3(points, he.to().0);
             let he = he.next();
-            let pb = point(points, he.to().0);
+            let pb = point_3(points, he.to().0);
             let he = he.next();
-            let pc = point(points, he.to().0);
+            let pc = point_3(points, he.to().0);
             orient3d_eeee(pa, pb, pc, pd, alloc) == Orientation::Positive
         };
         visible_faces.clear();

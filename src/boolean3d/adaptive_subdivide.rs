@@ -10,7 +10,7 @@ use crate::{
     geometry::{Surf, Surface},
     math::{cross, cross_in, dot, square_norm, sub_short},
     mesh::{EdgeId, Mesh},
-    point, point_2,
+    point_3, point_2,
     triangle::{convex_2, convex_3},
 };
 
@@ -93,7 +93,7 @@ fn adaptive_subdivide_impl(tets: &mut TetSet, data: &mut SubdivisionData, sq_eps
         }
         split_bump.reset();
         let (new_vert, tet_pairs) = tets.split_edge(eid, &split_bump);
-        let p = point(&tets.points, new_vert.0);
+        let p = point_3(&tets.points, new_vert.0);
 
         for (sid, surf) in data.surfaces.iter().enumerate() {
             data.vals_and_grads[sid].push(surf.eval(p));
@@ -165,7 +165,7 @@ fn subdividable<A: Allocator + Copy>(
     let mut active = Vec::with_capacity_in(surfs.len(), alloc);
     active.resize(surfs.len(), true);
     let verts = tets.tet_vertices[tid];
-    let tet_points = verts.map(|vid| point(&tets.points, vid.0));
+    let tet_points = verts.map(|vid| point_3(&tets.points, vid.0));
 
     let trans_vmat = [
         sub_short::<3, _>(tet_points[1], tet_points[0]),
@@ -364,7 +364,7 @@ fn contain_zero_3<A: Allocator + Copy>(mut points: Vec<f64, A>, alloc: A) -> boo
     match convex_3(&points, true, alloc) {
         crate::triangle::Convex3Result::Dim3(hull) => {
             for vid in hull {
-                let p = point(&points, vid);
+                let p = point_3(&points, vid);
                 if vid == zero_vid || (p[0] == 0.0 && p[1] == 0.0 && p[2] == 0.0) {
                     return false;
                 }

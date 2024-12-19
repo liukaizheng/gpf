@@ -12,7 +12,7 @@ use crate::{
     boolean3d::tet_set::EDGE_FACE_INDICES,
     is_positive,
     mesh::{EdgeId, ElementId, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
-    oriented_index, point, strip_orientation, twin_index,
+    oriented_index, point_3, strip_orientation, twin_index,
     utils::{DisjointSet, TwoDimArr},
     INVALID_IND,
 };
@@ -55,7 +55,7 @@ pub(crate) fn write_shell(
                 let vid = *v;
                 if vertex_map[vid] == INVALID_IND {
                     vertex_map[vid] = points.len() / 3;
-                    points.extend_from_slice(point(&all_points, *vid));
+                    points.extend_from_slice(point_3(&all_points, *vid));
                 }
             }
         }
@@ -743,7 +743,7 @@ fn find_component_extremes(
                                 IsoElem::V => {}
                                 IsoElem::None | IsoElem::E(_) => {
                                     tet_vert_to_iso_elem_arr[tet_vid] = IsoElem::V;
-                                    let pt = point(&tets.points, tet_vid.0);
+                                    let pt = point_3(&tets.points, tet_vid.0);
                                     if pt.partial_cmp(extreme_pt).unwrap().is_lt() {
                                         extreme_pt = pt;
                                         extreme_vid = vid;
@@ -752,8 +752,8 @@ fn find_component_extremes(
                             },
                             IsoVert::ES((tet_eid, _)) => {
                                 let [va, vb] = tets.mesh.e_vertices(tet_eid);
-                                let p1 = point(&tets.points, va.0);
-                                let p2 = point(&tets.points, vb.0);
+                                let p1 = point_3(&tets.points, va.0);
+                                let p2 = point_3(&tets.points, vb.0);
                                 let (min_pt, max_vid) = if p1.partial_cmp(&p2).unwrap().is_lt() {
                                     (p1, vb)
                                 } else {
@@ -816,8 +816,8 @@ fn get_outer_patch(
                 }
                 IsoVert::ES((tet_eid, _)) => {
                     let [va, vb] = tets.mesh.e_vertices(tet_eid);
-                    let p1 = point(&tets.points, va.0);
-                    let p2 = point(&tets.points, vb.0);
+                    let p1 = point_3(&tets.points, va.0);
+                    let p2 = point_3(&tets.points, vb.0);
                     let [min_vid, max_vid] = if p1.partial_cmp(&p2).unwrap().is_lt() {
                         [va, vb]
                     } else {
@@ -1309,7 +1309,7 @@ fn remove_unused_patches(
                 let vid = *v;
                 if point_indices[vid] == INVALID_IND {
                     point_indices[vid] = points.len() / 3;
-                    points.extend_from_slice(point(&iso_surf_mesh.points, vid.0));
+                    points.extend_from_slice(point_3(&iso_surf_mesh.points, vid.0));
                 }
                 point_indices[vid]
             }));

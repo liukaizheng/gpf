@@ -1,7 +1,7 @@
 use hashbrown::HashMap;
 use tinyvec::TinyVec;
 
-use crate::{boolean3d::{extract_cells::write_chains, write_obj}, mesh::{EdgeId, FaceId, Mesh, SurfaceMesh, VertexId}};
+use crate::{boolean3d::{extract_cells::write_chains, write_obj}, mesh::{EdgeId, FaceId, Mesh, SurfaceMesh, VertexId}, utils::Bitmask};
 
 use super::extract_cells::identify_chain_edge;
 
@@ -28,5 +28,13 @@ impl ModelData {
         println!("the number of non_manifold_vertices: {:?}", non_manifold_vertices.len());
         println!("the number of chains: {:?}", chains.len());
         write_chains("chain.obj", &self.points,&self.mesh, &is_chain_edge);
+
+        let non_manifold_vert_masks = non_manifold_vertices.iter().map(|&vid| {
+            let mut mask = Bitmask::<[usize; 1]>::new(self.surface_patches.len());
+            for f in self.mesh.vertex(vid).incoming_halfedges().map(|he| he.face()) {
+                mask.set(self.face_patch_arr[*f]);
+            }
+            mask
+        }).collect::<Vec<_>>();
     }
 }

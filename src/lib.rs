@@ -21,7 +21,13 @@ pub mod utils;
 const INVALID_IND: usize = usize::MAX;
 
 #[inline(always)]
-fn point(points: &[f64], idx: usize) -> &[f64] {
+pub fn point<const N: usize>(points: &[f64], idx: usize) -> &[f64] {
+    let start = idx * N;
+    &points[start..(start + N)]
+}
+
+#[inline(always)]
+fn point_3(points: &[f64], idx: usize) -> &[f64] {
     let start = idx * 3;
     &points[start..(start + 3)]
 }
