@@ -52,7 +52,7 @@ pub fn boolean3d(
     let vals = adaptive_subdivide(&mut tets, &surfaces, eps * eps);
 
     let iso_surf_mesh = extract_iso_surface(&tets, vals);
-    write_obj("123.obj", &iso_surf_mesh.points, &iso_surf_mesh.mesh);
+    // write_obj("123.obj", &iso_surf_mesh.points, &iso_surf_mesh.mesh);
     println!("mesh n tets: {}", tets.tet_faces.len());
 
     let model_data = extract_cells(iso_surf_mesh, &tets, surfaces.len());

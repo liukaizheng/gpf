@@ -47,7 +47,7 @@ fn test_boolean1() {
             face_loops,
             face_surfaces,
             points,
-            BBox::new(0.0, 0.0, 0.0, 1.0, 1.0, 1.0),
+            BBox::new(-0.5, -0.5, -0.5, 1.0, 0.5, 0.365815),
         )
     };
 
@@ -84,5 +84,6 @@ fn test_boolean1() {
         )
     };
 
-    boolean3d(model1, model2, BooleanType::Union, surfaces, 0.1);
+    boolean3d(model1, model2, BooleanType::Union, surfaces, 0.001);
+
 }

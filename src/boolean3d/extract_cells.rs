@@ -21,24 +21,24 @@ use super::{
     ar_in_tet::IsoVert, resolve_boolean::ModelData, tet_set::TetSet, Arrangement, IsoSurfMesh,
 };
 
-fn write_chains(name: &str, iso_surf_mesh: &IsoSurfMesh, is_chain_edge: &[bool]) {
+pub(crate) fn write_chains(name: &str, points: &[f64], mesh: &SurfaceMesh, is_chain_edge: &[bool]) {
     let file = std::fs::File::create(name).unwrap();
     use std::io::Write;
-    for p in iso_surf_mesh.points.chunks(3) {
+    for p in points.chunks(3) {
         writeln!(&file, "v {} {} {}", p[0], p[1], p[2]).unwrap();
     }
 
-    for edge in iso_surf_mesh.mesh.edges() {
+    for edge in mesh.edges() {
         if is_chain_edge[*edge] {
             let he = edge.halfedge();
-            let v0 = iso_surf_mesh.mesh.he_from(*he);
-            let v1 = iso_surf_mesh.mesh.he_to(*he);
+            let v0 = mesh.he_from(*he);
+            let v1 = mesh.he_to(*he);
             writeln!(&file, "l {} {}", v0.0 + 1, v1.0 + 1).unwrap();
         }
     }
 }
 
-fn write_shell(
+pub(crate) fn write_shell(
     name: &str,
     mesh: &SurfaceMesh,
     all_points: &[f64],
@@ -90,8 +90,9 @@ pub(super) fn extract_cells(
     tets: &TetSet,
     n_surfaces: usize,
 ) -> ModelData {
-    let (chains, is_chain_edge) =
-        identify_chain_edge(&iso_surf_mesh.mesh, &iso_surf_mesh.face_parents);
+    let (_, chains, is_chain_edge) = identify_chain_edge(&iso_surf_mesh.mesh, |fa, fb| {
+        iso_surf_mesh.face_parents[fa] == iso_surf_mesh.face_parents[fb]
+    });
     println!("the n chains is {}", chains.len());
     // write_chains("chain.obj", &iso_surf_mesh, &is_chain_edge);
 
@@ -109,25 +110,29 @@ pub(super) fn extract_cells(
     remove_unused_patches(&iso_surf_mesh, cells, &patches, &patch_cell_arr, n_surfaces)
 }
 
-fn identify_chain_edge(
+pub(crate) fn identify_chain_edge<F>(
     mesh: &SurfaceMesh,
-    face_parents: &[usize],
-) -> (Vec<Vec<EdgeId>>, Vec<bool>) {
-    let mut is_chain_edge = vec![false; mesh.n_edges_capacity()];
+    face_with_same_surf: F,
+) -> (Vec<VertexId>, Vec<Vec<HalfedgeId>>, Vec<bool>)
+where
+    F: Fn(FaceId, FaceId) -> bool,
+{
     let mut vertex_edge_map = HashMap::<VertexId, TinyVec<[EdgeId; 2]>>::new();
+    let mut non_manifold_vertices = HashSet::new();
     for edge in mesh.edges() {
         let he = edge.halfedge();
         let next_he = he.sibling();
         if next_he.ne(&he) {
-            if next_he.sibling().ne(&he)
-                || face_parents[*he.face()] != face_parents[*next_he.face()]
-            {
+            if next_he.sibling().ne(&he) || !face_with_same_surf(*he.face(), *next_he.face()) {
                 let eid = *edge;
-                is_chain_edge[eid] = true;
                 for vid in mesh.he_vertices(*he) {
                     match vertex_edge_map.entry(vid) {
                         Entry::Occupied(mut entry) => {
-                            entry.get_mut().push(eid);
+                            let vert_edges = entry.get_mut();
+                            vert_edges.push(eid);
+                            if vert_edges.len() > 2 {
+                                non_manifold_vertices.insert(vid);
+                            }
                         }
                         Entry::Vacant(entry) => {
                             let mut vals = TinyVec::new();
@@ -140,44 +145,66 @@ fn identify_chain_edge(
         }
     }
 
-    let propagate_chain =
-        |mut curr_vid: VertexId, mut curr_eid: EdgeId, edge_visited: &mut [bool]| {
-            let mut chain = vec![curr_eid];
-            edge_visited[curr_eid] = true;
-            loop {
-                let [va, vb] = mesh.e_vertices(curr_eid);
-                curr_vid = if va == curr_vid { vb } else { va };
-
-                let candidate_edges = vertex_edge_map.get(&curr_vid).unwrap();
-                if candidate_edges.len() != 2 {
-                    break;
-                }
-                curr_eid = if candidate_edges[0] == curr_eid {
-                    candidate_edges[1]
-                } else {
-                    candidate_edges[0]
-                };
-                if edge_visited[curr_eid] {
-                    break;
-                }
-                chain.push(curr_eid);
-                edge_visited[curr_eid] = true;
+    let propagate_chain = |mut curr_hid: HalfedgeId, is_chain_edge: &mut [bool]| {
+        let mut chain = vec![curr_hid];
+        is_chain_edge[mesh.he_edge(curr_hid)] = true;
+        loop {
+            let vb = mesh.he_to(curr_hid);
+            let candidate_edges = vertex_edge_map.get(&vb).unwrap();
+            if candidate_edges.len() != 2 {
+                break;
             }
-            chain
-        };
-
+            let next_eid = if candidate_edges[0] == mesh.he_edge(curr_hid) {
+                candidate_edges[1]
+            } else {
+                candidate_edges[0]
+            };
+            if is_chain_edge[next_eid] {
+                break;
+            }
+            is_chain_edge[next_eid] = true;
+            curr_hid = {
+                let hid = mesh.e_halfedge(next_eid);
+                if mesh.he_to(hid) == vb {
+                    mesh.he_twin(hid)
+                } else {
+                    hid
+                }
+            };
+            debug_assert!(curr_hid.valid());
+            debug_assert!(mesh.he_from(curr_hid) == vb);
+            chain.push(curr_hid);
+        }
+        chain
+    };
     let mut chains = Vec::new();
-    let mut edge_visited = vec![false; mesh.n_edges_capacity()];
-    for (&vid, edges) in &vertex_edge_map {
-        for &eid in edges {
-            if edge_visited[eid] {
+    let mut is_chain_edge = vec![false; mesh.n_edges_capacity()];
+    for vid in &non_manifold_vertices {
+        for &eid in &vertex_edge_map[vid] {
+            if is_chain_edge[eid] {
                 continue;
             }
-            chains.push(propagate_chain(vid, eid, &mut edge_visited));
+            let start_hid = {
+                let hid = mesh.e_halfedge(eid);
+                if mesh.he_to(hid) == *vid {
+                    mesh.he_twin(hid)
+                } else {
+                    hid
+                }
+            };
+
+            if !start_hid.valid() {
+                // It doesn't matter, we will identify this chain from the other non-manifold vertex
+                continue;
+            }
+            debug_assert!(start_hid.valid());
+            debug_assert!(mesh.he_from(start_hid) == *vid);
+            chains.push(propagate_chain(start_hid, &mut is_chain_edge));
         }
     }
-    (chains, is_chain_edge)
+    (Vec::from_iter(non_manifold_vertices), chains, is_chain_edge)
 }
+
 fn identify_boundary_patches(mesh: &SurfaceMesh, face_patch_arr: &[usize]) -> Vec<bool> {
     let mut is_boundary_patch_arr = vec![false; face_patch_arr.len()];
     for e in mesh.edges() {
@@ -229,7 +256,7 @@ fn extract_patches(mesh: &SurfaceMesh, is_chain_edge: &[bool]) -> (Vec<Vec<FaceI
 fn extract_cells_impl(
     iso_surf_mesh: &IsoSurfMesh,
     tets: &TetSet,
-    chains: &[Vec<EdgeId>],
+    chains: &[Vec<HalfedgeId>],
     patches: &[Vec<FaceId>],
     face_patch_arr: &[usize],
     n_ori_patches: usize,
@@ -241,7 +268,7 @@ fn extract_cells_impl(
         order_patches_around_edge(
             iso_surf_mesh,
             tets,
-            chain[0],
+            iso_surf_mesh.mesh.he_edge(chain[0]),
             face_patch_arr,
             &mut shell_ds,
             &bump,
@@ -1311,16 +1338,15 @@ fn remove_unused_patches(
             patch_cell_arr[patch_id] = cid;
         }
     }
-    for (shell_id, shell) in cells.iter().enumerate() {
-        write_shell(
-            &format!("data/mesh/shell_{}.obj", shell_id),
-            &mesh,
-            &points,
-            shell,
-            &patches,
-        );
-    }
-
+    // for (shell_id, shell) in cells.iter().enumerate() {
+    //     write_shell(
+    //         &format!("data/mesh/shell_{}.obj", shell_id),
+    //         &mesh,
+    //         &points,
+    //         shell,
+    //         &patches,
+    //     );
+    // }
     ModelData {
         points,
         face_patch_arr,

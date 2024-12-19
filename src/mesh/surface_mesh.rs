@@ -460,7 +460,7 @@ impl<A: Allocator + Copy> Mesh for SurfaceMesh<A> {
         loop {
             let next = self.he_sibling_arr[curr];
             if next == hid {
-                return hid;
+                return HalfedgeId::default();
             }
 
             if self.he_to(curr) != self.he_to(next) {
