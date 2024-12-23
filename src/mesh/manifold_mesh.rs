@@ -179,6 +179,13 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
     }
 
     #[inline]
+    pub fn reserve_edges(&mut self, new_len: usize) {
+        let new_n_halfedges = new_len << 1;
+        self.core_data.reserve_halfedges(new_n_halfedges);
+        self.he_face_arr.reserve(new_n_halfedges);
+    }
+
+    #[inline]
     pub fn new_face(&mut self) -> FaceId {
         let fid = FaceId::from(self.core_data.f_halfedge_arr.len());
         self.core_data.f_halfedge_arr.push(HalfedgeId::default());

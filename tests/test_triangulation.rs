@@ -1,7 +1,7 @@
 #![feature(test)]
 
 use bumpalo::Bump;
-use gpf::triangle::{tetrahedralize, triangulate};
+use gpf::triangle::{tetrahedralize, triangulate, triangulate1};
 use rand::{distributions::Uniform, rngs::SmallRng, Rng, SeedableRng};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
@@ -91,4 +91,12 @@ fn test_tetrahedralize() {
     let points = Vec::from_iter(rng.sample_iter(uniform).take(n_points * 3));
     let tets = tetrahedralize(&points);
     assert!(tets.tets.len() > 0);
+}
+
+#[test]
+fn test_simple() {
+    let points = [0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0];
+    let bump = Bump::new();
+
+    triangulate1(&points, &[], &bump);
 }

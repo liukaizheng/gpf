@@ -103,4 +103,11 @@ impl<A: Allocator + Copy> MeshCoreData<A> {
             }
         }
     }
+
+    #[inline]
+    pub(crate) fn reserve_halfedges(&mut self, n_halfedges: usize) {
+        self.he_prev_arr.reserve(n_halfedges);
+        self.he_next_arr.reserve(n_halfedges);
+        self.he_vertex_arr.reserve(n_halfedges);
+    }
 }

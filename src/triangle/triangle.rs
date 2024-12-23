@@ -4,7 +4,128 @@ use std::alloc::Allocator;
 use bumpalo::Bump;
 
 use crate::math::{dot, sub_in};
-use crate::{predicates, INVALID_IND};
+use crate::mesh::{HalfedgeId, ManifoldMesh, VertexId};
+use crate::{point, predicates, INVALID_IND};
+
+struct Triangulation<'a, A: Allocator + Copy> {
+    points: &'a [f64],
+    alloc: A,
+    mesh: ManifoldMesh<A>,
+    sorted_vertices: Vec<VertexId, A>,
+}
+impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
+    fn triangulate(&mut self) {
+        let n_points = self.points.len() >> 1;
+        self.mesh.new_vertices(n_points);
+        self.mesh.reserve_edges(n_points << 1);
+    }
+
+    fn div_conq_recurse(
+        &mut self,
+        start: usize,
+        end: usize,
+        is_horizontal: bool,
+    ) -> [HalfedgeId; 2] {
+        let len = end - start;
+        match len {
+            2 => {
+                let hid = self.mesh.new_edge_by_veritces(
+                    self.sorted_vertices[start + 1],
+                    self.sorted_vertices[start],
+                );
+                [hid, hid]
+            }
+            3 => {
+                let va = self.sorted_vertices[start];
+                let vb = self.sorted_vertices[start + 1];
+                let vc = self.sorted_vertices[start + 2];
+                let area = self.counterclockwise(va, vb, vc);
+                match area.partial_cmp(&0.0).unwrap() {
+                    std::cmp::Ordering::Less => {
+                        let ha = self.mesh.new_edge_by_veritces(va, vc);
+                        let hb = self.mesh.new_edge_by_veritces(vc, vb);
+                        let hc = self.mesh.new_edge_by_veritces(vb, va);
+                        self.mesh.new_face_by_halfedges(&[ha, hb, hc]);
+                        use crate::mesh::Mesh;
+                        let twin_ha = self.mesh.he_twin(ha);
+                        [twin_ha, twin_ha]
+                    }
+                    std::cmp::Ordering::Greater => {
+                        let ha = self.mesh.new_edge_by_veritces(va, vb);
+                        let hb = self.mesh.new_edge_by_veritces(vb, vc);
+                        let hc = self.mesh.new_edge_by_veritces(vc, va);
+                        self.mesh.new_face_by_halfedges(&[ha, hb, hc]);
+                        [ha, hb]
+                    }
+                    std::cmp::Ordering::Equal => {
+                        let ha = self.mesh.new_edge_by_veritces(vc, vb);
+                        let hb = self.mesh.new_edge_by_veritces(va, vb);
+                        [hb, ha]
+                    }
+                }
+            }
+            _ => {
+                let mid = start + (len >> 1);
+                let [_, inner_left_hid] = self.div_conq_recurse(start, mid, !is_horizontal);
+                let [inner_right_hid, _] = self.div_conq_recurse(mid, end, !is_horizontal);
+                self.merge_hull(inner_left_hid, inner_right_hid, is_horizontal)
+            }
+        }
+    }
+
+    fn merge_hull(
+        &mut self,
+        mut inner_left_hid: HalfedgeId,
+        mut inner_right_hid: HalfedgeId,
+        is_horizontal: bool,
+    ) -> [HalfedgeId; 2] {
+        use crate::mesh::Mesh;
+        if !is_horizontal {
+            let [mut va, mut vb] = self.mesh.he_vertices(inner_left_hid);
+            let mut pa = point::<2>(self.points, va.0);
+            let mut pb = point::<2>(self.points, vb.0);
+            loop {
+                if pa[1] < pb[1] {
+                    inner_left_hid = self.mesh.he_prev(inner_left_hid);
+                    vb = va;
+                    pb = pa;
+                    va = self.mesh.he_from(inner_left_hid);
+                    pa = point::<2>(self.points, va.0);
+                } else {
+                    break;
+                }
+            }
+        }
+        [inner_left_hid, inner_right_hid]
+    }
+
+    fn counterclockwise(&self, va: VertexId, vb: VertexId, vc: VertexId) -> f64 {
+        predicates::orient2d(
+            point::<2>(self.points, va.0),
+            point::<2>(self.points, vb.0),
+            point::<2>(self.points, vc.0),
+            self.alloc,
+        )
+    }
+}
+
+pub fn triangulate1<A: Allocator + Copy>(points: &[f64], segments: &[usize], alloc: A) {
+    let n_points = points.len() >> 1;
+    let mut sorted_vertices = Vec::<VertexId, _>::with_capacity_in(n_points, alloc);
+    sorted_vertices.extend((0..n_points).map(|idx| VertexId(idx)));
+    sorted_vertices.sort_unstable_by(|&i, &j| {
+        point::<2>(points, i.0)
+            .partial_cmp(point::<2>(points, j.0))
+            .unwrap()
+    });
+    let mut triangulation = Triangulation {
+        points,
+        alloc,
+        mesh: ManifoldMesh::new(([] as [[usize; 0]; 0]).into_iter(), alloc),
+        sorted_vertices,
+    };
+    triangulation.triangulate();
+}
 
 pub fn triangulate<A: Allocator + Copy>(
     points: &[f64],
@@ -255,7 +376,7 @@ fn apex(triangles: &[Triangle], he: &HEdge) -> usize {
 }
 
 #[inline(always)]
-fn point(points: &[f64], idx: usize) -> &[f64] {
+fn point2(points: &[f64], idx: usize) -> &[f64] {
     &points[(idx << 1)..]
 }
 
@@ -331,7 +452,12 @@ fn counterclockwise<A: Allocator + Copy>(
     k: usize,
     bump: A,
 ) -> f64 {
-    predicates::orient2d(point(points, i), point(points, j), point(points, k), bump)
+    predicates::orient2d(
+        point2(points, i),
+        point2(points, j),
+        point2(points, k),
+        bump,
+    )
 }
 
 #[inline(always)]
@@ -344,10 +470,10 @@ fn incircle<A: Allocator + Copy>(
     bump: A,
 ) -> f64 {
     predicates::incircle(
-        point(points, a),
-        point(points, b),
-        point(points, c),
-        point(points, d),
+        point2(points, a),
+        point2(points, b),
+        point2(points, c),
+        point2(points, d),
         bump,
     )
 }
@@ -377,7 +503,7 @@ fn merge_hulls<A: Allocator + Copy>(
         // The pointers to the extreme vertices are shifted to point to the
         // topmost and bottommost vertex of each hull, rather than the
         // leftmost and rightmost vertices.
-        while point(m.points, far_left_apex)[1] < point(m.points, far_left_pt)[1] {
+        while point2(m.points, far_left_apex)[1] < point2(m.points, far_left_pt)[1] {
             next_self(far_left);
             sym_self(&mut m.triangles, far_left);
             far_left_pt = far_left_apex;
@@ -387,7 +513,7 @@ fn merge_hulls<A: Allocator + Copy>(
         let mut check_edge = HEdge::default();
         sym(&mut m.triangles, inner_left, &mut check_edge);
         let mut check_vertex = apex(&m.triangles, &mut check_edge);
-        while point(m.points, check_vertex)[1] > point(m.points, inner_left_dest)[1] {
+        while point2(m.points, check_vertex)[1] > point2(m.points, inner_left_dest)[1] {
             next(&mut check_edge, inner_left);
             inner_left_apex = inner_left_dest;
             inner_left_dest = check_vertex;
@@ -395,7 +521,7 @@ fn merge_hulls<A: Allocator + Copy>(
             check_vertex = apex(&m.triangles, &check_edge);
         }
 
-        while point(m.points, inner_right_apex)[1] < point(m.points, inner_right_org)[1] {
+        while point2(m.points, inner_right_apex)[1] < point2(m.points, inner_right_org)[1] {
             next_self(inner_right);
             sym_self(&mut m.triangles, inner_right);
             inner_right_org = inner_right_apex;
@@ -404,7 +530,7 @@ fn merge_hulls<A: Allocator + Copy>(
 
         sym(&mut m.triangles, far_right, &mut check_edge);
         check_vertex = apex(&m.triangles, &mut check_edge);
-        while point(m.points, check_vertex)[1] > point(m.points, far_right_pt)[1] {
+        while point2(m.points, check_vertex)[1] > point2(m.points, far_right_pt)[1] {
             next(&check_edge, far_right);
             far_right_pt = check_vertex;
             sym(&mut m.triangles, far_right, &mut check_edge);
@@ -511,13 +637,13 @@ fn merge_hulls<A: Allocator + Copy>(
                 // The pointers to the extremal vertices are restored to the
                 // leftmost and rightmost vertices (rather than topmost and
                 // bottommost)
-                while point(m.points, check_vertex)[0] < point(m.points, far_left_pt)[0] {
+                while point2(m.points, check_vertex)[0] < point2(m.points, far_left_pt)[0] {
                     prev(&check_edge, far_left);
                     far_left_pt = check_vertex;
                     sym(&mut m.triangles, far_left, &mut check_edge);
                     check_vertex = apex(&m.triangles, &check_edge);
                 }
-                while point(m.points, far_right_apex)[0] > point(m.points, far_right_pt)[0] {
+                while point2(m.points, far_right_apex)[0] > point2(m.points, far_right_pt)[0] {
                     prev_self(far_right);
                     sym_self(&mut m.triangles, far_right);
                     far_right_pt = far_right_apex;
