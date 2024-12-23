@@ -4,7 +4,7 @@ use std::alloc::Allocator;
 use bumpalo::Bump;
 
 use crate::math::{dot, sub_in};
-use crate::mesh::{HalfedgeId, ManifoldMesh, VertexId};
+use crate::mesh::{ElementId, HalfedgeId, ManifoldMesh, VertexId};
 use crate::{point, predicates, INVALID_IND};
 
 struct Triangulation<'a, A: Allocator + Copy> {
@@ -86,8 +86,9 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
             self.rotate(&mut inner_right_hid, |pay, pby| pay < pby);
         }
         // find bottommost halfedge
-        let [mut lt, mut lb] = self.mesh.he_vertices(inner_left_hid);
-        let [mut rb, mut rt] = self.mesh.he_vertices(inner_right_hid);
+        {
+            let [mut lt, mut lb] = self.mesh.he_vertices(inner_left_hid);
+            let [mut rb, mut rt] = self.mesh.he_vertices(inner_right_hid);
             loop {
                 let mut stop = true;
                 if self.counterclockwise(lt, lb, rt) > 0.0 {
@@ -107,8 +108,14 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
                     break;
                 }
             }
+            inner_left_hid = self.mesh.he_prev(inner_left_hid);
+            inner_right_hid = self.mesh.he_next(inner_right_hid);
+        }
+
+        let [mut lt, mut lb] = self.mesh.he_vertices(inner_left_hid);
+        let [mut rb, mut rt] = self.mesh.he_vertices(inner_right_hid);
         let bottom_hid = self.mesh.new_edge_by_veritces(rt, lt);
-        let top_hid = self.mesh.he_twin(bottom_hid);
+        let mut top_hid = self.mesh.he_twin(bottom_hid);
 
         loop {
             let left_finished = self.counterclockwise(lt, lb, rb) <= 0.0;
@@ -118,21 +125,56 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
             }
 
             if !left_finished {
-                let mut apex = {
-                    let twin_hid = self.mesh.he_twin(inner_left_hid);
-                    if self.mesh.he_is_boundary(twin_hid){
-                        VertexId::default()
-                    } else {
-                        self.mesh.he_to_to(twin_hid)
-                    }
-                };
+                let mut curr_hid = self.mesh.he_twin(inner_left_hid);
 
-                let mut delaunay_test = self.incircle(lb, rb, lt, apex) > 0.0;
                 loop {
-                    if !delaunay_test {
+                    if self.mesh.he_is_boundary(curr_hid) {
                         break;
                     }
+                    let apex = self.mesh.he_to_to(curr_hid);
+                    if self.incircle(lb, rb, lt, apex) > 0.0 {
+                        break;
+                    }
+                    self.mesh.remove_face(self.mesh.he_face(curr_hid));
+                    curr_hid = self.mesh.he_twin(self.mesh.v_halfedge(apex));
+                    lt = apex;
                 }
+                inner_left_hid = self.mesh.he_twin(curr_hid);
+            }
+
+            if !right_finished {
+                let mut curr_hid = self.mesh.he_twin(inner_right_hid);
+                loop {
+                    if self.mesh.he_is_boundary(curr_hid) {
+                        break;
+                    }
+                    let apex = self.mesh.he_to_to(curr_hid);
+                    if self.incircle(lb, rb, rt, apex) > 0.0 {
+                        break;
+                    }
+                    self.mesh.remove_face(self.mesh.he_face(curr_hid));
+                    curr_hid = self.mesh.he_twin(self.mesh.v_halfedge(rb));
+                    rt = apex;
+                }
+                inner_right_hid = self.mesh.he_twin(curr_hid);
+            }
+
+            if left_finished || (!right_finished && self.incircle(lt, lb, rb, rt) > 0.0) {
+                let new_hid = self.mesh.new_edge_by_veritces(rt, lb);
+                self.mesh
+                    .new_face_by_halfedges(&[top_hid, inner_right_hid, new_hid]);
+                top_hid = self.mesh.he_twin(new_hid);
+                inner_right_hid = self.mesh.he_next(top_hid);
+                rb = rt;
+                rt = self.mesh.he_to(inner_right_hid);
+            } else {
+                let new_hid = self.mesh.new_edge_by_veritces(rb, lt);
+                self.mesh
+                    .new_face_by_halfedges(&[top_hid, new_hid, inner_left_hid]);
+                top_hid = self.mesh.he_twin(new_hid);
+                inner_left_hid = self.mesh.he_prev(top_hid);
+                lb = lt;
+                lt = self.mesh.he_from(inner_left_hid);
             }
         }
 

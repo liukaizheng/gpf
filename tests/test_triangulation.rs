@@ -95,8 +95,14 @@ fn test_tetrahedralize() {
 
 #[test]
 fn test_simple() {
-    let points = [0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0];
-    let bump = Bump::new();
+    // let points = [0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0];
 
-    triangulate1(&points, &[], &bump);
+
+    let bump = Bump::new();
+    let rng = SmallRng::seed_from_u64(5489);
+    let uniform = Uniform::new_inclusive(-1.0, 1.0);
+    let n_points = 1_00;
+    let points = Vec::from_iter(rng.sample_iter(uniform).take(n_points * 3));
+
+    triangulate(&points, &[], &bump);
 }

@@ -304,8 +304,14 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
         let fid = self.he_face(hid);
         let twin_fid = self.he_face(twin_hid);
 
+        let bottom_vid = self.he_to(bl_hid);
+        let top_vid = self.he_to(tr_hid);
+
         self.he_face_arr[tr_hid] = fid;
         self.he_face_arr[bl_hid] = twin_fid;
+
+        self.core_data.set_he_vertex(hid, bottom_vid);
+        self.core_data.set_he_vertex(twin_hid, top_vid);
 
         self.core_data.connect_halfedges(hid, br_hid);
         self.core_data.connect_halfedges(br_hid, tr_hid);
