@@ -18,6 +18,7 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
         let n_points = self.points.len() >> 1;
         self.mesh.new_vertices(n_points);
         self.mesh.reserve_edges(n_points << 1);
+        self.div_conq_recurse(0, n_points, true);
     }
 
     fn div_conq_recurse(
@@ -81,29 +82,97 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
     ) -> [HalfedgeId; 2] {
         use crate::mesh::Mesh;
         if !is_horizontal {
-            let [mut va, mut vb] = self.mesh.he_vertices(inner_left_hid);
-            let mut pa = point::<2>(self.points, va.0);
-            let mut pb = point::<2>(self.points, vb.0);
+            self.rotate(&mut inner_left_hid, |pay, pby| pay > pby);
+            self.rotate(&mut inner_right_hid, |pay, pby| pay < pby);
+        }
+        // find bottommost halfedge
+        let [mut lt, mut lb] = self.mesh.he_vertices(inner_left_hid);
+        let [mut rb, mut rt] = self.mesh.he_vertices(inner_right_hid);
             loop {
-                if pa[1] < pb[1] {
-                    inner_left_hid = self.mesh.he_prev(inner_left_hid);
-                    vb = va;
-                    pb = pa;
-                    va = self.mesh.he_from(inner_left_hid);
-                    pa = point::<2>(self.points, va.0);
-                } else {
+                let mut stop = true;
+                if self.counterclockwise(lt, lb, rt) > 0.0 {
+                    stop = false;
+                    inner_left_hid = self.mesh.he_next(inner_left_hid);
+                    lt = lb;
+                    lb = self.mesh.he_to(inner_left_hid);
+                }
+
+                if self.counterclockwise(rb, rt, lt) > 0.0 {
+                    stop = false;
+                    inner_right_hid = self.mesh.he_prev(inner_right_hid);
+                    rt = rb;
+                    rb = self.mesh.he_from(inner_right_hid);
+                }
+                if stop {
                     break;
                 }
             }
+        let bottom_hid = self.mesh.new_edge_by_veritces(rt, lt);
+        let top_hid = self.mesh.he_twin(bottom_hid);
+
+        loop {
+            let left_finished = self.counterclockwise(lt, lb, rb) <= 0.0;
+            let right_finished = self.counterclockwise(rb, rt, lt) <= 0.0;
+            if left_finished && right_finished {
+                break;
+            }
+
+            if !left_finished {
+                let mut apex = {
+                    let twin_hid = self.mesh.he_twin(inner_left_hid);
+                    if self.mesh.he_is_boundary(twin_hid){
+                        VertexId::default()
+                    } else {
+                        self.mesh.he_to_to(twin_hid)
+                    }
+                };
+
+                let mut delaunay_test = self.incircle(lb, rb, lt, apex) > 0.0;
+                loop {
+                    if !delaunay_test {
+                        break;
+                    }
+                }
+            }
         }
+
         [inner_left_hid, inner_right_hid]
     }
 
+    fn rotate(&self, hid: &mut HalfedgeId, continue_fn: impl Fn(f64, f64) -> bool) {
+        use crate::mesh::Mesh;
+        let [mut va, vb] = self.mesh.he_vertices(*hid);
+        let mut pa = point::<2>(self.points, va.0);
+        let mut pb = point::<2>(self.points, vb.0);
+        loop {
+            if continue_fn(pa[1], pb[1]) {
+                *hid = self.mesh.he_prev(*hid);
+                pb = pa;
+                va = self.mesh.he_from(*hid);
+                pa = point::<2>(self.points, va.0);
+            } else {
+                break;
+            }
+        }
+    }
+
+    #[inline]
     fn counterclockwise(&self, va: VertexId, vb: VertexId, vc: VertexId) -> f64 {
         predicates::orient2d(
             point::<2>(self.points, va.0),
             point::<2>(self.points, vb.0),
             point::<2>(self.points, vc.0),
+            self.alloc,
+        )
+    }
+
+    #[inline]
+    fn incircle(&self, va: VertexId, vb: VertexId, vc: VertexId, vd: VertexId) -> f64 {
+        predicates::incircle(
+            point::<2>(self.points, va.0),
+            point::<2>(self.points, vb.0),
+            point::<2>(self.points, vc.0),
+            point::<2>(self.points, vd.0),
             self.alloc,
         )
     }

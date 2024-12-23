@@ -82,6 +82,11 @@ impl<A: Allocator + Copy> MeshCoreData<A> {
     }
 
     #[inline]
+    pub(crate) fn set_f_halfedge(&mut self, hid: HalfedgeId, fid: FaceId) {
+        self.f_halfedge_arr[fid] = hid;
+    }
+
+    #[inline]
     pub(crate) fn set_f_hafledge(&mut self, fid: FaceId, hid: HalfedgeId) {
         self.f_halfedge_arr[fid] = hid;
     }

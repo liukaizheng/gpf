@@ -292,6 +292,32 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
         self.core_data.f_halfedge_arr[fid] = HalfedgeId::default();
         self.core_data.n_faces -= 1;
     }
+
+    pub fn flip(&mut self, hid: HalfedgeId) {
+        let bl_hid = self.he_next(hid);
+        let br_hid = self.he_next(bl_hid);
+
+        let twin_hid = self.he_twin(hid);
+        let tr_hid = self.he_next(twin_hid);
+        let tl_hid = self.he_next(tr_hid);
+
+        let fid = self.he_face(hid);
+        let twin_fid = self.he_face(twin_hid);
+
+        self.he_face_arr[tr_hid] = fid;
+        self.he_face_arr[bl_hid] = twin_fid;
+
+        self.core_data.connect_halfedges(hid, br_hid);
+        self.core_data.connect_halfedges(br_hid, tr_hid);
+        self.core_data.connect_halfedges(tr_hid, hid);
+
+        self.core_data.connect_halfedges(twin_hid, tl_hid);
+        self.core_data.connect_halfedges(tl_hid, bl_hid);
+        self.core_data.connect_halfedges(bl_hid, twin_hid);
+
+        self.core_data.set_f_hafledge(fid, hid);
+        self.core_data.set_f_hafledge(twin_fid, twin_hid);
+    }
 }
 
 impl<A: Allocator + Copy> Mesh for ManifoldMesh<A> {
