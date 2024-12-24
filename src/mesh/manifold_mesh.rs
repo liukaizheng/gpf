@@ -18,16 +18,9 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
     pub fn new<U, T>(polygons: T, alloc: A) -> Self
     where
         U: AsRef<[usize]>,
-        T: Iterator<Item = U> + Clone,
+        T: Iterator<Item = U>,
     {
-        let mut n_faces = 0;
-        let mut n_vertices = 0;
-        for poly in polygons.clone() {
-            n_vertices = n_vertices.max(*poly.as_ref().iter().max().unwrap());
-            n_faces += 1;
-        }
-        n_vertices += 1;
-        let core_data = MeshCoreData::new(n_vertices, n_faces, alloc);
+        let core_data = MeshCoreData::new(0, 0, alloc);
         let mut mesh = Self {
             core_data,
             he_face_arr: Vec::new_in(alloc),
@@ -35,11 +28,16 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
 
         let mut edge_map = HashMap::<(usize, usize), HalfedgeId>::new();
         for (fid, polygon) in polygons.enumerate() {
+            let fid = FaceId(fid);
             let mut first_hid = HalfedgeId::default();
             let mut prev_hid = first_hid;
 
             for (&a, &b) in polygon.as_ref().iter().circular_tuple_windows() {
                 let key = if a < b { (a, b) } else { (b, a) };
+                let va = VertexId(a);
+                let vb = VertexId(b);
+                mesh.core_data.v_min_reserve(va);
+                mesh.core_data.v_min_reserve(vb);
                 let hid = match edge_map.entry(key) {
                     hashbrown::hash_map::Entry::Occupied(entry) => {
                         let hid = mesh.he_twin(*entry.get());
@@ -53,11 +51,11 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
                     }
                 };
                 mesh.core_data.v_halfedge_arr[a] = hid;
-                mesh.core_data.set_he_vertex(hid, b.into());
-                mesh.core_data.set_he_vertex(mesh.he_twin(hid), a.into());
-                mesh.he_face_arr[hid] = fid.into();
+                mesh.core_data.set_he_vertex(hid, vb);
+                mesh.core_data.set_he_vertex(mesh.he_twin(hid), va);
+                mesh.he_face_arr[hid] = fid;
                 if !first_hid.valid() {
-                    mesh.core_data.f_halfedge_arr[fid] = hid;
+                    mesh.core_data.f_halfedge_arr.push(hid);
                     first_hid = hid;
                 } else {
                     mesh.core_data.connect_halfedges(prev_hid, hid);
@@ -66,6 +64,7 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
             }
             mesh.core_data.connect_halfedges(prev_hid, first_hid);
         }
+        mesh.core_data.n_faces = mesh.core_data.f_halfedge_arr.len();
 
         let mut edge_visited = vec![false; mesh.n_edges_capacity()];
         for twin_hid in edge_map.into_values() {
@@ -291,6 +290,11 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
         }
         self.core_data.f_halfedge_arr[fid] = HalfedgeId::default();
         self.core_data.n_faces -= 1;
+    }
+
+    #[inline]
+    pub fn connect_halfedges(&mut self, ha: HalfedgeId, hb: HalfedgeId) {
+        self.core_data.connect_halfedges(ha, hb);
     }
 
     pub fn flip(&mut self, hid: HalfedgeId) {

@@ -101,8 +101,13 @@ fn test_simple() {
     let bump = Bump::new();
     let rng = SmallRng::seed_from_u64(5489);
     let uniform = Uniform::new_inclusive(-1.0, 1.0);
-    let n_points = 1_00;
-    let points = Vec::from_iter(rng.sample_iter(uniform).take(n_points * 3));
+    let n_points = 1_0;
+    let points = Vec::from_iter(rng.sample_iter(uniform).take(n_points * 2));
 
-    triangulate(&points, &[], &bump);
+    {
+        let triangles = triangulate(&points, &[], &bump);
+        write_obj(&points, &triangles, "123.obj");
+    }
+
+    triangulate1(&points, &[], &bump);
 }

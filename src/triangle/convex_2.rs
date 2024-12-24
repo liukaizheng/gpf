@@ -105,7 +105,7 @@ pub fn convex_2<A: Allocator + Copy>(points: &[f64], alloc: A) -> Vec<usize, A> 
         pa == pb
     });
 
-    alternate_axes(points, &mut hull, 0);
+    alternate_axes(points, &mut hull, true);
     let mut link = LinkList::new(n_points, alloc);
     let hull_start = div_conq_recurse(points, &hull, 0, &mut link, alloc);
     let mut result = Vec::new_in(alloc);
@@ -130,7 +130,7 @@ fn div_conq_recurse<A: Allocator + Copy>(
             return hull[0];
         }
         _ => {
-            if axis == 3 {
+            if hull.len() == 3 {
                 axis = 0;
             }
             let divider = hull.len() >> 1;

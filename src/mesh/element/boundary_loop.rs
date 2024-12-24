@@ -1,4 +1,4 @@
-use std::ops::{Deref, DerefMut, Index, IndexMut};
+use std::ops::{Add, Deref, DerefMut, Index, IndexMut, Mul};
 
 use super::{ElementId, ElementIndex};
 use crate::{element_id, INVALID_IND};

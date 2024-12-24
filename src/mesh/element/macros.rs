@@ -79,5 +79,23 @@ macro_rules! element_id {
                 &mut self.0
             }
         }
+
+        impl Add<usize> for $name {
+            type Output = Self;
+
+            #[inline(always)]
+            fn add(self, rhs: usize) -> Self::Output {
+                Self(self.0 + rhs)
+            }
+        }
+
+        impl Mul<usize> for $name {
+            type Output = Self;
+
+            #[inline(always)]
+            fn mul(self, rhs: usize) -> Self::Output {
+                Self(self.0 * rhs)
+            }
+        }
     };
 }

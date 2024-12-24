@@ -1,4 +1,4 @@
-use std::ops::{Deref, DerefMut, Index, IndexMut};
+use std::ops::{Add, Deref, DerefMut, Index, IndexMut, Mul};
 
 use super::{iter_next, Edge, Element, ElementId, ElementIndex, Face, Vertex};
 use crate::{element_id, mesh::Mesh, INVALID_IND};

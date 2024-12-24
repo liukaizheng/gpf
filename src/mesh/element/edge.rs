@@ -1,4 +1,4 @@
-use std::ops::{Deref, DerefMut, Index, IndexMut};
+use std::ops::{Add, Deref, DerefMut, Index, IndexMut, Mul};
 
 use super::{iter_next, Element, ElementId, ElementIndex, Halfedge, HalfedgeId};
 use crate::{element_id, mesh::Mesh, INVALID_IND};
@@ -9,6 +9,7 @@ use std::alloc::Allocator;
 pub struct EdgeId(pub usize);
 
 element_id!(struct EdgeId);
+
 
 pub struct Edge<'a, M: Mesh> {
     mesh: &'a M,
