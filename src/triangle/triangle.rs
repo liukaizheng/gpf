@@ -58,16 +58,12 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
                         let ha = self.mesh.new_edge_by_veritces(va, vc);
                         let hb = self.mesh.new_edge_by_veritces(vc, vb);
                         let hc = self.mesh.new_edge_by_veritces(vb, va);
-                        let twin_ha = self.mesh.he_twin(ha);
-                        let twin_hb = self.mesh.he_twin(hb);
-                        let twin_hc = self.mesh.he_twin(hc);
                         self.mesh.new_face_by_halfedges(&[ha, hb, hc]);
-                        self.mesh.connect_halfedges(twin_ha, twin_hc);
-                        self.mesh.connect_halfedges(twin_hc, twin_hb);
-                        self.mesh.connect_halfedges(twin_hb, twin_ha);
                         if is_horizontal {
+                            let twin_hb = self.mesh.he_twin(hb);
                             [twin_hb, twin_hb]
                         } else {
+                            let twin_ha = self.mesh.he_twin(ha);
                             [twin_ha, twin_ha]
                         }
                     }
@@ -75,17 +71,14 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
                         let ha = self.mesh.new_edge_by_veritces(va, vb);
                         let hb = self.mesh.new_edge_by_veritces(vb, vc);
                         let hc = self.mesh.new_edge_by_veritces(vc, va);
-                        let twin_ha = self.mesh.he_twin(ha);
                         let twin_hb = self.mesh.he_twin(hb);
-                        let twin_hc = self.mesh.he_twin(hc);
                         self.mesh.new_face_by_halfedges(&[ha, hb, hc]);
-                        self.mesh.connect_halfedges(twin_ha, twin_hc);
-                        self.mesh.connect_halfedges(twin_hc, twin_hb);
-                        self.mesh.connect_halfedges(twin_hb, twin_ha);
 
                         if is_horizontal {
+                            let twin_hc = self.mesh.he_twin(hc);
                             [twin_hb, twin_hc]
                         } else {
+                            let twin_ha = self.mesh.he_twin(ha);
                             [twin_ha, twin_hb]
                         }
                     }
@@ -182,11 +175,13 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
                     let need_add_edges = self.mesh.he_is_boundary(prev_hid);
                     self.mesh.remove_face(self.mesh.he_face(curr_hid));
 
-                    if need_add_edges {
-                        self.add_two_edges(lt, apex, lb);
-                    }
+                    curr_hid = if need_add_edges {
+                        let hid = self.add_two_edges(lb, apex, lt);
+                        self.mesh.he_twin(self.mesh.he_next(hid))
+                    } else {
+                        prev_hid
+                    };
 
-                    curr_hid = prev_hid;
                     lt = apex;
                 }
                 inner_left_hid = self.mesh.he_twin(curr_hid);
@@ -206,11 +201,13 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
                     let need_add_edges = self.mesh.he_is_boundary(next_hid);
 
                     self.mesh.remove_face(self.mesh.he_face(curr_hid));
-                    if need_add_edges {
-                        self.add_two_edges(rb, apex, rt);
-                    }
+                    curr_hid = if need_add_edges {
+                        let hid = self.add_two_edges(rb, apex, rt);
+                        self.mesh.he_twin(hid)
+                    } else {
+                        next_hid
+                    };
 
-                    curr_hid = next_hid;
                     rt = apex;
                 }
                 inner_right_hid = self.mesh.he_twin(curr_hid);
@@ -285,6 +282,8 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
             let prev_va_hid = self.mesh.he_prev(va_hid);
             self.mesh.connect_halfedges(twin_ha, va_hid);
             self.mesh.connect_halfedges(prev_va_hid, ha);
+        } else {
+            self.mesh.connect_halfedges(twin_ha, ha);
         }
 
         let vc_hid = self.mesh.v_halfedge(vb);
@@ -292,6 +291,8 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
             let prev_vc_hid = self.mesh.he_prev(vc_hid);
             self.mesh.connect_halfedges(hb, vc_hid);
             self.mesh.connect_halfedges(prev_vc_hid, twin_hb);
+        } else {
+            self.mesh.connect_halfedges(hb, twin_hb);
         }
         ha
     }

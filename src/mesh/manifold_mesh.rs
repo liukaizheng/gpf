@@ -117,8 +117,16 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
             let hb = self.he_twin(hb_twin);
             match [self.he_is_boundary(ha), self.he_is_boundary(hb)] {
                 [true, true] => {
-                    self.core_data.connect_halfedges(ha, hb);
-                    self.core_data.set_v_halfedge(self.he_to(ha), hb);
+                    let vid = self.he_to(ha);
+                    let vh = self.v_halfedge(vid);
+                    if vh.valid() {
+                        let vh_prev = self.he_prev(vh);
+                        self.core_data.connect_halfedges(vh_prev, hb);
+                        self.core_data.connect_halfedges(ha, vh);
+                    } else {
+                        self.core_data.connect_halfedges(ha, hb);
+                    }
+                    self.core_data.set_v_halfedge(vid, hb);
                 }
                 [true, false] => {
                     let ha_next = self.he_next(hb_twin);
