@@ -168,4 +168,5 @@ pub trait Mesh: Sized {
 
     fn set_v_halfedge(&mut self, v: VertexId, hid: HalfedgeId);
     fn set_f_halfedge(&mut self, fid: FaceId, hid: HalfedgeId);
+    fn set_he_vertex(&mut self, hid: HalfedgeId, vid: VertexId);
 }

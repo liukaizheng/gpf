@@ -530,4 +530,9 @@ impl<A: Allocator + Copy> Mesh for SurfaceMesh<A> {
     fn set_f_halfedge(&mut self, fid: FaceId, hid: HalfedgeId) {
         self.core_data.set_f_hafledge(fid, hid);
     }
+
+    #[inline(always)]
+    fn set_he_vertex(&mut self, hid: HalfedgeId, vid: VertexId) {
+        self.core_data.set_he_vertex(hid, vid);
+    }
 }
