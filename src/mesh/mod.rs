@@ -1,4 +1,5 @@
 mod element;
+mod element_cache;
 mod manifold_mesh;
 mod mesh;
 mod mesh_core_data;

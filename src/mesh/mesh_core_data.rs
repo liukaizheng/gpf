@@ -115,5 +115,6 @@ impl<A: Allocator + Copy> MeshCoreData<A> {
         self.he_prev_arr.reserve(n_halfedges);
         self.he_next_arr.reserve(n_halfedges);
         self.he_vertex_arr.reserve(n_halfedges);
+        self.he_face_arr.reserve(n_halfedges);
     }
 }

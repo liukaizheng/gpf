@@ -4,12 +4,13 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 
 use super::{
-    clone_vec_in, mesh_core_data::MeshCoreData, EdgeId, ElementId, FaceId, HalfedgeId, Mesh,
-    VertexId,
+    element_cache::ElementCache, mesh_core_data::MeshCoreData, EdgeId, ElementId, FaceId,
+    HalfedgeId, Mesh, VertexId,
 };
 
 pub struct ManifoldMesh<A: Allocator + Copy> {
     core_data: MeshCoreData<A>,
+    edges_cache: Option<ElementCache<EdgeId, A>>,
 }
 
 impl<A: Allocator + Copy> ManifoldMesh<A> {
@@ -19,7 +20,10 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
         T: Iterator<Item = U>,
     {
         let core_data = MeshCoreData::new(0, 0, alloc);
-        let mut mesh = Self { core_data };
+        let mut mesh = Self {
+            core_data,
+            edges_cache: None,
+        };
 
         let mut edge_map = HashMap::<(usize, usize), HalfedgeId>::new();
         for (fid, polygon) in polygons.enumerate() {
@@ -102,6 +106,8 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
     pub fn clone_in<A1: Allocator + Copy>(&self, alloc: A1) -> ManifoldMesh<A1> {
         ManifoldMesh {
             core_data: self.core_data.clone_in(alloc),
+            // TODO: clone halfedges_cache
+            edges_cache: None,
         }
     }
 
@@ -173,8 +179,18 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
 
     #[inline]
     pub fn new_edge(&mut self) -> HalfedgeId {
-        let hid = self.core_data.he_next_arr.len().into();
+        self.core_data.n_halfedges += 2;
         let new_len = self.core_data.he_prev_arr.len() + 2;
+        if let Some(cache) = self.edges_cache.as_mut() {
+            let eid = cache.pop();
+            if eid.valid() {
+                return HalfedgeId(eid.0 << 1);
+            } else {
+                cache.reserve(new_len >> 1);
+            }
+        }
+
+        let hid = self.core_data.he_next_arr.len().into();
 
         self.core_data
             .he_prev_arr
@@ -189,7 +205,6 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
         self.core_data
             .he_face_arr
             .resize(new_len, FaceId::default());
-        self.core_data.n_halfedges += 2;
         hid
     }
 
@@ -197,7 +212,6 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
     pub fn reserve_edges(&mut self, new_len: usize) {
         let new_n_halfedges = new_len << 1;
         self.core_data.reserve_halfedges(new_n_halfedges);
-        self.core_data.he_face_arr.reserve(new_n_halfedges);
     }
 
     #[inline]
@@ -229,6 +243,14 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
         self.core_data.set_he_vertex(hid, VertexId::default());
         self.core_data
             .set_he_vertex(self.he_twin(hid), VertexId::default());
+        if let Some(cache) = self.edges_cache.as_mut() {
+            cache.push(eid);
+        } else {
+            let mut cache = ElementCache::new(self.n_edges_capacity(), self.core_data.alloc);
+            cache.push(eid);
+            self.edges_cache = Some(cache);
+        }
+
         self.core_data.n_halfedges -= 2;
     }
 
@@ -293,10 +315,7 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
 
             // make current edge invalid
             if self.he_is_boundary(rev_next_hid) {
-                self.core_data.set_he_vertex(curr_hid, VertexId::default());
-                self.core_data
-                    .set_he_vertex(rev_next_hid, VertexId::default());
-                self.core_data.n_halfedges -= 2;
+                self.remove_edge(self.he_edge(curr_hid));
             }
 
             curr_hid = next_hid;
@@ -333,6 +352,11 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
         self.core_data.he_face_arr[new_hid] = fid;
         if fid.valid() {
             self.core_data.set_f_halfedge(fid, new_hid);
+            self.core_data.he_face_arr[old_hid] = FaceId::default();
+        }
+
+        if self.he_is_boundary(self.he_twin(old_hid)) {
+            self.remove_edge(self.he_edge(old_hid));
         }
     }
 

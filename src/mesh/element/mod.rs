@@ -17,7 +17,7 @@ use crate::INVALID_IND;
 #[macro_use]
 mod macros;
 
-pub trait ElementIndex {
+pub trait ElementIndex: Default {
     fn index(&self) -> usize;
 }
 pub trait ElementId: From<usize> + ElementIndex {
