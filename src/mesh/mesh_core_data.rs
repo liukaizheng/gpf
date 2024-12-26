@@ -11,11 +11,13 @@ pub struct MeshCoreData<A: Allocator + Copy> {
     pub(crate) he_prev_arr: Vec<HalfedgeId, A>,
     pub(crate) he_next_arr: Vec<HalfedgeId, A>,
     pub(crate) he_vertex_arr: Vec<VertexId, A>,
+    pub(crate) he_face_arr: Vec<FaceId, A>,
     pub(crate) f_halfedge_arr: Vec<HalfedgeId, A>,
 
     pub(crate) n_vertices: usize,
     pub(crate) n_halfedges: usize,
     pub(crate) n_faces: usize,
+    pub(crate) alloc: A,
 }
 
 impl<A: Allocator + Copy> MeshCoreData<A> {
@@ -30,10 +32,12 @@ impl<A: Allocator + Copy> MeshCoreData<A> {
             he_prev_arr: Vec::new_in(alloc),
             he_next_arr: Vec::new_in(alloc),
             he_vertex_arr: Vec::new_in(alloc),
+            he_face_arr: Vec::new_in(alloc),
             f_halfedge_arr,
             n_vertices,
             n_halfedges: 0,
             n_faces,
+            alloc,
         }
     }
 
@@ -43,10 +47,12 @@ impl<A: Allocator + Copy> MeshCoreData<A> {
             he_prev_arr: clone_vec_in(&self.he_prev_arr, alloc),
             he_next_arr: clone_vec_in(&self.he_next_arr, alloc),
             he_vertex_arr: clone_vec_in(&self.he_vertex_arr, alloc),
+            he_face_arr: clone_vec_in(&self.he_face_arr, alloc),
             f_halfedge_arr: clone_vec_in(&self.f_halfedge_arr, alloc),
             n_vertices: self.n_vertices,
             n_halfedges: self.n_halfedges,
             n_faces: self.n_faces,
+            alloc,
         }
     }
 
@@ -82,12 +88,7 @@ impl<A: Allocator + Copy> MeshCoreData<A> {
     }
 
     #[inline]
-    pub(crate) fn set_f_halfedge(&mut self, hid: HalfedgeId, fid: FaceId) {
-        self.f_halfedge_arr[fid] = hid;
-    }
-
-    #[inline]
-    pub(crate) fn set_f_hafledge(&mut self, fid: FaceId, hid: HalfedgeId) {
+    pub(crate) fn set_f_halfedge(&mut self, fid: FaceId, hid: HalfedgeId) {
         self.f_halfedge_arr[fid] = hid;
     }
 

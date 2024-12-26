@@ -139,7 +139,7 @@ fn hull_3<A: Allocator + Copy>(
         triangles.reverse();
     }
     let mut mesh = ManifoldMesh::new(triangles.chunks(3), alloc);
-    mesh.new_vertices(points.len() / 3 - mesh.n_vertices_capacity());
+    mesh.set_n_vertices(points.len() / 3);
 
     let mut first_bot_hid = HalfedgeId::default();
     for v in mesh.vertices() {

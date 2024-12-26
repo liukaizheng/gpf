@@ -20,6 +20,8 @@ pub trait Mesh: Sized {
 
     fn n_faces_capacity(&self) -> usize;
 
+    fn set_n_vertices(&mut self, n: usize);
+
     #[inline(always)]
     fn v_is_valid(&self, vid: VertexId) -> bool {
         self.v_halfedge(vid).valid()

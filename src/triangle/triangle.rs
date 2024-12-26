@@ -6,7 +6,7 @@ use std::ops::{Add, Index, Mul};
 use bumpalo::Bump;
 
 use crate::math::{dot, sub_in};
-use crate::mesh::{ElementId, FaceId, HalfedgeId, ManifoldMesh, VertexId};
+use crate::mesh::{ElementId, HalfedgeId, ManifoldMesh, VertexId};
 use crate::{point, predicates, INVALID_IND};
 
 struct Triangulation<'a, A: Allocator + Copy> {
@@ -20,11 +20,11 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
         let n_points = self.points.len() >> 1;
         self.mesh.new_vertices(n_points);
         self.mesh.reserve_edges(n_points << 1);
-        self.div_conq_recurse1(0, n_points, is_horizontal);
+        self.div_conq_recurse(0, n_points, is_horizontal);
         self.mesh
     }
 
-    fn div_conq_recurse1(
+    fn div_conq_recurse(
         &mut self,
         start: usize,
         end: usize,
@@ -122,27 +122,14 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
             }
             _ => {
                 let mid = start + (len >> 1);
-                let n_start = self.mesh.n_faces_capacity();
-                let [_, lr_hid] = self.div_conq_recurse1(start, mid, !is_horizontal);
-                let n_mid = self.mesh.n_faces_capacity();
-                let [rl_hid, _] = self.div_conq_recurse1(mid, end, !is_horizontal);
-                if mid == 29487 {
-                    let mut pts = Vec::new();
-                    for i in start..end {
-                        pts.extend_from_slice(point::<2>(self.points, self.sorted_vertices[i].0));
-                    }
-                    println!("the points is {:?} {}", pts, is_horizontal);
-                    println!("start is {}", start);
-                    println!("end is {}", end);
-                    self.write(n_start, n_mid, "left.obj");
-                    self.write(n_mid, self.mesh.n_faces_capacity(), "right.obj");
-                }
-                self.merge_hull1(lr_hid, rl_hid, is_horizontal)
+                let [_, lr_hid] = self.div_conq_recurse(start, mid, !is_horizontal);
+                let [rl_hid, _] = self.div_conq_recurse(mid, end, !is_horizontal);
+                self.merge_hulls(lr_hid, rl_hid, is_horizontal)
             }
         }
     }
 
-    fn merge_hull1(
+    fn merge_hulls(
         &mut self,
         mut lr_hid: HalfedgeId,
         mut rl_hid: HalfedgeId,
@@ -236,7 +223,6 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
                     curr_hid = self.mesh.he_prev_twin(self.mesh.he_twin(curr_hid));
                     debug_assert!(self.mesh.he_from(curr_hid) == rt_vid);
                     debug_assert!(self.mesh.he_to(curr_hid) == rb_vid);
-
                 }
                 right_hid = self.mesh.he_prev(self.mesh.he_twin(curr_hid));
             }
@@ -275,11 +261,17 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
         ]);
 
         if is_horizontal {
+            top_hid = self.rotate_prev(top_hid, |pa, pb| pa[1] < pb[1]);
             top_hid = self.rotate_next(top_hid, |pa, pb| pa[1] >= pb[1]);
+
+            bottom_hid = self.rotate_next(bottom_hid, |pa, pb| pa[1] <= pb[1]);
             bottom_hid = self.rotate_prev(bottom_hid, |pa, pb| pa[1] > pb[1]);
             [self.mesh.he_next(bottom_hid), self.mesh.he_prev(top_hid)]
         } else {
+            top_hid = self.rotate_next(top_hid, |pa, pb| pa[0] <= pb[0]);
             top_hid = self.rotate_prev(top_hid, |pa, pb| pa[0] > pb[0]);
+
+            bottom_hid = self.rotate_prev(bottom_hid, |pa, pb| pa[0] < pb[0]);
             bottom_hid = self.rotate_next(bottom_hid, |pa, pb| pa[0] >= pb[0]);
             [self.mesh.he_next(top_hid), self.mesh.he_prev(bottom_hid)]
         }
@@ -319,7 +311,11 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
         }
     }
 
-    fn rotate_prev(&self, mut hid: HalfedgeId, stop_fn: impl Fn(&[f64], &[f64]) -> bool) -> HalfedgeId {
+    fn rotate_prev(
+        &self,
+        mut hid: HalfedgeId,
+        stop_fn: impl Fn(&[f64], &[f64]) -> bool,
+    ) -> HalfedgeId {
         use crate::mesh::Mesh;
         let [va, vb] = self.mesh.he_vertices(hid);
         let mut pa = point::<2>(self.points, va.0);
@@ -335,7 +331,11 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
         hid
     }
 
-    fn rotate_next(&self, mut hid: HalfedgeId, stop_fn: impl Fn(&[f64], &[f64]) -> bool) -> HalfedgeId {
+    fn rotate_next(
+        &self,
+        mut hid: HalfedgeId,
+        stop_fn: impl Fn(&[f64], &[f64]) -> bool,
+    ) -> HalfedgeId {
         use crate::mesh::Mesh;
         let [va, vb] = self.mesh.he_vertices(hid);
         let mut pa = point::<2>(self.points, va.0);
@@ -371,36 +371,14 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
             self.alloc,
         )
     }
-
-    fn write(&self, start: usize, end: usize, name: &str) {
-        use crate::mesh::Mesh;
-        use std::fs::File;
-        use std::io::Write;
-        let mut file = File::create(name).unwrap();
-        for pt in self.points.chunks(2) {
-            writeln!(file, "v {} {} 0", pt[0], pt[1]).unwrap();
-        }
-
-        for face in self.mesh.faces() {
-            let fid = *face;
-            if *fid < start || *fid >= end {
-                continue;
-            }
-            let ha = self.mesh.f_halfedge(fid);
-            let hb = self.mesh.he_next(ha);
-            let hc = self.mesh.he_next(hb);
-            let va = self.mesh.he_to(ha);
-            let vb = self.mesh.he_to(hb);
-            let vc = self.mesh.he_to(hc);
-            if va.valid() && vb.valid() && vc.valid() {
-                writeln!(file, "f {} {} {}", va.0 + 1, vb.0 + 1, vc.0 + 1).unwrap();
-            }
-        }
-
-    }
 }
 
-pub fn triangulate1<A: Allocator + Copy>(points: &[f64], segments: &[usize], is_horizontal: bool, alloc: A) -> Vec<usize, A> {
+pub fn triangulate1<A: Allocator + Copy>(
+    points: &[f64],
+    segments: &[usize],
+    is_horizontal: bool,
+    alloc: A,
+) -> Vec<usize, A> {
     use crate::mesh::Mesh;
     let n_points = points.len() >> 1;
     let mut sorted_vertices = Vec::<VertexId, _>::with_capacity_in(n_points, alloc);
@@ -419,20 +397,24 @@ pub fn triangulate1<A: Allocator + Copy>(points: &[f64], segments: &[usize], is_
     };
     let mesh = triangulation.triangulate(is_horizontal);
     let mut result = Vec::with_capacity_in(mesh.n_faces(), alloc);
-    result.extend(mesh.faces().filter_map(|f| {
-        let fid = *f;
-        let ha = mesh.f_halfedge(fid);
-        let hb = mesh.he_next(ha);
-        let hc = mesh.he_next(hb);
-        let va = mesh.he_from(ha);
-        let vb = mesh.he_from(hb);
-        let vc = mesh.he_from(hc);
-        if va.valid() && vb.valid() && vc.valid() {
-            Some([va.0, vb.0, vc.0])
-        } else {
-            None
-        }
-    }).flatten());
+    result.extend(
+        mesh.faces()
+            .filter_map(|f| {
+                let fid = *f;
+                let ha = mesh.f_halfedge(fid);
+                let hb = mesh.he_next(ha);
+                let hc = mesh.he_next(hb);
+                let va = mesh.he_to(ha);
+                let vb = mesh.he_to(hb);
+                let vc = mesh.he_to(hc);
+                if va.valid() && vb.valid() && vc.valid() {
+                    Some([va.0, vb.0, vc.0])
+                } else {
+                    None
+                }
+            })
+            .flatten(),
+    );
     result
 }
 

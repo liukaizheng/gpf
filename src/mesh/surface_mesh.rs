@@ -12,7 +12,6 @@ pub struct SurfaceMesh<A: Allocator + Copy = std::alloc::Global> {
     core_data: MeshCoreData<A>,
     n_edges: usize,
     he_edge_arr: Vec<EdgeId, A>,
-    he_face_arr: Vec<FaceId, A>,
     he_vert_in_next_arr: Vec<HalfedgeId, A>,
     he_sibling_arr: Vec<HalfedgeId, A>,
     e_halfedge_arr: Vec<HalfedgeId, A>,
@@ -31,7 +30,6 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
             core_data,
             n_edges: 0,
             he_edge_arr: Vec::new_in(alloc),
-            he_face_arr: Vec::new_in(alloc),
             he_vert_in_next_arr: Vec::new_in(alloc),
             he_sibling_arr: Vec::new_in(alloc),
             e_halfedge_arr: Vec::new_in(alloc),
@@ -49,7 +47,7 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
                 let hid = mesh.new_halfedges(1);
 
                 mesh.core_data.he_vertex_arr[hid] = vid;
-                mesh.he_face_arr[hid] = fid.into();
+                mesh.core_data.he_face_arr[hid] = fid.into();
 
                 if i == 0 {
                     mesh.core_data.f_halfedge_arr.push(hid);
@@ -132,7 +130,6 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
             core_data: self.core_data.clone_in(alloc),
             n_edges: self.n_edges,
             he_edge_arr: clone_vec_in(&self.he_edge_arr, alloc),
-            he_face_arr: clone_vec_in(&self.he_face_arr, alloc),
             he_vert_in_next_arr: clone_vec_in(&self.he_vert_in_next_arr, alloc),
             he_sibling_arr: clone_vec_in(&self.he_sibling_arr, alloc),
             e_halfedge_arr: clone_vec_in(&self.e_halfedge_arr, alloc),
@@ -192,7 +189,9 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
             .he_vertex_arr
             .resize(new_len, VertexId::default());
 
-        self.he_face_arr.resize(new_len, FaceId::default());
+        self.core_data
+            .he_face_arr
+            .resize(new_len, FaceId::default());
         self.he_sibling_arr.resize(new_len, HalfedgeId::default());
         self.he_edge_arr.resize(new_len, EdgeId::default());
         self.he_vert_in_next_arr
@@ -255,7 +254,7 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
                 new_e_halfedges.push(old_hid);
             }
 
-            self.he_face_arr[new_hid] = self.he_face_arr[old_hid];
+            self.core_data.he_face_arr[new_hid] = self.core_data.he_face_arr[old_hid];
 
             let prev_hid = self.he_prev(old_hid);
             self.core_data.connect_halfedges(prev_hid, new_hid);
@@ -334,12 +333,12 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
 
         // h-f
         let new_f = self.new_faces(1);
-        self.he_face_arr[first_he] = fid;
+        self.core_data.he_face_arr[first_he] = fid;
 
         {
             let mut hid = second_he;
             loop {
-                self.he_face_arr[hid] = new_f;
+                self.core_data.he_face_arr[hid] = new_f;
                 hid = self.he_next(hid);
                 if hid == second_he {
                     break;
@@ -378,7 +377,7 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
             self.he_edge_arr[new_hid] = self.he_edge_arr[old_hid];
 
             // h-f
-            self.he_face_arr[new_hid] = new_f;
+            self.core_data.he_face_arr[new_hid] = new_f;
         }
 
         // h-h: next halfedge
@@ -443,6 +442,14 @@ impl<A: Allocator + Copy> Mesh for SurfaceMesh<A> {
     #[inline(always)]
     fn n_edges_capacity(&self) -> usize {
         self.e_halfedge_arr.len()
+    }
+
+    #[inline]
+    fn set_n_vertices(&mut self, n: usize) {
+        self.core_data.n_vertices = n;
+        if n > 0 {
+            self.core_data.v_min_reserve((n - 1).into());
+        }
     }
 
     #[inline(always)]
@@ -518,7 +525,7 @@ impl<A: Allocator + Copy> Mesh for SurfaceMesh<A> {
 
     #[inline(always)]
     fn he_face(&self, hid: HalfedgeId) -> FaceId {
-        self.he_face_arr[hid]
+        self.core_data.he_face_arr[hid]
     }
 
     #[inline(always)]
@@ -528,7 +535,7 @@ impl<A: Allocator + Copy> Mesh for SurfaceMesh<A> {
 
     #[inline(always)]
     fn set_f_halfedge(&mut self, fid: FaceId, hid: HalfedgeId) {
-        self.core_data.set_f_hafledge(fid, hid);
+        self.core_data.set_f_halfedge(fid, hid);
     }
 
     #[inline(always)]
