@@ -1,7 +1,7 @@
 use hashbrown::HashMap;
 use itertools::Itertools;
 use std::alloc::Allocator;
-use std::ops::{Add, Deref, Index, Mul};
+use std::ops::{Add, Index, Mul};
 
 use bumpalo::Bump;
 
@@ -16,11 +16,12 @@ struct Triangulation<'a, A: Allocator + Copy> {
     sorted_vertices: Vec<VertexId, A>,
 }
 impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
-    fn triangulate(&mut self) {
+    fn triangulate(mut self) -> ManifoldMesh<A> {
         let n_points = self.points.len() >> 1;
         self.mesh.new_vertices(n_points);
         self.mesh.reserve_edges(n_points << 1);
         self.div_conq_recurse1(0, n_points, true);
+        self.mesh
     }
 
     fn div_conq_recurse1(
@@ -179,7 +180,7 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
 
         loop {
             let left_finished = self.counterclockwise(lt_vid, lb_vid, rb_vid) <= 0.0;
-            let right_finished = self.counterclockwise(rb_vid, rt_vid, lt_vid) <= 0.0;
+            let right_finished = self.counterclockwise(rb_vid, rt_vid, lb_vid) <= 0.0;
             if left_finished && right_finished {
                 break;
             }
@@ -199,6 +200,8 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
                     self.mesh.flip(curr_hid);
                     lt_vid = apex_vid;
                     curr_hid = self.mesh.he_next_twin(curr_hid);
+                    debug_assert!(self.mesh.he_from(curr_hid) == lb_vid);
+                    debug_assert!(self.mesh.he_to(curr_hid) == apex_vid);
                 }
                 left_hid = self.mesh.he_next(self.mesh.he_twin(curr_hid));
             }
@@ -218,6 +221,9 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
                     self.mesh.flip(curr_hid);
                     rt_vid = apex_vid;
                     curr_hid = self.mesh.he_prev_twin(self.mesh.he_twin(curr_hid));
+                    debug_assert!(self.mesh.he_from(curr_hid) == rt_vid);
+                    debug_assert!(self.mesh.he_to(curr_hid) == rb_vid);
+
                 }
                 right_hid = self.mesh.he_prev(self.mesh.he_twin(curr_hid));
             }
@@ -257,10 +263,10 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
 
         if is_horizontal {
             top_hid = self.rotate_next(top_hid, |pa, pb| pa[1] >= pb[1]);
-            bottom_hid = self.rotate_prev(bottom_hid, |pa, pb| pa[1] < pb[1]);
+            bottom_hid = self.rotate_prev(bottom_hid, |pa, pb| pa[1] > pb[1]);
             [self.mesh.he_next(bottom_hid), self.mesh.he_prev(top_hid)]
         } else {
-            top_hid = self.rotate_prev(top_hid, |pa, pb| pa[0] < pb[0]);
+            top_hid = self.rotate_prev(top_hid, |pa, pb| pa[0] > pb[0]);
             bottom_hid = self.rotate_next(bottom_hid, |pa, pb| pa[0] >= pb[0]);
             [self.mesh.he_next(top_hid), self.mesh.he_prev(bottom_hid)]
         }
@@ -300,228 +306,6 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
         }
     }
 
-    fn div_conq_recurse(
-        &mut self,
-        start: usize,
-        end: usize,
-        is_horizontal: bool,
-    ) -> [HalfedgeId; 2] {
-        use crate::mesh::Mesh;
-        let len = end - start;
-        match len {
-            2 => {
-                let hid = if is_horizontal {
-                    self.mesh.new_edge_by_veritces(
-                        self.sorted_vertices[start],
-                        self.sorted_vertices[start + 1],
-                    )
-                } else {
-                    self.mesh.new_edge_by_veritces(
-                        self.sorted_vertices[start + 1],
-                        self.sorted_vertices[start],
-                    )
-                };
-                let twin_hid = self.mesh.he_twin(hid);
-                self.mesh.connect_halfedges(hid, twin_hid);
-                self.mesh.connect_halfedges(twin_hid, hid);
-                [hid, hid]
-            }
-            3 => {
-                let va = self.sorted_vertices[start];
-                let vb = self.sorted_vertices[start + 1];
-                let vc = self.sorted_vertices[start + 2];
-                let area = self.counterclockwise(va, vb, vc);
-                match area.partial_cmp(&0.0).unwrap() {
-                    std::cmp::Ordering::Less => {
-                        let ha = self.mesh.new_edge_by_veritces(va, vc);
-                        let hb = self.mesh.new_edge_by_veritces(vc, vb);
-                        let hc = self.mesh.new_edge_by_veritces(vb, va);
-                        self.mesh.new_face_by_halfedges(&[ha, hb, hc]);
-                        if is_horizontal {
-                            let twin_hb = self.mesh.he_twin(hb);
-                            [twin_hb, twin_hb]
-                        } else {
-                            let twin_ha = self.mesh.he_twin(ha);
-                            [twin_ha, twin_ha]
-                        }
-                    }
-                    std::cmp::Ordering::Greater => {
-                        let ha = self.mesh.new_edge_by_veritces(va, vb);
-                        let hb = self.mesh.new_edge_by_veritces(vb, vc);
-                        let hc = self.mesh.new_edge_by_veritces(vc, va);
-                        let twin_hb = self.mesh.he_twin(hb);
-                        self.mesh.new_face_by_halfedges(&[ha, hb, hc]);
-
-                        if is_horizontal {
-                            let twin_hc = self.mesh.he_twin(hc);
-                            [twin_hb, twin_hc]
-                        } else {
-                            let twin_ha = self.mesh.he_twin(ha);
-                            [twin_ha, twin_hb]
-                        }
-                    }
-                    std::cmp::Ordering::Equal => {
-                        let [ha, hb] = if is_horizontal {
-                            [
-                                self.mesh.new_edge_by_veritces(va, vb),
-                                self.mesh.new_edge_by_veritces(vb, vc),
-                            ]
-                        } else {
-                            [
-                                self.mesh.new_edge_by_veritces(vc, vb),
-                                self.mesh.new_edge_by_veritces(vb, va),
-                            ]
-                        };
-                        let twin_ha = self.mesh.he_twin(ha);
-                        let twin_hb = self.mesh.he_twin(hb);
-                        self.mesh.connect_halfedges(ha, hb);
-                        self.mesh.connect_halfedges(hb, twin_hb);
-                        self.mesh.connect_halfedges(twin_hb, twin_ha);
-                        self.mesh.connect_halfedges(twin_ha, ha);
-                        [hb, ha]
-                    }
-                }
-            }
-            _ => {
-                let mid = start + (len >> 1);
-                let [_, inner_left_hid] = self.div_conq_recurse(start, mid, !is_horizontal);
-                let [inner_right_hid, _] = self.div_conq_recurse(mid, end, !is_horizontal);
-                self.merge_hull(inner_left_hid, inner_right_hid, is_horizontal)
-            }
-        }
-    }
-
-    fn merge_hull(
-        &mut self,
-        mut inner_left_hid: HalfedgeId,
-        mut inner_right_hid: HalfedgeId,
-        is_horizontal: bool,
-    ) -> [HalfedgeId; 2] {
-        use crate::mesh::Mesh;
-        // find bottommost halfedge
-        {
-            let [mut lt, mut lb] = self.mesh.he_vertices(inner_left_hid);
-            let [mut rb, mut rt] = self.mesh.he_vertices(inner_right_hid);
-            loop {
-                let mut stop = true;
-                if self.counterclockwise(lt, lb, rt) > 0.0 {
-                    stop = false;
-                    inner_left_hid = self.mesh.he_next(inner_left_hid);
-                    lt = lb;
-                    lb = self.mesh.he_to(inner_left_hid);
-                }
-
-                if self.counterclockwise(rb, rt, lt) > 0.0 {
-                    stop = false;
-                    inner_right_hid = self.mesh.he_prev(inner_right_hid);
-                    rt = rb;
-                    rb = self.mesh.he_from(inner_right_hid);
-                }
-                if stop {
-                    break;
-                }
-            }
-            inner_left_hid = self.mesh.he_prev(inner_left_hid);
-            inner_right_hid = self.mesh.he_next(inner_right_hid);
-        }
-
-        let [mut lt, mut lb] = self.mesh.he_vertices(inner_left_hid);
-        let [mut rb, mut rt] = self.mesh.he_vertices(inner_right_hid);
-        let mut bottom_hid = self.mesh.new_edge_by_veritces(rb, lb);
-        let mut top_hid = self.mesh.he_twin(bottom_hid);
-
-        loop {
-            let left_finished = self.counterclockwise(lt, lb, rb) <= 0.0;
-            let right_finished = self.counterclockwise(rb, rt, lt) <= 0.0;
-            if left_finished && right_finished {
-                break;
-            }
-
-            if !left_finished {
-                let mut curr_hid = self.mesh.he_twin(inner_left_hid);
-
-                loop {
-                    if self.mesh.he_is_boundary(curr_hid) {
-                        break;
-                    }
-                    let apex = self.mesh.he_to_to(curr_hid);
-                    if self.incircle(lb, rb, lt, apex) <= 0.0 {
-                        break;
-                    }
-
-                    let prev_hid = self.mesh.he_twin(self.mesh.he_prev(curr_hid));
-                    let next_hid = self.mesh.he_twin(self.mesh.he_next(curr_hid));
-
-                    self.mesh.remove_face(self.mesh.he_face(curr_hid));
-
-                    if self.mesh.he_is_boundary(prev_hid) {
-                        self.rebuild_halfedge(prev_hid, lb, apex);
-                    }
-                    if self.mesh.he_is_boundary(next_hid) {
-                        self.rebuild_halfedge(next_hid, apex, lt);
-                    }
-                    curr_hid = prev_hid;
-
-                    lt = apex;
-                }
-                inner_left_hid = self.mesh.he_twin(curr_hid);
-            }
-
-            if !right_finished {
-                let mut curr_hid = self.mesh.he_twin(inner_right_hid);
-                loop {
-                    if self.mesh.he_is_boundary(curr_hid) {
-                        break;
-                    }
-                    let apex = self.mesh.he_to_to(curr_hid);
-                    if self.incircle(lb, rb, rt, apex) <= 0.0 {
-                        break;
-                    }
-                    let next_hid = self.mesh.he_twin(self.mesh.he_next(curr_hid));
-                    let prev_hid = self.mesh.he_twin(self.mesh.he_prev(curr_hid));
-
-                    if self.mesh.he_is_boundary(prev_hid) {
-                        self.rebuild_halfedge(prev_hid, rb, apex);
-                    }
-
-                    self.mesh.remove_face(self.mesh.he_face(curr_hid));
-                    curr_hid = next_hid;
-
-                    rt = apex;
-                }
-                inner_right_hid = self.mesh.he_twin(curr_hid);
-            }
-
-            if left_finished || (!right_finished && self.incircle(lt, lb, rb, rt) > 0.0) {
-                let new_hid = self.mesh.new_edge_by_veritces(rt, lb);
-                self.mesh
-                    .new_face_by_halfedges(&[top_hid, inner_right_hid, new_hid]);
-                top_hid = self.mesh.he_twin(new_hid);
-                inner_right_hid = self.mesh.he_next(top_hid);
-                rb = rt;
-                rt = self.mesh.he_to(inner_right_hid);
-            } else {
-                let new_hid = self.mesh.new_edge_by_veritces(rb, lt);
-                self.mesh
-                    .new_face_by_halfedges(&[top_hid, new_hid, inner_left_hid]);
-                top_hid = self.mesh.he_twin(new_hid);
-                inner_left_hid = self.mesh.he_prev(top_hid);
-                lb = lt;
-                lt = self.mesh.he_from(inner_left_hid);
-            }
-        }
-
-        if is_horizontal {
-            top_hid = self.rotate_next(top_hid, |pa, pb| pa[1] >= pb[1]);
-            bottom_hid = self.rotate_prev(bottom_hid, |pa, pb| pa[1] < pb[1]);
-            [self.mesh.he_next(bottom_hid), self.mesh.he_prev(top_hid)]
-        } else {
-            top_hid = self.rotate_prev(top_hid, |pa, pb| pa[0] < pb[0]);
-            bottom_hid = self.rotate_next(bottom_hid, |pa, pb| pa[0] >= pb[0]);
-            [self.mesh.he_next(top_hid), self.mesh.he_prev(bottom_hid)]
-        }
-    }
-
     fn rotate_prev(&self, mut hid: HalfedgeId, stop_fn: impl Fn(&[f64], &[f64]) -> bool) -> HalfedgeId {
         use crate::mesh::Mesh;
         let [va, vb] = self.mesh.he_vertices(hid);
@@ -554,77 +338,6 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
         hid
     }
 
-    fn rotate_back(&self, hid: &mut HalfedgeId, continue_fn: impl Fn(&[f64], &[f64]) -> bool) {
-        use crate::mesh::Mesh;
-        let [va, vb] = self.mesh.he_vertices(*hid);
-        let mut pa = point::<2>(self.points, va.0);
-        let mut pb = point::<2>(self.points, vb.0);
-        loop {
-            if continue_fn(pa, pb) {
-                *hid = self.mesh.he_prev(*hid);
-                pb = pa;
-                pa = point::<2>(self.points, self.mesh.he_from(*hid).0);
-            } else {
-                break;
-            }
-        }
-    }
-
-    fn rebuild_halfedge(&mut self, hid: HalfedgeId, va: VertexId, vb: VertexId) {
-        use crate::mesh::Mesh;
-        let twin_hid = self.mesh.he_twin(hid);
-
-        self.mesh.set_he_vertex(hid, vb);
-        self.mesh.set_he_vertex(twin_hid, va);
-        self.mesh.set_v_halfedge(va, hid);
-    }
-
-    fn add_two_edges(&mut self, va: VertexId, vb: VertexId, vc: VertexId) -> HalfedgeId {
-        use crate::mesh::Mesh;
-        let ha = self.mesh.new_edge_by_veritces(va, vb);
-        let hb = self.mesh.new_edge_by_veritces(vb, vc);
-
-        let twin_ha = self.mesh.he_twin(ha);
-        let twin_hb = self.mesh.he_twin(hb);
-        self.mesh.connect_halfedges(ha, hb);
-        self.mesh.connect_halfedges(twin_hb, twin_ha);
-
-        let va_hid = self.mesh.v_halfedge(va);
-        if va_hid.valid() {
-            let prev_va_hid = self.mesh.he_prev(va_hid);
-            self.mesh.connect_halfedges(twin_ha, va_hid);
-            self.mesh.connect_halfedges(prev_va_hid, ha);
-        } else {
-            self.mesh.connect_halfedges(twin_ha, ha);
-        }
-
-        let vc_hid = self.mesh.v_halfedge(vb);
-        if vc_hid.valid() {
-            let prev_vc_hid = self.mesh.he_prev(vc_hid);
-            self.mesh.connect_halfedges(hb, vc_hid);
-            self.mesh.connect_halfedges(prev_vc_hid, twin_hb);
-        } else {
-            self.mesh.connect_halfedges(hb, twin_hb);
-        }
-        ha
-    }
-
-    fn rotate_forward(&self, hid: &mut HalfedgeId, continue_fn: impl Fn(&[f64], &[f64]) -> bool) {
-        use crate::mesh::Mesh;
-        let [va, vb] = self.mesh.he_vertices(*hid);
-        let mut pa = point::<2>(self.points, va.0);
-        let mut pb = point::<2>(self.points, vb.0);
-        loop {
-            if continue_fn(pa, pb) {
-                *hid = self.mesh.he_next(*hid);
-                pa = pb;
-                pb = point::<2>(self.points, self.mesh.he_to(*hid).0);
-            } else {
-                break;
-            }
-        }
-    }
-
     #[inline]
     fn counterclockwise(&self, va: VertexId, vb: VertexId, vc: VertexId) -> f64 {
         predicates::orient2d(
@@ -647,7 +360,8 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
     }
 }
 
-pub fn triangulate1<A: Allocator + Copy>(points: &[f64], segments: &[usize], alloc: A) {
+pub fn triangulate1<A: Allocator + Copy>(points: &[f64], segments: &[usize], alloc: A) -> Vec<usize, A> {
+    use crate::mesh::Mesh;
     let n_points = points.len() >> 1;
     let mut sorted_vertices = Vec::<VertexId, _>::with_capacity_in(n_points, alloc);
     sorted_vertices.extend((0..n_points).map(|idx| VertexId(idx)));
@@ -657,13 +371,29 @@ pub fn triangulate1<A: Allocator + Copy>(points: &[f64], segments: &[usize], all
             .unwrap()
     });
     alternate_axes(points, &mut sorted_vertices, true);
-    let mut triangulation = Triangulation {
+    let triangulation = Triangulation {
         points,
         alloc,
         mesh: ManifoldMesh::new(([] as [[usize; 0]; 0]).into_iter(), alloc),
         sorted_vertices,
     };
-    triangulation.triangulate();
+    let mesh = triangulation.triangulate();
+    let mut result = Vec::with_capacity_in(mesh.n_faces(), alloc);
+    result.extend(mesh.faces().filter_map(|f| {
+        let fid = *f;
+        let ha = mesh.f_halfedge(fid);
+        let hb = mesh.he_next(ha);
+        let hc = mesh.he_next(hb);
+        let va = mesh.he_from(ha);
+        let vb = mesh.he_from(hb);
+        let vc = mesh.he_from(hc);
+        if va.valid() && vb.valid() && vc.valid() {
+            Some([va.0, vb.0, vc.0])
+        } else {
+            None
+        }
+    }).flatten());
+    result
 }
 
 pub fn triangulate<A: Allocator + Copy>(

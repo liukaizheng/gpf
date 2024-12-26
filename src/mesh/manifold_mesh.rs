@@ -123,16 +123,19 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
                     } else {
                         HalfedgeId::default()
                     };
-                    if vh.valid() {
-                        let vh_prev = self.he_prev(vh);
-                        self.core_data.connect_halfedges(vh_prev, hb);
-                        self.core_data.connect_halfedges(ha, vh);
-                    } else {
-                        self.core_data.connect_halfedges(ha, hb);
-                    }
+
                     if vid.valid() {
                         self.core_data.set_v_halfedge(vid, hb);
                     }
+                    if vh.valid() {
+                        let vh_prev = self.he_prev(vh);
+                        if self.he_is_boundary(vh_prev) && self.he_is_boundary(vh) {
+                            self.core_data.connect_halfedges(vh_prev, hb);
+                            self.core_data.connect_halfedges(ha, vh);
+                            continue;
+                        }
+                    }
+                    self.core_data.connect_halfedges(ha, hb);
                 }
                 [true, false] => {
                     let ha_next = self.he_next(hb_twin);
@@ -330,7 +333,11 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
         let next_hid = self.he_next(old_hid);
         self.core_data.connect_halfedges(prev_hid, new_hid);
         self.core_data.connect_halfedges(new_hid, next_hid);
-        self.he_face_arr[new_hid] = self.he_face_arr[old_hid];
+        let fid = self.he_face(old_hid);
+        self.he_face_arr[new_hid] = fid;
+        if fid.valid() {
+            self.core_data.set_f_hafledge(fid, new_hid);
+        }
     }
 
 
