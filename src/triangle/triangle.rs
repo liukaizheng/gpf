@@ -6,7 +6,7 @@ use std::ops::{Add, Index, Mul};
 use bumpalo::Bump;
 
 use crate::math::{dot, sub_in};
-use crate::mesh::{ElementId, HalfedgeId, ManifoldMesh, VertexId};
+use crate::mesh::{ElementId, FaceId, HalfedgeId, ManifoldMesh, VertexId};
 use crate::{point, predicates, INVALID_IND};
 
 struct Triangulation<'a, A: Allocator + Copy> {
@@ -16,11 +16,11 @@ struct Triangulation<'a, A: Allocator + Copy> {
     sorted_vertices: Vec<VertexId, A>,
 }
 impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
-    fn triangulate(mut self) -> ManifoldMesh<A> {
+    fn triangulate(mut self, is_horizontal: bool) -> ManifoldMesh<A> {
         let n_points = self.points.len() >> 1;
         self.mesh.new_vertices(n_points);
         self.mesh.reserve_edges(n_points << 1);
-        self.div_conq_recurse1(0, n_points, true);
+        self.div_conq_recurse1(0, n_points, is_horizontal);
         self.mesh
     }
 
@@ -122,8 +122,21 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
             }
             _ => {
                 let mid = start + (len >> 1);
+                let n_start = self.mesh.n_faces_capacity();
                 let [_, lr_hid] = self.div_conq_recurse1(start, mid, !is_horizontal);
+                let n_mid = self.mesh.n_faces_capacity();
                 let [rl_hid, _] = self.div_conq_recurse1(mid, end, !is_horizontal);
+                if mid == 29487 {
+                    let mut pts = Vec::new();
+                    for i in start..end {
+                        pts.extend_from_slice(point::<2>(self.points, self.sorted_vertices[i].0));
+                    }
+                    println!("the points is {:?} {}", pts, is_horizontal);
+                    println!("start is {}", start);
+                    println!("end is {}", end);
+                    self.write(n_start, n_mid, "left.obj");
+                    self.write(n_mid, self.mesh.n_faces_capacity(), "right.obj");
+                }
                 self.merge_hull1(lr_hid, rl_hid, is_horizontal)
             }
         }
@@ -358,9 +371,36 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
             self.alloc,
         )
     }
+
+    fn write(&self, start: usize, end: usize, name: &str) {
+        use crate::mesh::Mesh;
+        use std::fs::File;
+        use std::io::Write;
+        let mut file = File::create(name).unwrap();
+        for pt in self.points.chunks(2) {
+            writeln!(file, "v {} {} 0", pt[0], pt[1]).unwrap();
+        }
+
+        for face in self.mesh.faces() {
+            let fid = *face;
+            if *fid < start || *fid >= end {
+                continue;
+            }
+            let ha = self.mesh.f_halfedge(fid);
+            let hb = self.mesh.he_next(ha);
+            let hc = self.mesh.he_next(hb);
+            let va = self.mesh.he_to(ha);
+            let vb = self.mesh.he_to(hb);
+            let vc = self.mesh.he_to(hc);
+            if va.valid() && vb.valid() && vc.valid() {
+                writeln!(file, "f {} {} {}", va.0 + 1, vb.0 + 1, vc.0 + 1).unwrap();
+            }
+        }
+
+    }
 }
 
-pub fn triangulate1<A: Allocator + Copy>(points: &[f64], segments: &[usize], alloc: A) -> Vec<usize, A> {
+pub fn triangulate1<A: Allocator + Copy>(points: &[f64], segments: &[usize], is_horizontal: bool, alloc: A) -> Vec<usize, A> {
     use crate::mesh::Mesh;
     let n_points = points.len() >> 1;
     let mut sorted_vertices = Vec::<VertexId, _>::with_capacity_in(n_points, alloc);
@@ -370,14 +410,14 @@ pub fn triangulate1<A: Allocator + Copy>(points: &[f64], segments: &[usize], all
             .partial_cmp(point::<2>(points, j.0))
             .unwrap()
     });
-    alternate_axes(points, &mut sorted_vertices, true);
+    alternate_axes(points, &mut sorted_vertices, is_horizontal);
     let triangulation = Triangulation {
         points,
         alloc,
         mesh: ManifoldMesh::new(([] as [[usize; 0]; 0]).into_iter(), alloc),
         sorted_vertices,
     };
-    let mesh = triangulation.triangulate();
+    let mesh = triangulation.triangulate(is_horizontal);
     let mut result = Vec::with_capacity_in(mesh.n_faces(), alloc);
     result.extend(mesh.faces().filter_map(|f| {
         let fid = *f;
