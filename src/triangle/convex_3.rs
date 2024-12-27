@@ -260,14 +260,14 @@ fn close_hull<A: Allocator + Copy>(
     vid: VertexId,
 ) {
     debug_assert!(mesh.he_is_boundary(first_hid));
-    let n_old_halfedges_capacity = mesh.n_halfedges_capacity();
+    let start_vid = mesh.he_from(first_hid);
 
     let mut curr_bot_hid = first_hid;
     let mut first_side_hid = HalfedgeId::default();
     let mut prev_side_hid = HalfedgeId::default();
     loop {
         let mut next_bot_hid = mesh.he_next(curr_bot_hid);
-        if next_bot_hid.0 >= n_old_halfedges_capacity {
+        if mesh.he_to(curr_bot_hid) == start_vid {
             next_bot_hid = first_hid;
         }
         let [va, vb] = mesh.he_vertices(curr_bot_hid);

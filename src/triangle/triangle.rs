@@ -19,7 +19,7 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
     fn triangulate(mut self, is_horizontal: bool) -> ManifoldMesh<A> {
         let n_points = self.points.len() >> 1;
         self.mesh.new_vertices(n_points);
-        self.mesh.reserve_edges(n_points << 1);
+        self.mesh.reserve_edges(n_points * 6);
         self.div_conq_recurse(0, n_points, is_horizontal);
         self.mesh
     }
