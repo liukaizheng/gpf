@@ -6,7 +6,7 @@ use std::ops::{Add, Index, Mul};
 use bumpalo::Bump;
 
 use crate::math::{dot, sub_in};
-use crate::mesh::{ElementId, HalfedgeId, ManifoldMesh, VertexId};
+use crate::mesh::{ElementId, HalfedgeId, ManifoldMesh, Mesh, VertexId};
 use crate::{point, predicates, INVALID_IND};
 
 struct Triangulation<'a, A: Allocator + Copy> {
@@ -30,7 +30,6 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
         end: usize,
         is_horizontal: bool,
     ) -> [HalfedgeId; 2] {
-        use crate::mesh::Mesh;
         let len = end - start;
         match len {
             2 => {
@@ -135,7 +134,6 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
         mut rl_hid: HalfedgeId,
         is_horizontal: bool,
     ) -> [HalfedgeId; 2] {
-        use crate::mesh::Mesh;
         let [mut lt_vid, mut lb_vid] = self.he_dest_apex(lr_hid); // left top, left bottom
         let [mut rb_vid, mut rt_vid] = self.he_apex_org(rl_hid); // right bottom, right top
 
@@ -288,7 +286,6 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
 
     #[inline]
     fn he_apex_org(&self, hid: HalfedgeId) -> [VertexId; 2] {
-        use crate::mesh::Mesh;
         let next_hid = self.mesh.he_next(hid);
         let nnext_hid = self.mesh.he_next(next_hid);
         [self.mesh.he_to(next_hid), self.mesh.he_to(nnext_hid)]
@@ -296,7 +293,6 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
 
     #[inline]
     fn he_dest_apex(&self, hid: HalfedgeId) -> [VertexId; 2] {
-        use crate::mesh::Mesh;
         let next_hid = self.mesh.he_next(hid);
         [self.mesh.he_to(hid), self.mesh.he_to(next_hid)]
     }
@@ -316,7 +312,6 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
         mut hid: HalfedgeId,
         stop_fn: impl Fn(&[f64], &[f64]) -> bool,
     ) -> HalfedgeId {
-        use crate::mesh::Mesh;
         let [va, vb] = self.mesh.he_vertices(hid);
         let mut pa = point::<2>(self.points, va.0);
         let mut pb = point::<2>(self.points, vb.0);
@@ -336,7 +331,6 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
         mut hid: HalfedgeId,
         stop_fn: impl Fn(&[f64], &[f64]) -> bool,
     ) -> HalfedgeId {
-        use crate::mesh::Mesh;
         let [va, vb] = self.mesh.he_vertices(hid);
         let mut pa = point::<2>(self.points, va.0);
         let mut pb = point::<2>(self.points, vb.0);
@@ -379,7 +373,6 @@ pub fn triangulate1<A: Allocator + Copy>(
     is_horizontal: bool,
     alloc: A,
 ) -> Vec<usize, A> {
-    use crate::mesh::Mesh;
     let n_points = points.len() >> 1;
     let mut sorted_vertices = Vec::<VertexId, _>::with_capacity_in(n_points, alloc);
     sorted_vertices.extend((0..n_points).map(|idx| VertexId(idx)));
@@ -436,7 +429,7 @@ pub fn triangulate<A: Allocator + Copy>(
     // resort the array of points to accommodate alternating cuts
     alternate_axes(points, &mut sorted_pt_inds, true);
 
-    let mut mesh = Mesh {
+    let mut mesh = TriMesh {
         points,
         triangles: Vec::new_in(bump),
     };
@@ -595,7 +588,7 @@ impl Default for Triangle {
     }
 }
 
-struct Mesh<'a, A: Allocator + Copy> {
+struct TriMesh<'a, A: Allocator + Copy> {
     points: &'a [f64],
     triangles: Vec<Triangle, A>,
 }
@@ -787,7 +780,7 @@ fn incircle<A: Allocator + Copy>(
 }
 
 fn merge_hulls<A: Allocator + Copy>(
-    m: &mut Mesh<A>,
+    m: &mut TriMesh<A>,
     axis: usize,
     far_left: &mut HEdge,
     inner_left: &mut HEdge,
@@ -1115,7 +1108,7 @@ fn merge_hulls<A: Allocator + Copy>(
 }
 
 fn div_conq_recurse<A: Allocator + Copy>(
-    m: &mut Mesh<'_, A>,
+    m: &mut TriMesh<'_, A>,
     sorted_pt_inds: &[usize],
     axis: usize,
     far_left: &mut HEdge,
@@ -1307,7 +1300,7 @@ enum Direction {
 }
 
 fn find_direction<A: Allocator + Copy>(
-    m: &Mesh<A>,
+    m: &TriMesh<A>,
     ghost: &[bool],
     search_tri: &mut HEdge,
     search_point: usize,
@@ -1384,7 +1377,7 @@ fn set_mark(triangles: &mut [Triangle], he: &HEdge, mark: usize, reverse: bool) 
 }
 
 fn scout_segment<A: Allocator + Copy>(
-    m: &mut Mesh<A>,
+    m: &mut TriMesh<A>,
     ghost: &[bool],
     search_tri: &mut HEdge,
     endpoint2: usize,
@@ -1420,7 +1413,7 @@ fn scout_segment<A: Allocator + Copy>(
     }
 }
 
-fn flip<A: Allocator + Copy>(m: &mut Mesh<A>, flip_edge: &HEdge, vertex_map: &mut [HEdge]) {
+fn flip<A: Allocator + Copy>(m: &mut TriMesh<A>, flip_edge: &HEdge, vertex_map: &mut [HEdge]) {
     let right_vertex = org(&m.triangles, flip_edge);
     let left_vertex = dest(&m.triangles, flip_edge);
     let bot_vertex = apex(&m.triangles, flip_edge);
@@ -1483,7 +1476,7 @@ fn flip<A: Allocator + Copy>(m: &mut Mesh<A>, flip_edge: &HEdge, vertex_map: &mu
 }
 
 fn delaunay_fixup<A: Allocator + Copy>(
-    m: &mut Mesh<A>,
+    m: &mut TriMesh<A>,
     ghost: &[bool],
     fixup_tri: &mut HEdge,
     left_side: bool,
@@ -1540,7 +1533,7 @@ fn delaunay_fixup<A: Allocator + Copy>(
 }
 
 fn constrained_edge<A: Allocator + Copy>(
-    m: &mut Mesh<A>,
+    m: &mut TriMesh<A>,
     ghost: &[bool],
     start_tri: &mut HEdge,
     endpoint2: usize,
@@ -1608,7 +1601,7 @@ fn constrained_edge<A: Allocator + Copy>(
 }
 
 fn insert_segment<A: Allocator + Copy>(
-    m: &mut Mesh<A>,
+    m: &mut TriMesh<A>,
     vertex_map: &mut [HEdge],
     ghost: &[bool],
     mut start: usize,
@@ -1633,7 +1626,7 @@ fn insert_segment<A: Allocator + Copy>(
     constrained_edge(m, ghost, &mut searchtri1, end, mark, vertex_map, bump);
 }
 
-fn form_skeleton<A: Allocator + Copy>(m: &mut Mesh<A>, ghost: &[bool], segment: &[usize], bump: A) {
+fn form_skeleton<A: Allocator + Copy>(m: &mut TriMesh<A>, ghost: &[bool], segment: &[usize], bump: A) {
     let mut vertex_map = make_vertex_map(&m.triangles, ghost, m.points.len() >> 1, bump);
     for (i, seg) in segment.chunks(2).enumerate() {
         if seg[0] != seg[1] {
