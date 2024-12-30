@@ -105,7 +105,7 @@ fn test_simple() {
 
     {
         let start = Instant::now();
-        // let triangles = triangulate(&points, &[], &bump);
+        let triangles = triangulate(&points, &[], &bump);
         println!("old Time elapsed in {:?}", start.elapsed());
         // write_obj(&points, &triangles, "123.obj");
     }
@@ -114,7 +114,7 @@ fn test_simple() {
         let start = Instant::now();
         let triangles = triangulate1(&points, &[], true, &bump);
         println!("new Time elapsed in {:?}", start.elapsed());
-        // write_obj(&points, &triangles, "124.obj");
+        write_obj(&points, &triangles, "124.obj");
     }
 }
 
@@ -139,5 +139,20 @@ fn test_bug() {
 
     let bump = Bump::new();
     let triangles = triangulate1(&points, &[], false, &bump);
+    write_obj(&points, &triangles, "bug.obj");
+}
+
+#[test]
+fn test_cdt() {
+    #[rustfmt::skip]
+    let points = vec![
+        0.5, 0.0,
+        1.0, 1.0,
+        0.0, 0.0,
+        -0.4, -0.5,
+        0.5, -1.0,
+    ];
+    let bump = Bump::new();
+    let triangles = triangulate(&points, &[1, 3], &bump);
     write_obj(&points, &triangles, "bug.obj");
 }

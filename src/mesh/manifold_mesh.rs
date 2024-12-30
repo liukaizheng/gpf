@@ -342,6 +342,10 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
         self.he_twin(self.he_next(hid))
     }
 
+    /// The method replaces one halfedge with another one in the same face.
+    /// It assumes that the face of `old_hid` is valid and matches the expected face after replacement.
+    /// The old edge will be removed if its twin is boundary, which means that after replacement
+    /// both halfedges of the old edge will have no face.
     #[inline]
     pub fn he_replace(&mut self, old_hid: HalfedgeId, new_hid: HalfedgeId) {
         let prev_hid = self.he_prev(old_hid);
@@ -360,6 +364,47 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
         }
     }
 
+    /// Creates a new topology by flipping an edge.
+    /// The edge that will be flipped is specified by `hid`.
+    ///
+    /// The operation will not perform any geometric checks by itself, there must be one face on either side of the edge.
+    ///
+    /// before:
+    /// ```text
+    ///                   top_vid
+    ///                      ⬤
+    ///                     /   \
+    ///                    /     \
+    ///           tl_hid  /       \ tr_hid
+    ///                  /         \
+    ///                 /     hid   \
+    ///      left_vid ⬤-------------⬤  right_vid
+    ///                 \ twin_hid  /
+    ///                  \         /
+    ///           bl_hid  \       /  br_hid
+    ///                    \     /
+    ///                     \   /
+    ///                      ⬤
+    ///                 bottom_vid
+    ///
+    /// ```
+    /// after:
+    /// ```text
+    ///                  top_vid
+    ///                    ⬤
+    ///                  / |  \
+    ///                 /  |   \
+    ///       tl_hid   /   |    \ tr_hid
+    ///               /    |     \
+    ///              /     |      \
+    ///   left_vid ⬤  twin | hid   ⬤ right_vid
+    ///              \     |     /
+    ///               \    |    /
+    ///       bl_hid   \   |   /  br_hid
+    ///                 \  |  /
+    ///                  \ | /
+    ///                   ⬤
+    /// ```
     pub fn flip(&mut self, hid: HalfedgeId) {
         let bl_hid = self.he_next(hid);
         let br_hid = self.he_next(bl_hid);

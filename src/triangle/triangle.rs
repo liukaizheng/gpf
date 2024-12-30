@@ -7,7 +7,7 @@ use bumpalo::Bump;
 
 use crate::math::{dot, sub_in};
 use crate::mesh::{ElementId, HalfedgeId, ManifoldMesh, Mesh, VertexId};
-use crate::{point, predicates, INVALID_IND};
+use crate::{point, predicates, twin_index, INVALID_IND};
 
 struct Triangulation<'a, A: Allocator + Copy> {
     points: &'a [f64],
@@ -16,12 +16,12 @@ struct Triangulation<'a, A: Allocator + Copy> {
     sorted_vertices: Vec<VertexId, A>,
 }
 impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
-    fn triangulate(mut self, is_horizontal: bool) -> ManifoldMesh<A> {
+    fn triangulate(mut self, is_horizontal: bool) -> (HalfedgeId, ManifoldMesh<A>) {
         let n_points = self.points.len() >> 1;
         self.mesh.new_vertices(n_points);
         self.mesh.reserve_edges(n_points * 6);
-        self.div_conq_recurse(0, n_points, is_horizontal);
-        self.mesh
+        let [bdy_hid, _] = self.div_conq_recurse(0, n_points, is_horizontal);
+        (bdy_hid, self.mesh)
     }
 
     fn div_conq_recurse(
@@ -367,12 +367,43 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
     }
 }
 
-pub fn triangulate1<A: Allocator + Copy>(
+/// A constrained Delaunay triangulation.
+struct CDT<'a, A: Allocator + Copy> {
+    points: &'a [f64],
+    mesh: ManifoldMesh<A>,
+    halfedge_marks: Vec<usize, A>,
+}
+
+impl<'a, A: Allocator + Copy> CDT<'a, A> {
+    fn insert_segment(&mut self, mut va: VertexId, mut vb: VertexId, mark: usize) -> bool {
+        va = self.scout_segment(self.mesh.v_halfedge(va), vb, mark);
+        if va == vb {
+            return true;
+        }
+        vb = self.scout_segment(self.mesh.v_halfedge(vb), va, twin_index(mark));
+        true
+    }
+
+    fn scout_segment(&mut self, hid: HalfedgeId, vb: VertexId, mark: usize) -> VertexId {
+        if self.mesh.he_to(hid) == vb {
+            return vb;
+        }
+
+        VertexId::default()
+    }
+
+    #[inline]
+    fn set_edge_mark(&mut self, hid: HalfedgeId, mark: usize) {
+        self.halfedge_marks[hid] = mark;
+        self.halfedge_marks[self.mesh.he_twin(hid)] = twin_index(mark);
+    }
+}
+
+fn get_triangulated_mesh<A: Allocator + Copy>(
     points: &[f64],
-    segments: &[usize],
     is_horizontal: bool,
     alloc: A,
-) -> Vec<usize, A> {
+) -> (HalfedgeId, ManifoldMesh<A>) {
     let n_points = points.len() >> 1;
     let mut sorted_vertices = Vec::<VertexId, _>::with_capacity_in(n_points, alloc);
     sorted_vertices.extend((0..n_points).map(|idx| VertexId(idx)));
@@ -388,7 +419,15 @@ pub fn triangulate1<A: Allocator + Copy>(
         mesh: ManifoldMesh::new(([] as [[usize; 0]; 0]).into_iter(), alloc),
         sorted_vertices,
     };
-    let mesh = triangulation.triangulate(is_horizontal);
+    triangulation.triangulate(is_horizontal)
+}
+
+pub fn triangulate_points<A: Allocator + Copy>(
+    points: &[f64],
+    is_horizontal: bool,
+    alloc: A,
+) -> Vec<usize, A> {
+    let (_, mesh) = get_triangulated_mesh(points, is_horizontal, alloc);
     let mut result = Vec::with_capacity_in(mesh.n_faces(), alloc);
     result.extend(
         mesh.faces()
@@ -409,6 +448,56 @@ pub fn triangulate1<A: Allocator + Copy>(
             .flatten(),
     );
     result
+}
+
+pub fn triangulate1<A: Allocator + Copy>(
+    points: &[f64],
+    segments: &[usize],
+    is_horizontal: bool,
+    alloc: A,
+) -> Vec<usize, A> {
+    let (bdy_hid, mut mesh) = get_triangulated_mesh(points, is_horizontal, alloc);
+    set_boundary_vertex_halfedges(&mut mesh, bdy_hid);
+    let mut halfedge_marks = Vec::<usize, A>::with_capacity_in(mesh.n_halfedges_capacity(), alloc);
+    halfedge_marks.extend(std::iter::repeat(INVALID_IND).take(mesh.n_halfedges_capacity()));
+    let mut cdt = CDT {
+        points,
+        mesh,
+        halfedge_marks,
+    };
+    for idx in (0..segments.len()).step_by(2) {
+        let va = VertexId(segments[idx]);
+        let vb = VertexId(segments[idx + 1]);
+        if va != vb {
+            cdt.insert_segment(va, vb, idx);
+        }
+    }
+
+    Vec::<usize, A>::new_in(alloc)
+}
+
+fn set_boundary_vertex_halfedges<A: Allocator + Copy>(
+    mesh: &mut ManifoldMesh<A>,
+    first_hid: HalfedgeId,
+) {
+    let mut curr_hid = first_hid;
+    loop {
+        let va = mesh.he_from(curr_hid);
+        mesh.set_v_halfedge(va, curr_hid);
+        curr_hid = mesh.he_next(mesh.he_next_twin(curr_hid));
+        if curr_hid == first_hid {
+            break;
+        }
+    }
+}
+
+fn insert_segment1<A: Allocator + Copy>(
+    points: &[f64],
+    mesh: &mut ManifoldMesh<A>,
+    va: VertexId,
+    vb: VertexId,
+    mark: usize,
+) {
 }
 
 pub fn triangulate<A: Allocator + Copy>(
@@ -1626,7 +1715,12 @@ fn insert_segment<A: Allocator + Copy>(
     constrained_edge(m, ghost, &mut searchtri1, end, mark, vertex_map, bump);
 }
 
-fn form_skeleton<A: Allocator + Copy>(m: &mut TriMesh<A>, ghost: &[bool], segment: &[usize], bump: A) {
+fn form_skeleton<A: Allocator + Copy>(
+    m: &mut TriMesh<A>,
+    ghost: &[bool],
+    segment: &[usize],
+    bump: A,
+) {
     let mut vertex_map = make_vertex_map(&m.triangles, ghost, m.points.len() >> 1, bump);
     for (i, seg) in segment.chunks(2).enumerate() {
         if seg[0] != seg[1] {
