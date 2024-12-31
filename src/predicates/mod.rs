@@ -1,9 +1,10 @@
 mod det4;
 mod expansion_number;
-mod generic_point;
+mod generic_point_3d;
+mod generic_point_2d;
 mod interval_number;
 mod less_than;
-pub mod orient2d;
+pub mod orient2d_3d;
 pub mod orient3d;
 mod predicates;
 
@@ -14,10 +15,10 @@ use std::{
 
 pub use det4::*;
 pub use expansion_number::*;
-pub use generic_point::*;
+pub use generic_point_3d::*;
 pub use interval_number::*;
 pub use less_than::*;
-pub use orient2d::*;
+pub use orient2d_3d::*;
 pub use predicates::*;
 
 use self::orient3d::orient3d_eeee;

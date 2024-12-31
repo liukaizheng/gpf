@@ -10,7 +10,7 @@ use crate::{
     math::{cross_in, norm, sub_in},
     mesh::{EdgeId, ElementId, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
-        self, max_comp_in_tri_normal, orient2d, orient2d_by_axis, orient3d::orient3d, sign_reverse,
+        self, max_comp_in_tri_normal, orient2d_3d, orient2d_by_axis, orient3d::orient3d, sign_reverse,
         sign_reversed, ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
         Orientation, Point3D,
     },
@@ -1081,7 +1081,8 @@ impl BSPComplex {
             let [va, vb] = self.mesh.e_vertices(ea);
             let vc = end_vertex(hb);
             let [pa, pb, pc] = [va, vb, vc].map(|vid| &self.points[vid]);
-            orient2d::orient2d_by_axis(pa, pb, pc, axis, bump) == Orientation::Zero
+            orient2d_3d::orient2d_by_axis(pa, pb, pc, axis, bump) == Orientation::Zero
+
         };
         let start_idx = outline
             .iter()
@@ -1302,7 +1303,7 @@ impl BSPComplex {
                 tri_points
                     .into_iter()
                     .circular_tuple_windows()
-                    .map(|(pa, pb)| orient2d::orient2d_by_axis(pa, pb, p, axis, bump)),
+                    .map(|(pa, pb)| orient2d_3d::orient2d_by_axis(pa, pb, p, axis, bump)),
             );
 
             // intersect in inner
@@ -1322,8 +1323,8 @@ impl BSPComplex {
                     let pc = &self.points[tri[k]];
                     let pd = &self.points[tri[(k + 1) % 3]];
                     if sign_reversed(
-                        orient2d::orient2d_by_axis(pa, pb, pc, axis, bump),
-                        orient2d::orient2d_by_axis(pa, pb, pd, axis, bump),
+                        orient2d_3d::orient2d_by_axis(pa, pb, pc, axis, bump),
+                        orient2d_3d::orient2d_by_axis(pa, pb, pd, axis, bump),
                     ) {
                         return true;
                     }
@@ -1352,7 +1353,7 @@ impl BSPComplex {
 
         let mut base_ori = Orientation::Undefined;
         for (pa, pb) in face_points.into_iter().circular_tuple_windows() {
-            let ori = orient2d::orient2d_by_axis(pa, pb, center, axis, bump);
+            let ori = orient2d_3d::orient2d_by_axis(pa, pb, center, axis, bump);
             if ori == Orientation::Zero {
                 return false;
             }
@@ -1857,7 +1858,7 @@ fn is_triangle_intersects_poly<A: Allocator + Copy>(
         for (i, (&pa, &pb)) in tri.iter().circular_tuple_windows().enumerate() {
             let mut has_inside = false;
             for &pc in poly {
-                let ori = orient2d::orient2d_by_axis(pa, pb, pc, axis, alloc);
+                let ori = orient2d_3d::orient2d_by_axis(pa, pb, pc, axis, alloc);
                 if ori == Orientation::Zero {
                     continue;
                 }
@@ -1880,7 +1881,7 @@ fn is_triangle_intersects_poly<A: Allocator + Copy>(
         for (&pa, &pb) in poly.iter().circular_tuple_windows() {
             let mut has_inside = false;
             for &pc in tri {
-                let ori = orient2d::orient2d_by_axis(pa, pb, pc, axis, alloc);
+                let ori = orient2d_3d::orient2d_by_axis(pa, pb, pc, axis, alloc);
                 if ori == Orientation::Zero {
                     continue;
                 }
