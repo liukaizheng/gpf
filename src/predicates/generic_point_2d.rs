@@ -3,7 +3,9 @@ use std::{
     cell::{Ref, RefCell},
 };
 
-use super::{abs_max, dummy_abs_max, estimate, get_exponent, ExpansionNum, GenericNum, IntervalNumber};
+use super::{
+    abs_max, dummy_abs_max, estimate, get_exponent, ExpansionNum, GenericNum, IntervalNumber,
+};
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct ExplicitPoint2D<'a> {
@@ -36,7 +38,7 @@ fn copy_exact_cache<A: Allocator + Copy>(
 }
 
 pub struct ImplicitPointSSI<'a> {
-    a: &'a [f64],
+    pub a: &'a [f64],
     b: &'a [f64],
     p: &'a [f64],
     q: &'a [f64],
@@ -227,4 +229,9 @@ fn normalize_lambda2d(x: &mut [f64], y: &mut [f64], d: &mut [f64]) {
             }
         }
     }
+}
+
+pub enum Point2D<'a> {
+    E(&'a [f64]),
+    I(ImplicitPointSSI<'a>),
 }

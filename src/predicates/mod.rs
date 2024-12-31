@@ -4,6 +4,7 @@ mod generic_point_3d;
 mod generic_point_2d;
 mod interval_number;
 mod less_than;
+pub mod orient2d_2d;
 pub mod orient2d_3d;
 pub mod orient3d;
 mod predicates;
