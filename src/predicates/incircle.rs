@@ -1,9 +1,76 @@
 use std::alloc::Allocator;
 
+use crate::point;
+
 use super::{
-    abs_max, double_to_sign, dummy_abs_max, generic_point_2d::ImplicitPointSSI, GenericNum,
-    Orientation,
+    abs_max, double_to_sign, dummy_abs_max,
+    generic_point_2d::{ImplicitPointSSI, Point2D},
+    predicates, GenericNum, Orientation,
 };
+
+pub fn incircle<T: AsRef<Point2D>, A: Allocator + Copy>(
+    va: T,
+    vb: T,
+    vc: T,
+    vd: T,
+    points: &[f64],
+    alloc: A,
+) -> Orientation {
+    match (va.as_ref(), vb.as_ref(), vc.as_ref(), vd.as_ref()) {
+        (&Point2D::E(va), &Point2D::E(vb), &Point2D::E(vc), &Point2D::E(vd)) => {
+            let pa = point::<2>(points, va);
+            let pb = point::<2>(points, vb);
+            let pc = point::<2>(points, vc);
+            let pd = point::<2>(points, vd);
+            double_to_sign(predicates::incircle(pa, pb, pc, pd, alloc))
+        }
+        (&Point2D::E(va), &Point2D::E(vb), &Point2D::E(vc), Point2D::I(pd)) => {
+            incircle_ieee(pd, vb, va, vc, points, alloc)
+        }
+        (&Point2D::E(va), &Point2D::E(vb), Point2D::I(pc), &Point2D::E(vd)) => {
+            incircle_ieee(pc, va, vb, vd, points, alloc)
+        }
+        (&Point2D::E(va), &Point2D::E(vb), Point2D::I(pc), Point2D::I(pd)) => {
+            incircle_iiee(pc, pd, va, vb, points, alloc)
+        }
+        (&Point2D::E(va), Point2D::I(pb), &Point2D::E(vc), &Point2D::E(vd)) => {
+            incircle_ieee(pb, vc, va, vd, points, alloc)
+        }
+        (&Point2D::E(va), Point2D::I(pb), &Point2D::E(vc), Point2D::I(pd)) => {
+            incircle_iiee(pb, pd, vc, va, points, alloc)
+        }
+        (&Point2D::E(va), Point2D::I(pb), Point2D::I(pc), &Point2D::E(vd)) => {
+            incircle_iiee(pb, pc, va, vd, points, alloc)
+        }
+        (&Point2D::E(va), Point2D::I(pb), Point2D::I(pc), Point2D::I(pd)) => {
+            incircle_iiie(pb, pd, pc, va, points, alloc)
+        }
+        (Point2D::I(pa), &Point2D::E(vb), &Point2D::E(vc), &Point2D::E(vd)) => {
+            incircle_ieee(pa, vb, vc, vd, points, alloc)
+        }
+        (Point2D::I(pa), &Point2D::E(vb), &Point2D::E(vc), Point2D::I(pd)) => {
+            incircle_iiee(pa, pd, vb, vc, points, alloc)
+        }
+        (Point2D::I(pa), &Point2D::E(vb), Point2D::I(pc), &Point2D::E(vd)) => {
+            incircle_iiee(pa, pc, vd, vb, points, alloc)
+        }
+        (Point2D::I(pa), &Point2D::E(vb), Point2D::I(pc), Point2D::I(pd)) => {
+            incircle_iiie(pa, pc, pd, vb, points, alloc)
+        }
+        (Point2D::I(pa), Point2D::I(pb), &Point2D::E(vc), &Point2D::E(vd)) => {
+            incircle_iiee(pa, pb, vc, vd, points, alloc)
+        }
+        (Point2D::I(pa), Point2D::I(pb), &Point2D::E(vc), Point2D::I(pd)) => {
+            incircle_iiie(pa, pd, pb, vc, points, alloc)
+        }
+        (Point2D::I(pa), Point2D::I(pb), Point2D::I(pc), &Point2D::E(vd)) => {
+            incircle_iiie(pa, pb, pc, vd, points, alloc)
+        }
+        (Point2D::I(pa), Point2D::I(pb), Point2D::I(pc), Point2D::I(pd)) => {
+            incircle_iiii(pa, pb, pc, pd, points, alloc)
+        }
+    }
+}
 
 fn incircle_ieee_impl<const NEED_MAX: bool, T: GenericNum, F: FnOnce(&[T]) -> Option<T>>(
     l1x: &T,
@@ -59,20 +126,26 @@ fn incircle_ieee_impl<const NEED_MAX: bool, T: GenericNum, F: FnOnce(&[T]) -> Op
         (det, None)
     }
 }
-fn incircle_ieee<'a, A: Allocator + Copy>(
+
+fn incircle_ieee<A: Allocator + Copy>(
     pa: &ImplicitPointSSI,
-    pb: &[f64],
-    pc: &[f64],
-    pd: &[f64],
+    vb: usize,
+    vc: usize,
+    vd: usize,
+    points: &[f64],
     alloc: A,
 ) -> Orientation {
-    if let Some(pa_static) = pa.ss_filter() {
+    let pa_pa = point::<2>(points, pa.data[0]);
+    let pb = point::<2>(points, vb);
+    let pc = point::<2>(points, vc);
+    let pd = point::<2>(points, vd);
+    if let Some(pa_static) = pa.ss_filter(points) {
         let ret = incircle_ieee_impl::<true, _, _>(
             &pa_static.0.x,
             &pa_static.0.y,
             &pa_static.0.d,
-            pa.a[0],
-            pa.a[1],
+            pa_pa[0],
+            pa_pa[1],
             pb[0],
             pb[1],
             pc[0],
@@ -95,13 +168,13 @@ fn incircle_ieee<'a, A: Allocator + Copy>(
         }
     }
 
-    if let Some(pa_dynamic) = pa.d_filter() {
+    if let Some(pa_dynamic) = pa.d_filter(points) {
         let ret = incircle_ieee_impl::<false, _, _>(
             &pa_dynamic.x,
             &pa_dynamic.y,
             &pa_dynamic.d,
-            pa.a[0].into(),
-            pa.a[1].into(),
+            pa_pa[0].into(),
+            pa_pa[1].into(),
             pb[0].into(),
             pb[1].into(),
             pc[0].into(),
@@ -118,13 +191,13 @@ fn incircle_ieee<'a, A: Allocator + Copy>(
         }
     }
 
-    if let Some(pa_exact) = pa.exact(alloc) {
+    if let Some(pa_exact) = pa.exact(points, alloc) {
         let (det, _) = incircle_ieee_impl::<false, _, _>(
             &pa_exact.x,
             &pa_exact.y,
             &pa_exact.d,
-            [pa.a[0]].to_vec_in(alloc).into(),
-            [pa.a[1]].to_vec_in(alloc).into(),
+            [pa_pa[0]].to_vec_in(alloc).into(),
+            [pa_pa[1]].to_vec_in(alloc).into(),
             [pb[0]].to_vec_in(alloc).into(),
             [pb[1]].to_vec_in(alloc).into(),
             [pc[0]].to_vec_in(alloc).into(),
@@ -211,12 +284,17 @@ fn incircle_iiee_impl<const NEED_MAX: bool, T: GenericNum, F: FnOnce(&[T]) -> Op
 fn incircle_iiee<'a, A: Allocator + Copy>(
     pa: &ImplicitPointSSI,
     pb: &ImplicitPointSSI,
-    pc: &[f64],
-    pd: &[f64],
+    vc: usize,
+    vd: usize,
+    points: &[f64],
     alloc: A,
 ) -> Orientation {
-    if let Some(pa_static) = pa.ss_filter()
-        && let Some(pb_static) = pb.ss_filter()
+    let pa_pa = point::<2>(points, pa.data[0]);
+    let pb_pa = point::<2>(points, pb.data[0]);
+    let pc = point::<2>(points, vc);
+    let pd = point::<2>(points, vd);
+    if let Some(pa_static) = pa.ss_filter(points)
+        && let Some(pb_static) = pb.ss_filter(points)
     {
         let ret = incircle_iiee_impl::<true, _, _>(
             &pa_static.0.x,
@@ -225,10 +303,10 @@ fn incircle_iiee<'a, A: Allocator + Copy>(
             &pb_static.0.x,
             &pb_static.0.y,
             &pb_static.0.d,
-            pa.a[0],
-            pa.a[1],
-            pb.a[0],
-            pb.a[1],
+            pa_pa[0],
+            pa_pa[1],
+            pb_pa[0],
+            pb_pa[1],
             pc[0],
             pc[1],
             pd[0],
@@ -254,8 +332,8 @@ fn incircle_iiee<'a, A: Allocator + Copy>(
         }
     }
 
-    if let Some(pa_dynamic) = pa.d_filter()
-        && let Some(pb_dynamic) = pb.d_filter()
+    if let Some(pa_dynamic) = pa.d_filter(points)
+        && let Some(pb_dynamic) = pb.d_filter(points)
     {
         let ret = incircle_iiee_impl::<false, _, _>(
             &pa_dynamic.x,
@@ -264,10 +342,10 @@ fn incircle_iiee<'a, A: Allocator + Copy>(
             &pb_dynamic.x,
             &pb_dynamic.y,
             &pb_dynamic.d,
-            pa.a[0].into(),
-            pa.a[1].into(),
-            pb.a[0].into(),
-            pb.a[1].into(),
+            pa_pa[0].into(),
+            pa_pa[1].into(),
+            pb_pa[0].into(),
+            pb_pa[1].into(),
             pc[0].into(),
             pc[1].into(),
             pd[0].into(),
@@ -282,8 +360,8 @@ fn incircle_iiee<'a, A: Allocator + Copy>(
         }
     }
 
-    if let Some(pa_exact) = pa.exact(alloc)
-        && let Some(pb_exact) = pb.exact(alloc)
+    if let Some(pa_exact) = pa.exact(points, alloc)
+        && let Some(pb_exact) = pb.exact(points, alloc)
     {
         let (det, _) = incircle_iiee_impl::<false, _, _>(
             &pa_exact.x,
@@ -292,10 +370,10 @@ fn incircle_iiee<'a, A: Allocator + Copy>(
             &pb_exact.x,
             &pb_exact.y,
             &pb_exact.d,
-            [pa.a[0]].to_vec_in(alloc).into(),
-            [pa.a[1]].to_vec_in(alloc).into(),
-            [pb.a[0]].to_vec_in(alloc).into(),
-            [pb.a[1]].to_vec_in(alloc).into(),
+            [pa_pa[0]].to_vec_in(alloc).into(),
+            [pa_pa[1]].to_vec_in(alloc).into(),
+            [pb_pa[0]].to_vec_in(alloc).into(),
+            [pb_pa[1]].to_vec_in(alloc).into(),
             [pc[0]].to_vec_in(alloc).into(),
             [pc[1]].to_vec_in(alloc).into(),
             [pd[0]].to_vec_in(alloc).into(),
@@ -390,12 +468,17 @@ fn incircle_iiie<'a, A: Allocator + Copy>(
     pa: &ImplicitPointSSI,
     pb: &ImplicitPointSSI,
     pc: &ImplicitPointSSI,
-    pd: &[f64],
+    vd: usize,
+    points: &[f64],
     alloc: A,
 ) -> Orientation {
-    if let Some(pa_static) = pa.ss_filter()
-        && let Some(pb_static) = pb.ss_filter()
-        && let Some(pc_static) = pc.ss_filter()
+    let pa_pa = point::<2>(points, pa.data[0]);
+    let pb_pa = point::<2>(points, pb.data[0]);
+    let pc_pa = point::<2>(points, pc.data[0]);
+    let pd = point::<2>(points, vd);
+    if let Some(pa_static) = pa.ss_filter(points)
+        && let Some(pb_static) = pb.ss_filter(points)
+        && let Some(pc_static) = pc.ss_filter(points)
     {
         let ret = incircle_iiie_impl::<true, _, _>(
             &pa_static.0.x,
@@ -407,12 +490,12 @@ fn incircle_iiie<'a, A: Allocator + Copy>(
             &pc_static.0.x,
             &pc_static.0.y,
             &pc_static.0.d,
-            pa.a[0],
-            pa.a[1],
-            pb.a[0],
-            pb.a[1],
-            pc.a[0],
-            pc.a[1],
+            pa_pa[0],
+            pa_pa[1],
+            pb_pa[0],
+            pb_pa[1],
+            pc_pa[0],
+            pc_pa[1],
             pd[0],
             pd[1],
             abs_max,
@@ -433,9 +516,9 @@ fn incircle_iiie<'a, A: Allocator + Copy>(
         }
     }
 
-    if let Some(pa_dynamic) = pa.d_filter()
-        && let Some(pb_dynamic) = pb.d_filter()
-        && let Some(pc_dynamic) = pc.d_filter()
+    if let Some(pa_dynamic) = pa.d_filter(points)
+        && let Some(pb_dynamic) = pb.d_filter(points)
+        && let Some(pc_dynamic) = pc.d_filter(points)
     {
         let ret = incircle_iiie_impl::<false, _, _>(
             &pa_dynamic.x,
@@ -447,12 +530,12 @@ fn incircle_iiie<'a, A: Allocator + Copy>(
             &pc_dynamic.x,
             &pc_dynamic.y,
             &pc_dynamic.d,
-            pa.a[0].into(),
-            pa.a[1].into(),
-            pb.a[0].into(),
-            pb.a[1].into(),
-            pc.a[0].into(),
-            pc.a[1].into(),
+            pa_pa[0].into(),
+            pa_pa[1].into(),
+            pb_pa[0].into(),
+            pb_pa[1].into(),
+            pc_pa[0].into(),
+            pc_pa[1].into(),
             pd[0].into(),
             pd[1].into(),
             dummy_abs_max,
@@ -465,9 +548,9 @@ fn incircle_iiie<'a, A: Allocator + Copy>(
         }
     }
 
-    if let Some(pa_exact) = pa.exact(alloc)
-        && let Some(pb_exact) = pb.exact(alloc)
-        && let Some(pc_exact) = pc.exact(alloc)
+    if let Some(pa_exact) = pa.exact(points, alloc)
+        && let Some(pb_exact) = pb.exact(points, alloc)
+        && let Some(pc_exact) = pc.exact(points, alloc)
     {
         let (det, _) = incircle_iiie_impl::<false, _, _>(
             &pa_exact.x,
@@ -479,12 +562,12 @@ fn incircle_iiie<'a, A: Allocator + Copy>(
             &pc_exact.x,
             &pc_exact.y,
             &pc_exact.d,
-            [pa.a[0]].to_vec_in(alloc).into(),
-            [pa.a[1]].to_vec_in(alloc).into(),
-            [pb.a[0]].to_vec_in(alloc).into(),
-            [pb.a[1]].to_vec_in(alloc).into(),
-            [pc.a[0]].to_vec_in(alloc).into(),
-            [pc.a[1]].to_vec_in(alloc).into(),
+            [pa_pa[0]].to_vec_in(alloc).into(),
+            [pa_pa[1]].to_vec_in(alloc).into(),
+            [pb_pa[0]].to_vec_in(alloc).into(),
+            [pb_pa[1]].to_vec_in(alloc).into(),
+            [pc_pa[0]].to_vec_in(alloc).into(),
+            [pc_pa[1]].to_vec_in(alloc).into(),
             [pd[0]].to_vec_in(alloc).into(),
             [pd[1]].to_vec_in(alloc).into(),
             dummy_abs_max,
@@ -597,12 +680,17 @@ fn incircle_iiii<'a, A: Allocator + Copy>(
     pb: &ImplicitPointSSI,
     pc: &ImplicitPointSSI,
     pd: &ImplicitPointSSI,
+    points: &[f64],
     alloc: A,
 ) -> Orientation {
-    if let Some(pa_static) = pa.ss_filter()
-        && let Some(pb_static) = pb.ss_filter()
-        && let Some(pc_static) = pc.ss_filter()
-        && let Some(pd_static) = pd.ss_filter()
+    let pa_pa = point::<2>(points, pa.data[0]);
+    let pb_pa = point::<2>(points, pb.data[0]);
+    let pc_pa = point::<2>(points, pc.data[0]);
+    let pd_pa = point::<2>(points, pd.data[0]);
+    if let Some(pa_static) = pa.ss_filter(points)
+        && let Some(pb_static) = pb.ss_filter(points)
+        && let Some(pc_static) = pc.ss_filter(points)
+        && let Some(pd_static) = pd.ss_filter(points)
     {
         let ret = incircle_iiii_impl::<true, _, _>(
             &pa_static.0.x,
@@ -617,14 +705,14 @@ fn incircle_iiii<'a, A: Allocator + Copy>(
             &pd_static.0.x,
             &pd_static.0.y,
             &pd_static.0.d,
-            pa.a[0],
-            pa.a[1],
-            pb.a[0],
-            pb.a[1],
-            pc.a[0],
-            pc.a[1],
-            pd.a[0],
-            pd.a[1],
+            pa_pa[0],
+            pa_pa[1],
+            pb_pa[0],
+            pb_pa[1],
+            pc_pa[0],
+            pc_pa[1],
+            pd_pa[0],
+            pd_pa[1],
             abs_max,
         );
 
@@ -652,10 +740,10 @@ fn incircle_iiii<'a, A: Allocator + Copy>(
         }
     }
 
-    if let Some(pa_dynamic) = pa.d_filter()
-        && let Some(pb_dynamic) = pb.d_filter()
-        && let Some(pc_dynamic) = pc.d_filter()
-        && let Some(pd_dynamic) = pd.d_filter()
+    if let Some(pa_dynamic) = pa.d_filter(points)
+        && let Some(pb_dynamic) = pb.d_filter(points)
+        && let Some(pc_dynamic) = pc.d_filter(points)
+        && let Some(pd_dynamic) = pd.d_filter(points)
     {
         let ret = incircle_iiii_impl::<false, _, _>(
             &pa_dynamic.x,
@@ -670,14 +758,14 @@ fn incircle_iiii<'a, A: Allocator + Copy>(
             &pd_dynamic.x,
             &pd_dynamic.y,
             &pd_dynamic.d,
-            pa.a[0].into(),
-            pa.a[1].into(),
-            pb.a[0].into(),
-            pb.a[1].into(),
-            pc.a[0].into(),
-            pc.a[1].into(),
-            pd.a[0].into(),
-            pd.a[1].into(),
+            pa_pa[0].into(),
+            pa_pa[1].into(),
+            pb_pa[0].into(),
+            pb_pa[1].into(),
+            pc_pa[0].into(),
+            pc_pa[1].into(),
+            pd_pa[0].into(),
+            pd_pa[1].into(),
             dummy_abs_max,
         );
 
@@ -688,10 +776,10 @@ fn incircle_iiii<'a, A: Allocator + Copy>(
         }
     }
 
-    if let Some(pa_exact) = pa.exact(alloc)
-        && let Some(pb_exact) = pb.exact(alloc)
-        && let Some(pc_exact) = pc.exact(alloc)
-        && let Some(pd_exact) = pd.exact(alloc)
+    if let Some(pa_exact) = pa.exact(points, alloc)
+        && let Some(pb_exact) = pb.exact(points, alloc)
+        && let Some(pc_exact) = pc.exact(points, alloc)
+        && let Some(pd_exact) = pd.exact(points, alloc)
     {
         let (det, _) = incircle_iiii_impl::<false, _, _>(
             &pa_exact.x,
@@ -706,14 +794,14 @@ fn incircle_iiii<'a, A: Allocator + Copy>(
             &pd_exact.x,
             &pd_exact.y,
             &pd_exact.d,
-            [pa.a[0]].to_vec_in(alloc).into(),
-            [pa.a[1]].to_vec_in(alloc).into(),
-            [pb.a[0]].to_vec_in(alloc).into(),
-            [pb.a[1]].to_vec_in(alloc).into(),
-            [pc.a[0]].to_vec_in(alloc).into(),
-            [pc.a[1]].to_vec_in(alloc).into(),
-            [pd.a[0]].to_vec_in(alloc).into(),
-            [pd.a[1]].to_vec_in(alloc).into(),
+            [pa_pa[0]].to_vec_in(alloc).into(),
+            [pa_pa[1]].to_vec_in(alloc).into(),
+            [pb_pa[0]].to_vec_in(alloc).into(),
+            [pb_pa[1]].to_vec_in(alloc).into(),
+            [pc_pa[0]].to_vec_in(alloc).into(),
+            [pc_pa[1]].to_vec_in(alloc).into(),
+            [pd_pa[0]].to_vec_in(alloc).into(),
+            [pd_pa[1]].to_vec_in(alloc).into(),
             dummy_abs_max,
         );
         return double_to_sign(*det.last().unwrap());

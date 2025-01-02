@@ -1,28 +1,46 @@
 use std::alloc::Allocator;
 
+use crate::point;
+
 use super::{
     abs_max, double_to_sign, dummy_abs_max,
     generic_point_2d::{ImplicitPointSSI, Point2D},
     GenericNum, Orientation,
 };
 
-pub fn orient2d<'a, T: AsRef<Point2D<'a>>, A: Allocator + Copy>(
-    pa: T,
-    pb: T,
-    pc: T,
+pub fn orient2d<T: AsRef<Point2D>, A: Allocator + Copy>(
+    va: T,
+    vb: T,
+    vc: T,
+    points: &[f64],
     alloc: A,
 ) -> Orientation {
-    match (pa.as_ref(), pb.as_ref(), pc.as_ref()) {
-        (Point2D::E(pa), Point2D::E(pb), Point2D::E(pc)) => {
+    match (va.as_ref(), vb.as_ref(), vc.as_ref()) {
+        (&Point2D::E(va), &Point2D::E(vb), &Point2D::E(vc)) => {
+            let pa = point::<2>(points, va);
+            let pb = point::<2>(points, vb);
+            let pc = point::<2>(points, vc);
             double_to_sign(super::orient2d(pa, pb, pc, alloc))
         }
-        (Point2D::E(pa), Point2D::E(pb), Point2D::I(pc)) => orient2d_iee(pc, pa, pb, alloc),
-        (Point2D::E(pa), Point2D::I(pb), Point2D::E(pc)) => orient2d_iee(pb, pc, pa, alloc),
-        (Point2D::E(pa), Point2D::I(pb), Point2D::I(pc)) => orient2d_iie(pb, pc, pa, alloc),
-        (Point2D::I(pa), Point2D::E(pb), Point2D::E(pc)) => orient2d_iee(pa, pb, pc, alloc),
-        (Point2D::I(pa), Point2D::E(pb), Point2D::I(pc)) => orient2d_iie(pc, pa, pb, alloc),
-        (Point2D::I(pa), Point2D::I(pb), Point2D::E(pc)) => orient2d_iie(pa, pb, pc, alloc),
-        (Point2D::I(pa), Point2D::I(pb), Point2D::I(pc)) => orient2d_iii(pa, pb, pc, alloc),
+        (&Point2D::E(va), &Point2D::E(vb), Point2D::I(vc)) => {
+            orient2d_iee(vc, va, vb, points, alloc)
+        }
+        (&Point2D::E(va), Point2D::I(vb), &Point2D::E(vc)) => {
+            orient2d_iee(vb, vc, va, points, alloc)
+        }
+        (&Point2D::E(va), Point2D::I(vb), Point2D::I(vc)) => {
+            orient2d_iie(vb, vc, va, points, alloc)
+        }
+        (Point2D::I(va), &Point2D::E(vb), &Point2D::E(vc)) => {
+            orient2d_iee(va, vb, vc, points, alloc)
+        }
+        (Point2D::I(va), &Point2D::E(vb), Point2D::I(vc)) => {
+            orient2d_iie(vc, va, vb, points, alloc)
+        }
+        (Point2D::I(va), Point2D::I(vb), &Point2D::E(vc)) => {
+            orient2d_iie(va, vb, vc, points, alloc)
+        }
+        (Point2D::I(va), Point2D::I(vb), Point2D::I(vc)) => orient2d_iii(va, vb, vc, points, alloc),
     }
 }
 
@@ -57,19 +75,23 @@ fn orient2d_iee_impl<const NEED_MAX: bool, T: GenericNum, F: FnOnce(&[T]) -> Opt
     }
 }
 
-fn orient2d_iee<'a, A: Allocator + Copy>(
+fn orient2d_iee<A: Allocator + Copy>(
     pa: &ImplicitPointSSI,
-    pb: &[f64],
-    pc: &[f64],
+    vb: usize,
+    vc: usize,
+    points: &[f64],
     alloc: A,
 ) -> Orientation {
-    if let Some(pa_static) = pa.ss_filter() {
+    let pa_pa = point::<2>(points, pa.data[0]);
+    let pb = point::<2>(points, vb);
+    let pc = point::<2>(points, vc);
+    if let Some(pa_static) = pa.ss_filter(points) {
         let ret = orient2d_iee_impl::<true, _, _>(
             &pa_static.0.x,
             &pa_static.0.y,
             &pa_static.0.d,
-            pa.a[0],
-            pa.a[1],
+            pa_pa[0],
+            pa_pa[1],
             pb[0],
             pb[1],
             pc[0],
@@ -87,13 +109,13 @@ fn orient2d_iee<'a, A: Allocator + Copy>(
         }
     }
 
-    if let Some(pa_dynamic) = pa.d_filter() {
+    if let Some(pa_dynamic) = pa.d_filter(points) {
         let ret = orient2d_iee_impl::<false, _, _>(
             &pa_dynamic.x,
             &pa_dynamic.y,
             &pa_dynamic.d,
-            pa.a[0].into(),
-            pa.a[1].into(),
+            pa_pa[0].into(),
+            pa_pa[1].into(),
             pb[0].into(),
             pb[1].into(),
             pc[0].into(),
@@ -108,13 +130,13 @@ fn orient2d_iee<'a, A: Allocator + Copy>(
         }
     }
 
-    if let Some(pa_exact) = pa.exact(alloc) {
+    if let Some(pa_exact) = pa.exact(points, alloc) {
         let (det, _) = orient2d_iee_impl::<false, _, _>(
             &pa_exact.x,
             &pa_exact.y,
             &pa_exact.d,
-            [pa.a[0]].to_vec_in(alloc).into(),
-            [pa.a[1]].to_vec_in(alloc).into(),
+            [pa_pa[0]].to_vec_in(alloc).into(),
+            [pa_pa[1]].to_vec_in(alloc).into(),
             [pb[0]].to_vec_in(alloc).into(),
             [pb[1]].to_vec_in(alloc).into(),
             [pc[0]].to_vec_in(alloc).into(),
@@ -165,14 +187,18 @@ fn orient2d_iie_impl<const NEED_MAX: bool, T: GenericNum, F: FnOnce(&[T]) -> Opt
     }
 }
 
-fn orient2d_iie<'a, A: Allocator + Copy>(
+fn orient2d_iie<A: Allocator + Copy>(
     pa: &ImplicitPointSSI,
     pb: &ImplicitPointSSI,
-    pc: &[f64],
+    vc: usize,
+    points: &[f64],
     alloc: A,
 ) -> Orientation {
-    if let Some(pa_static) = pa.ss_filter()
-        && let Some(pb_static) = pb.ss_filter()
+    let pa_pa = point::<2>(points, pa.data[0]);
+    let pb_pa = point::<2>(points, pb.data[0]);
+    let pc = point::<2>(points, vc);
+    if let Some(pa_static) = pa.ss_filter(points)
+        && let Some(pb_static) = pb.ss_filter(points)
     {
         let ret = orient2d_iie_impl::<true, _, _>(
             &pa_static.0.x,
@@ -181,10 +207,10 @@ fn orient2d_iie<'a, A: Allocator + Copy>(
             &pb_static.0.x,
             &pb_static.0.y,
             &pb_static.0.d,
-            pa.a[0],
-            pa.a[1],
-            pb.a[0],
-            pb.a[1],
+            pa_pa[0],
+            pa_pa[1],
+            pb_pa[0],
+            pb_pa[1],
             pc[0],
             pc[1],
             abs_max,
@@ -204,8 +230,8 @@ fn orient2d_iie<'a, A: Allocator + Copy>(
         }
     }
 
-    if let Some(pa_dynamic) = pa.d_filter()
-        && let Some(pb_dynamic) = pb.d_filter()
+    if let Some(pa_dynamic) = pa.d_filter(points)
+        && let Some(pb_dynamic) = pb.d_filter(points)
     {
         let ret = orient2d_iie_impl::<false, _, _>(
             &pa_dynamic.x,
@@ -214,10 +240,10 @@ fn orient2d_iie<'a, A: Allocator + Copy>(
             &pb_dynamic.x,
             &pb_dynamic.y,
             &pb_dynamic.d,
-            pa.a[0].into(),
-            pa.a[1].into(),
-            pb.a[0].into(),
-            pb.a[1].into(),
+            pa_pa[0].into(),
+            pa_pa[1].into(),
+            pb_pa[0].into(),
+            pb_pa[1].into(),
             pc[0].into(),
             pc[1].into(),
             dummy_abs_max,
@@ -230,8 +256,8 @@ fn orient2d_iie<'a, A: Allocator + Copy>(
         }
     }
 
-    if let Some(pa_exact) = pa.exact(alloc)
-        && let Some(pb_exact) = pb.exact(alloc)
+    if let Some(pa_exact) = pa.exact(points, alloc)
+        && let Some(pb_exact) = pb.exact(points, alloc)
     {
         let (det, _) = orient2d_iie_impl::<false, _, _>(
             &pa_exact.x,
@@ -240,10 +266,10 @@ fn orient2d_iie<'a, A: Allocator + Copy>(
             &pb_exact.x,
             &pb_exact.y,
             &pb_exact.d,
-            [pa.a[0]].to_vec_in(alloc).into(),
-            [pa.a[1]].to_vec_in(alloc).into(),
-            [pb.a[0]].to_vec_in(alloc).into(),
-            [pb.a[1]].to_vec_in(alloc).into(),
+            [pa_pa[0]].to_vec_in(alloc).into(),
+            [pa_pa[1]].to_vec_in(alloc).into(),
+            [pb_pa[0]].to_vec_in(alloc).into(),
+            [pb_pa[1]].to_vec_in(alloc).into(),
             [pc[0]].to_vec_in(alloc).into(),
             [pc[1]].to_vec_in(alloc).into(),
             dummy_abs_max,
@@ -311,11 +337,15 @@ fn orient2d_iii<'a, A: Allocator + Copy>(
     pa: &ImplicitPointSSI,
     pb: &ImplicitPointSSI,
     pc: &ImplicitPointSSI,
+    points: &[f64],
     alloc: A,
 ) -> Orientation {
-    if let Some(pa_static) = pa.ss_filter()
-        && let Some(pb_static) = pb.ss_filter()
-        && let Some(pc_static) = pc.ss_filter()
+    let pa_pa = point::<2>(points, pa.data[0]);
+    let pb_pa = point::<2>(points, pb.data[0]);
+    let pc_pa = point::<2>(points, pc.data[0]);
+    if let Some(pa_static) = pa.ss_filter(points)
+        && let Some(pb_static) = pb.ss_filter(points)
+        && let Some(pc_static) = pc.ss_filter(points)
     {
         let ret = orient2d_iii_impl::<true, _, _>(
             &pa_static.0.x,
@@ -327,12 +357,12 @@ fn orient2d_iii<'a, A: Allocator + Copy>(
             &pc_static.0.x,
             &pc_static.0.y,
             &pc_static.0.d,
-            pa.a[0],
-            pa.a[1],
-            pb.a[0],
-            pb.a[1],
-            pc.a[0],
-            pc.a[1],
+            pa_pa[0],
+            pa_pa[1],
+            pb_pa[0],
+            pb_pa[1],
+            pc_pa[0],
+            pc_pa[1],
             abs_max,
         );
         let max_var = ret.1.unwrap().max(pa_static.1).max(pb_static.1);
@@ -350,9 +380,9 @@ fn orient2d_iii<'a, A: Allocator + Copy>(
         }
     }
 
-    if let Some(pa_dynamic) = pa.d_filter()
-        && let Some(pb_dynamic) = pb.d_filter()
-        && let Some(pc_dynamic) = pc.d_filter()
+    if let Some(pa_dynamic) = pa.d_filter(points)
+        && let Some(pb_dynamic) = pb.d_filter(points)
+        && let Some(pc_dynamic) = pc.d_filter(points)
     {
         let ret = orient2d_iii_impl::<false, _, _>(
             &pa_dynamic.x,
@@ -364,12 +394,12 @@ fn orient2d_iii<'a, A: Allocator + Copy>(
             &pc_dynamic.x,
             &pc_dynamic.y,
             &pc_dynamic.d,
-            pa.a[0].into(),
-            pa.a[1].into(),
-            pb.a[0].into(),
-            pb.a[1].into(),
-            pc.a[0].into(),
-            pc.a[1].into(),
+            pa_pa[0].into(),
+            pa_pa[1].into(),
+            pb_pa[0].into(),
+            pb_pa[1].into(),
+            pc_pa[0].into(),
+            pc_pa[1].into(),
             dummy_abs_max,
         );
 
@@ -380,9 +410,9 @@ fn orient2d_iii<'a, A: Allocator + Copy>(
         }
     }
 
-    if let Some(pa_exact) = pa.exact(alloc)
-        && let Some(pb_exact) = pb.exact(alloc)
-        && let Some(pc_exact) = pc.exact(alloc)
+    if let Some(pa_exact) = pa.exact(points, alloc)
+        && let Some(pb_exact) = pb.exact(points, alloc)
+        && let Some(pc_exact) = pc.exact(points, alloc)
     {
         let (det, _) = orient2d_iii_impl::<false, _, _>(
             &pa_exact.x,
@@ -394,12 +424,12 @@ fn orient2d_iii<'a, A: Allocator + Copy>(
             &pc_exact.x,
             &pc_exact.y,
             &pc_exact.d,
-            [pa.a[0]].to_vec_in(alloc).into(),
-            [pa.a[1]].to_vec_in(alloc).into(),
-            [pb.a[0]].to_vec_in(alloc).into(),
-            [pb.a[1]].to_vec_in(alloc).into(),
-            [pc.a[0]].to_vec_in(alloc).into(),
-            [pc.a[1]].to_vec_in(alloc).into(),
+            [pa_pa[0]].to_vec_in(alloc).into(),
+            [pa_pa[1]].to_vec_in(alloc).into(),
+            [pb_pa[0]].to_vec_in(alloc).into(),
+            [pb_pa[1]].to_vec_in(alloc).into(),
+            [pc_pa[0]].to_vec_in(alloc).into(),
+            [pc_pa[1]].to_vec_in(alloc).into(),
             dummy_abs_max,
         );
         return double_to_sign(*det.last().unwrap());

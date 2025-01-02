@@ -3,6 +3,8 @@ use std::{
     cell::{Ref, RefCell},
 };
 
+use crate::point;
+
 use super::{
     abs_max, dummy_abs_max, estimate, get_exponent, ExpansionNum, GenericNum, IntervalNumber,
 };
@@ -37,31 +39,24 @@ fn copy_exact_cache<A: Allocator + Copy>(
     }
 }
 
-pub struct ImplicitPointSSI<'a> {
-    pub a: &'a [f64],
-    b: &'a [f64],
-    p: &'a [f64],
-    q: &'a [f64],
-
+pub struct ImplicitPointSSI {
+    pub data: [usize; 4],
     ss_filter: RefCell<Option<(Implicit2DCache<f64>, f64)>>,
     d_filter: RefCell<Option<Implicit2DCache<IntervalNumber>>>,
     exact: RefCell<Option<Implicit2DCache<ExpansionNum>>>,
 }
 
-impl<'a> ImplicitPointSSI<'a> {
-    pub fn new(a: &'a [f64], b: &'a [f64], p: &'a [f64], q: &'a [f64]) -> Self {
+impl ImplicitPointSSI {
+    pub fn new(a: usize, b: usize, p: usize, q: usize) -> Self {
         ImplicitPointSSI {
-            a,
-            b,
-            p,
-            q,
+            data: [a, b, p, q],
             ss_filter: RefCell::new(None),
             d_filter: RefCell::new(None),
             exact: RefCell::new(None),
         }
     }
 
-    pub fn ss_filter(&self) -> Option<&(Implicit2DCache<f64>, f64)> {
+    pub fn ss_filter(&self, points: &[f64]) -> Option<&(Implicit2DCache<f64>, f64)> {
         if self.ss_filter.borrow().is_some() {
             let filter = self.ss_filter.borrow();
             if filter.as_ref().unwrap().1 == 0.0 {
@@ -70,9 +65,13 @@ impl<'a> ImplicitPointSSI<'a> {
                 return Ref::leak(filter).as_ref();
             }
         } else {
+            let pa = point::<2>(points, self.data[0]);
+            let pb = point::<2>(points, self.data[1]);
+            let pp = point::<2>(points, self.data[2]);
+            let pq = point::<2>(points, self.data[3]);
+
             let (mut filter, max_var) = ssi_lambda::<true, _, _>(
-                self.a[0], self.a[1], self.b[0], self.b[1], self.p[0], self.p[1], self.q[0],
-                self.q[1], abs_max,
+                pa[0], pa[1], pb[0], pb[1], pp[0], pp[1], pq[0], pq[1], abs_max,
             );
             let max_var = max_var.unwrap();
             let mut lambda_d_eps = max_var;
@@ -100,7 +99,7 @@ impl<'a> ImplicitPointSSI<'a> {
         }
     }
 
-    pub fn d_filter(&self) -> Option<&Implicit2DCache<IntervalNumber>> {
+    pub fn d_filter(&self, points: &[f64]) -> Option<&Implicit2DCache<IntervalNumber>> {
         if self.d_filter.borrow().is_some() {
             let filter = self.d_filter.borrow();
             if filter.as_ref().unwrap().d.not_zero() {
@@ -109,15 +108,19 @@ impl<'a> ImplicitPointSSI<'a> {
                 return None;
             }
         } else {
+            let pa = point::<2>(points, self.data[0]);
+            let pb = point::<2>(points, self.data[1]);
+            let pp = point::<2>(points, self.data[2]);
+            let pq = point::<2>(points, self.data[3]);
             let (mut filter, _) = ssi_lambda::<false, IntervalNumber, _>(
-                self.a[0].into(),
-                self.a[1].into(),
-                self.b[0].into(),
-                self.b[1].into(),
-                self.p[0].into(),
-                self.p[1].into(),
-                self.q[0].into(),
-                self.q[1].into(),
+                pa[0].into(),
+                pa[1].into(),
+                pb[0].into(),
+                pb[1].into(),
+                pp[0].into(),
+                pp[1].into(),
+                pq[0].into(),
+                pq[1].into(),
                 dummy_abs_max,
             );
             if filter.d.negative() {
@@ -136,6 +139,7 @@ impl<'a> ImplicitPointSSI<'a> {
 
     pub fn exact<A: Allocator + Copy>(
         &self,
+        points: &[f64],
         allocator: A,
     ) -> Option<Implicit2DCache<ExpansionNum<A>>> {
         if self.exact.borrow().is_some() {
@@ -147,15 +151,19 @@ impl<'a> ImplicitPointSSI<'a> {
                 return None;
             }
         } else {
+            let pa = point::<2>(points, self.data[0]);
+            let pb = point::<2>(points, self.data[1]);
+            let pp = point::<2>(points, self.data[2]);
+            let pq = point::<2>(points, self.data[3]);
             let (mut exact, _) = ssi_lambda::<false, ExpansionNum, _>(
-                vec![self.a[0]].into(),
-                vec![self.a[1]].into(),
-                vec![self.b[0]].into(),
-                vec![self.b[1]].into(),
-                vec![self.p[0]].into(),
-                vec![self.p[1]].into(),
-                vec![self.q[0]].into(),
-                vec![self.q[1]].into(),
+                vec![pa[0]].into(),
+                vec![pa[1]].into(),
+                vec![pb[0]].into(),
+                vec![pb[1]].into(),
+                vec![pp[0]].into(),
+                vec![pp[1]].into(),
+                vec![pq[0]].into(),
+                vec![pq[1]].into(),
                 dummy_abs_max,
             );
             if exact.d.negative() {
@@ -231,7 +239,7 @@ fn normalize_lambda2d(x: &mut [f64], y: &mut [f64], d: &mut [f64]) {
     }
 }
 
-pub enum Point2D<'a> {
-    E(&'a [f64]),
-    I(ImplicitPointSSI<'a>),
+pub enum Point2D {
+    E(usize),
+    I(ImplicitPointSSI),
 }
