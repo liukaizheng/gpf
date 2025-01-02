@@ -1,7 +1,8 @@
 mod det4;
 mod expansion_number;
-mod generic_point_3d;
 mod generic_point_2d;
+mod generic_point_3d;
+pub mod incircle;
 mod interval_number;
 mod less_than;
 pub mod orient2d_2d;
