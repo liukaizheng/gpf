@@ -8,15 +8,15 @@ use super::{
     predicates, GenericNum, Orientation,
 };
 
-pub fn incircle<T: AsRef<Point2D>, A: Allocator + Copy>(
-    va: T,
-    vb: T,
-    vc: T,
-    vd: T,
+pub fn incircle<A: Allocator + Copy>(
+    va: &Point2D,
+    vb: &Point2D,
+    vc: &Point2D,
+    vd: &Point2D,
     points: &[f64],
     alloc: A,
 ) -> Orientation {
-    match (va.as_ref(), vb.as_ref(), vc.as_ref(), vd.as_ref()) {
+    match (va, vb, vc, vd) {
         (&Point2D::E(va), &Point2D::E(vb), &Point2D::E(vc), &Point2D::E(vd)) => {
             let pa = point::<2>(points, va);
             let pb = point::<2>(points, vb);

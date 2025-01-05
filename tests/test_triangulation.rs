@@ -1,7 +1,8 @@
 #![feature(test)]
 
 use bumpalo::Bump;
-use gpf::triangle::{tetrahedralize, triangulate, triangulate1};
+use gpf::triangle::{tetrahedralize, triangulate, triangulate1, triangulate_points};
+use itertools::Itertools;
 use rand::{distributions::Uniform, rngs::SmallRng, Rng, SeedableRng};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
@@ -112,7 +113,7 @@ fn test_simple() {
 
     {
         let start = Instant::now();
-        let triangles = triangulate1(&points, &[], true, &bump);
+        let triangles = triangulate_points(&points, true, &bump);
         println!("new Time elapsed in {:?}", start.elapsed());
         write_obj(&points, &triangles, "124.obj");
     }
@@ -153,6 +154,30 @@ fn test_cdt() {
         0.5, -1.0,
     ];
     let bump = Bump::new();
-    let triangles = triangulate(&points, &[1, 3], &bump);
+    let triangles = triangulate1(&points, &[1, 3, 2, 4, 3, 0], true, &bump);
     write_obj(&points, &triangles, "bug.obj");
+}
+
+#[test]
+fn test_cdt_complex() {
+    let bump = Bump::new();
+    let rng = SmallRng::seed_from_u64(5489);
+    let uniform = Uniform::new_inclusive(-1.0, 1.0);
+    let n_points = 100;
+    let points = Vec::from_iter(rng.sample_iter(uniform).take(n_points * 2));
+    let mut segments = Vec::new();
+    for (i, j) in (0..n_points).tuple_combinations() {
+        segments.push(i);
+        segments.push(j);
+    }
+    // #[rustfmt::skip]
+    // let segments = [
+    //     0, 7,
+    //     0, 21,
+    // ];
+    let start = Instant::now();
+    let triangles = triangulate1(&points, &segments, true, &bump);
+
+    println!("new Time elapsed in {:?}", start.elapsed());
+    // write_obj(&points, &triangles, "bug.obj");
 }

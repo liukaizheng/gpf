@@ -342,18 +342,32 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
         self.he_twin(self.he_next(hid))
     }
 
+    #[inline]
+    pub fn he_twin_prev(&self, hid: HalfedgeId) -> HalfedgeId {
+        self.he_prev(self.he_twin(hid))
+    }
+
+    #[inline]
+    pub fn he_twin_next(&self, hid: HalfedgeId) -> HalfedgeId {
+        self.he_next(self.he_twin(hid))
+    }
+
     /// The method replaces one halfedge with another one in the same face.
     /// It assumes that the face of `old_hid` is valid and matches the expected face after replacement.
     /// The old edge will be removed if its twin is boundary, which means that after replacement
     /// both halfedges of the old edge will have no face.
     #[inline]
     pub fn he_replace(&mut self, old_hid: HalfedgeId, new_hid: HalfedgeId) {
+        let va = self.he_from(old_hid);
         let prev_hid = self.he_prev(old_hid);
         let next_hid = self.he_next(old_hid);
         self.core_data.connect_halfedges(prev_hid, new_hid);
         self.core_data.connect_halfedges(new_hid, next_hid);
         let fid = self.he_face(old_hid);
         self.core_data.he_face_arr[new_hid] = fid;
+        if va.valid() && self.v_halfedge(va) == old_hid {
+            self.core_data.set_v_halfedge(va, new_hid);
+        }
         if fid.valid() {
             self.core_data.set_f_halfedge(fid, new_hid);
             self.core_data.he_face_arr[old_hid] = FaceId::default();
@@ -445,6 +459,96 @@ impl<A: Allocator + Copy> ManifoldMesh<A> {
         if self.v_halfedge(right_vid) == hid {
             self.core_data.set_v_halfedge(right_vid, tr_hid);
         }
+    }
+
+    pub fn split_edge(&mut self, eid: EdgeId) -> VertexId {
+        let hid = self.e_halfedge(eid);
+        let twin_hid = self.he_twin(hid);
+        let vb = self.he_to(hid);
+        let new_v = self.new_vertices(1);
+        let new_hid = self.new_edge();
+        let new_twin_hid = self.he_twin(new_hid);
+
+        if self.v_halfedge(vb) == twin_hid {
+            self.set_v_halfedge(vb, new_twin_hid);
+        }
+
+        self.set_v_halfedge(new_v, new_hid);
+
+        let fid = self.he_face(hid);
+        let twin_fid = self.he_face(twin_hid);
+
+        self.core_data.he_face_arr[new_hid] = fid;
+        self.core_data.he_face_arr[new_twin_hid] = twin_fid;
+
+        self.set_he_vertex(hid, new_v);
+        self.set_he_vertex(new_hid, vb);
+        self.set_he_vertex(new_twin_hid, new_v);
+
+        let prev_twin_hid = self.he_prev(twin_hid);
+        let next_hid = self.he_next(hid);
+
+        self.connect_halfedges(prev_twin_hid, new_twin_hid);
+        self.connect_halfedges(new_twin_hid, twin_hid);
+
+        self.connect_halfedges(hid, new_hid);
+        self.connect_halfedges(new_hid, next_hid);
+
+        new_v
+    }
+
+    pub fn split_face(&mut self, fid: FaceId, va: VertexId, vb: VertexId) -> HalfedgeId {
+        let mut left_last_hid = HalfedgeId::default();
+        let mut right_last_hid = HalfedgeId::default();
+        for he in self.face(fid).halfedges() {
+            let v = *he.to();
+            if v == va {
+                left_last_hid = *he;
+            } else if v == vb {
+                right_last_hid = *he;
+            }
+        }
+        debug_assert!(left_last_hid.valid());
+        debug_assert!(right_last_hid.valid());
+
+        //  --------------vb------------
+        //  |             |            |
+        //  |             |            |
+        //  --------------va------------
+        let left_first_hid = self.he_next(right_last_hid);
+        let right_first_hid = self.he_next(left_last_hid);
+
+        let first_he = self.new_edge();
+        let second_he = self.he_twin(first_he);
+
+        // h-v
+        self.core_data.he_vertex_arr[first_he] = va;
+        self.core_data.he_vertex_arr[second_he] = vb;
+
+        // h-h
+        self.core_data.connect_halfedges(right_last_hid, first_he);
+        self.core_data.connect_halfedges(first_he, right_first_hid);
+        self.core_data.connect_halfedges(left_last_hid, second_he);
+        self.core_data.connect_halfedges(second_he, left_first_hid);
+
+        // h-f
+        let new_f = self.new_face();
+        self.core_data.he_face_arr[first_he] = fid;
+        {
+            let mut hid = second_he;
+            loop {
+                self.core_data.he_face_arr[hid] = new_f;
+                hid = self.he_next(hid);
+                if hid == second_he {
+                    break;
+                }
+            }
+        }
+
+        // f-h
+        self.core_data.f_halfedge_arr[fid] = first_he;
+        self.core_data.f_halfedge_arr[new_f] = second_he;
+        second_he
     }
 }
 

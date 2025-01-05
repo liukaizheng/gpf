@@ -8,14 +8,14 @@ use super::{
     GenericNum, Orientation,
 };
 
-pub fn orient2d<T: AsRef<Point2D>, A: Allocator + Copy>(
-    va: T,
-    vb: T,
-    vc: T,
+pub fn orient2d<A: Allocator + Copy>(
+    va: &Point2D,
+    vb: &Point2D,
+    vc: &Point2D,
     points: &[f64],
     alloc: A,
 ) -> Orientation {
-    match (va.as_ref(), vb.as_ref(), vc.as_ref()) {
+    match (va, vb, vc) {
         (&Point2D::E(va), &Point2D::E(vb), &Point2D::E(vc)) => {
             let pa = point::<2>(points, va);
             let pb = point::<2>(points, vb);

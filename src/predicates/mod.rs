@@ -17,6 +17,7 @@ use std::{
 
 pub use det4::*;
 pub use expansion_number::*;
+pub use generic_point_2d::*;
 pub use generic_point_3d::*;
 pub use interval_number::*;
 pub use less_than::*;

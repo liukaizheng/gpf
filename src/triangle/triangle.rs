@@ -7,6 +7,8 @@ use bumpalo::Bump;
 
 use crate::math::{dot, sub_in};
 use crate::mesh::{ElementId, HalfedgeId, ManifoldMesh, Mesh, VertexId};
+use crate::predicates::{incircle, ImplicitPointSSI};
+use crate::predicates::{orient2d_2d, Orientation, Point2D};
 use crate::{point, predicates, twin_index, INVALID_IND};
 
 struct Triangulation<'a, A: Allocator + Copy> {
@@ -370,32 +372,288 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
 /// A constrained Delaunay triangulation.
 struct CDT<'a, A: Allocator + Copy> {
     points: &'a [f64],
+    segments: &'a [usize],
+    point_indices: Vec<Point2D, A>,
     mesh: ManifoldMesh<A>,
     halfedge_marks: Vec<usize, A>,
+    alloc: A,
 }
 
 impl<'a, A: Allocator + Copy> CDT<'a, A> {
-    fn insert_segment(&mut self, mut va: VertexId, mut vb: VertexId, mark: usize) -> bool {
-        va = self.scout_segment(self.mesh.v_halfedge(va), vb, mark);
-        if va == vb {
-            return true;
+    fn perform(&mut self) {
+        for (idx, seg) in self.segments.chunks(2).enumerate() {
+            let va = VertexId(seg[0]);
+            let vb = VertexId(seg[1]);
+            if va != vb {
+                self.insert_segment(va, vb, idx << 1);
+            }
         }
-        vb = self.scout_segment(self.mesh.v_halfedge(vb), va, twin_index(mark));
-        true
+    }
+    fn insert_segment(&mut self, mut va: VertexId, mut vb: VertexId, mark: usize) {
+        let start_hid = self.scout_segment(self.mesh.v_halfedge(va), vb, mark);
+        va = self.mesh.he_from(start_hid);
+        if va == vb {
+            return;
+        }
+        let end_hid = self.scout_segment(self.mesh.v_halfedge(vb), va, twin_index(mark));
+        vb = self.mesh.he_from(end_hid);
+        if vb == va {
+            return;
+        }
+
+        self.constrain(start_hid, vb, mark);
     }
 
-    fn scout_segment(&mut self, hid: HalfedgeId, vb: VertexId, mark: usize) -> VertexId {
-        if self.mesh.he_to(hid) == vb {
-            return vb;
+    fn scout_segment(&mut self, mut hid: HalfedgeId, vb: VertexId, mark: usize) -> HalfedgeId {
+        let mut right_vid = self.mesh.he_to(hid);
+        if right_vid == vb {
+            self.set_edge_mark(hid, mark);
+            return self.mesh.v_halfedge(vb);
         }
 
-        VertexId::default()
+        let va = self.mesh.he_from(hid);
+        let mut left_vid = self.mesh.he_to_to(hid);
+
+        let mut left_ori = self.orient(vb, va, left_vid);
+        let mut right_ori = self.orient(right_vid, va, vb);
+        if left_ori.is_pos() && right_ori.is_pos() {
+            right_ori = Orientation::Negative;
+        }
+
+        loop {
+            if !left_ori.is_pos() {
+                break;
+            }
+            hid = self.mesh.he_prev_twin(hid);
+            left_vid = self.mesh.he_to_to(hid);
+            left_ori = self.orient(vb, va, left_vid);
+        }
+
+        loop {
+            if !right_ori.is_pos() {
+                break;
+            }
+            hid = self.mesh.he_twin_next(hid);
+            right_vid = self.mesh.he_to(hid);
+            right_ori = self.orient(right_vid, va, vb);
+        }
+
+        let mut colinear = false;
+        if left_ori.is_zero() {
+            hid = self.mesh.he_prev_twin(hid);
+            colinear = true;
+        } else if right_ori.is_zero() {
+            colinear = true;
+        }
+
+        if colinear {
+            self.set_edge_mark(hid, mark);
+            let end_vid = self.mesh.he_to(hid);
+            if end_vid == vb {
+                return self.mesh.v_halfedge(vb);
+            } else {
+                return self.scout_segment(self.mesh.v_halfedge(end_vid), vb, mark);
+            }
+        } else {
+            let split_hid = self.mesh.he_next(hid);
+            if self.halfedge_marks[split_hid] == INVALID_IND {
+                return hid;
+            } else {
+                let [_, new_hid] = self.split_edge(split_hid, mark);
+                return self.scout_segment(new_hid, vb, mark);
+            }
+        }
+    }
+
+    fn constrain(&mut self, bottom_right_hid: HalfedgeId, vb: VertexId, mark: usize) {
+        let va = self.mesh.he_from(bottom_right_hid);
+        let mut flip_hid = self.mesh.he_next(bottom_right_hid);
+        self.mesh.flip(flip_hid);
+        loop {
+            let top_vid = self.mesh.he_from(flip_hid);
+            if top_vid == vb {
+                let fixup_hid = self.mesh.he_twin_next(flip_hid);
+                self.fixup(flip_hid, false);
+                self.fixup(fixup_hid, true);
+                self.set_edge_mark(flip_hid, twin_index(mark));
+                break;
+            }
+
+            let ori = self.orient(va, vb, top_vid);
+            if ori.is_zero() {
+                let fixup_hid = self.mesh.he_twin_next(flip_hid);
+                self.fixup(flip_hid, false);
+                self.fixup(fixup_hid, true);
+                self.set_edge_mark(flip_hid, twin_index(mark));
+
+                let hid = self.scout_segment(self.mesh.he_prev_twin(flip_hid), vb, mark);
+                if self.mesh.he_from(hid) != vb {
+                    self.constrain(hid, vb, mark);
+                }
+                break;
+            } else {
+                if ori.is_pos() {
+                    let fixup_hid = self.mesh.he_twin_next(flip_hid);
+                    self.fixup(fixup_hid, true);
+                    flip_hid = self.mesh.he_prev(flip_hid);
+                } else {
+                    self.fixup(flip_hid, false);
+                    flip_hid = self.mesh.he_twin_next(flip_hid);
+                }
+
+                if self.halfedge_marks[flip_hid] != INVALID_IND {
+                    let [new_hid1, new_hid2] = self.split_edge(flip_hid, mark);
+                    self.fixup(self.mesh.he_twin(new_hid1), false);
+                    self.fixup(self.mesh.he_next(new_hid1), true);
+                    let hid = self.scout_segment(new_hid2, vb, mark);
+                    if self.mesh.he_from(hid) != vb {
+                        self.constrain(hid, vb, mark);
+                    }
+                    break;
+                } else {
+                    self.mesh.flip(flip_hid);
+                }
+            }
+        }
+    }
+
+    fn fixup(&mut self, hid: HalfedgeId, left_side: bool) {
+        let flip_hid = self.mesh.he_next(hid);
+        if self.halfedge_marks[flip_hid] != INVALID_IND {
+            return;
+        }
+        let twin_flip_hid = self.mesh.he_twin(flip_hid);
+
+        let bottom_vid = self.mesh.he_to_to(twin_flip_hid);
+        if !bottom_vid.valid() {
+            return;
+        }
+
+        let top_vid = self.mesh.he_from(hid);
+        let [left_vid, right_vid] = self.mesh.he_vertices(flip_hid);
+
+        if left_side {
+            if !self.orient(top_vid, left_vid, bottom_vid).is_pos() {
+                return;
+            }
+        } else {
+            if !self.orient(bottom_vid, right_vid, top_vid).is_pos() {
+                return;
+            }
+        }
+
+        if self.orient(left_vid, bottom_vid, right_vid).is_pos() {
+            if !self
+                .incircle(left_vid, bottom_vid, right_vid, top_vid)
+                .is_pos()
+            {
+                return;
+            }
+        }
+
+        self.mesh.flip(flip_hid);
+        self.fixup(hid, left_side);
+        self.fixup(twin_flip_hid, left_side);
+    }
+
+    fn split_edge(&mut self, hid: HalfedgeId, input_mark: usize) -> [HalfedgeId; 2] {
+        let twin_hid = self.mesh.he_twin(hid);
+        let fid = self.mesh.he_face(hid);
+        let twin_fid = self.mesh.he_face(twin_hid);
+        let bottom_vid = self.mesh.he_to_to(hid);
+        let top_vid = self.mesh.he_to_to(twin_hid);
+
+        let left_vid = self.mesh.he_to(hid);
+
+        let mark = self.halfedge_marks[hid];
+        debug_assert!(mark != INVALID_IND);
+
+        let new_vid = self.mesh.split_edge(self.mesh.he_edge(hid));
+
+        let vab = &self.segments[((input_mark >> 1) << 1)..];
+        let vcd = &self.segments[((mark >> 1) << 1)..];
+
+        self.point_indices.push(Point2D::I(ImplicitPointSSI::new(
+            vab[0], vab[1], vcd[0], vcd[1],
+        )));
+        let new_hid = self.mesh.v_halfedge(new_vid);
+        self.new_edge_call_back(new_hid);
+        if self.mesh.he_to(new_hid) == left_vid {
+            self.set_edge_mark(new_hid, mark);
+        } else {
+            self.set_edge_mark(new_hid, twin_index(mark));
+        }
+
+        let new_hid1 = self.mesh.split_face(fid, bottom_vid, new_vid);
+        self.new_edge_call_back(new_hid1);
+        self.set_edge_mark(new_hid1, input_mark);
+
+        let new_hid2 = self.mesh.split_face(twin_fid, new_vid, top_vid);
+        self.new_edge_call_back(new_hid2);
+        [new_hid1, new_hid2]
+    }
+
+    fn new_edge_call_back(&mut self, new_hid: HalfedgeId) {
+        if new_hid.0 >= self.halfedge_marks.len() {
+            self.halfedge_marks
+                .resize(self.halfedge_marks.len() + 2, INVALID_IND);
+        }
     }
 
     #[inline]
     fn set_edge_mark(&mut self, hid: HalfedgeId, mark: usize) {
         self.halfedge_marks[hid] = mark;
         self.halfedge_marks[self.mesh.he_twin(hid)] = twin_index(mark);
+    }
+
+    #[inline]
+    fn orient(&self, va: VertexId, vb: VertexId, vc: VertexId) -> Orientation {
+        orient2d_2d::orient2d(
+            &self.point_indices[va],
+            &self.point_indices[vb],
+            &self.point_indices[vc],
+            self.points,
+            self.alloc,
+        )
+    }
+
+    #[inline]
+    fn incircle(&self, va: VertexId, vb: VertexId, vc: VertexId, vd: VertexId) -> Orientation {
+        incircle::incircle(
+            &self.point_indices[va],
+            &self.point_indices[vb],
+            &self.point_indices[vc],
+            &self.point_indices[vd],
+            self.points,
+            self.alloc,
+        )
+    }
+
+    fn write(&self, name: &str) {
+        use std::io::Write;
+        let mut points = Vec::with_capacity(self.point_indices.len() * 2);
+        points.extend_from_slice(self.points);
+        for i in points.len() / 2..self.point_indices.len() {
+            points.extend(&self.point_indices[i].to_explicit(self.points));
+        }
+
+        let mut f = std::fs::File::create(name).unwrap();
+        for p in points.chunks(2) {
+            writeln!(f, "v {} {} 0", p[0], p[1]).unwrap();
+        }
+
+        for face in self.mesh.faces() {
+            let fid = *face;
+            let ha = self.mesh.f_halfedge(fid);
+            let hb = self.mesh.he_next(ha);
+            let hc = self.mesh.he_next(hb);
+            let va = self.mesh.he_to(ha);
+            let vb = self.mesh.he_to(hb);
+            let vc = self.mesh.he_to(hc);
+            if va.valid() && vb.valid() && vc.valid() {
+                writeln!(f, "f {} {} {}", va.0 + 1, vb.0 + 1, vc.0 + 1).unwrap();
+            }
+        }
     }
 }
 
@@ -460,18 +718,18 @@ pub fn triangulate1<A: Allocator + Copy>(
     set_boundary_vertex_halfedges(&mut mesh, bdy_hid);
     let mut halfedge_marks = Vec::<usize, A>::with_capacity_in(mesh.n_halfedges_capacity(), alloc);
     halfedge_marks.extend(std::iter::repeat(INVALID_IND).take(mesh.n_halfedges_capacity()));
+    let mut point_indices = Vec::with_capacity_in(mesh.n_vertices_capacity(), alloc);
+    point_indices.extend((0..mesh.n_vertices_capacity()).map(|idx| Point2D::E(idx)));
     let mut cdt = CDT {
         points,
+        segments,
+        point_indices,
         mesh,
         halfedge_marks,
+        alloc,
     };
-    for idx in (0..segments.len()).step_by(2) {
-        let va = VertexId(segments[idx]);
-        let vb = VertexId(segments[idx + 1]);
-        if va != vb {
-            cdt.insert_segment(va, vb, idx);
-        }
-    }
+    cdt.perform();
+    // cdt.write("cdt.obj");
 
     Vec::<usize, A>::new_in(alloc)
 }
@@ -482,22 +740,14 @@ fn set_boundary_vertex_halfedges<A: Allocator + Copy>(
 ) {
     let mut curr_hid = first_hid;
     loop {
-        let va = mesh.he_from(curr_hid);
-        mesh.set_v_halfedge(va, curr_hid);
-        curr_hid = mesh.he_next(mesh.he_next_twin(curr_hid));
+        let prev_hid = mesh.he_prev(curr_hid);
+        let va = mesh.he_to(prev_hid);
+        mesh.set_v_halfedge(va, mesh.he_twin(prev_hid));
+        curr_hid = mesh.he_next_twin(curr_hid);
         if curr_hid == first_hid {
             break;
         }
     }
-}
-
-fn insert_segment1<A: Allocator + Copy>(
-    points: &[f64],
-    mesh: &mut ManifoldMesh<A>,
-    va: VertexId,
-    vb: VertexId,
-    mark: usize,
-) {
 }
 
 pub fn triangulate<A: Allocator + Copy>(
@@ -851,7 +1101,7 @@ fn counterclockwise<A: Allocator + Copy>(
 }
 
 #[inline(always)]
-fn incircle<A: Allocator + Copy>(
+fn incircle1<A: Allocator + Copy>(
     points: &[f64],
     a: usize,
     b: usize,
@@ -1053,7 +1303,7 @@ fn merge_hulls<A: Allocator + Copy>(
             // triangulation would have been eaten right through.
             if next_apex != INVALID_IND {
                 // Check whether the edge is Delaunay
-                let mut bad_edge = incircle(
+                let mut bad_edge = incircle1(
                     m.points,
                     lower_left,
                     lower_right,
@@ -1091,7 +1341,7 @@ fn merge_hulls<A: Allocator + Copy>(
                     next_apex = apex(&m.triangles, &mut next_edge);
                     if next_apex != INVALID_IND {
                         // Check whether the edge is Delaunay
-                        bad_edge = incircle(
+                        bad_edge = incircle1(
                             m.points,
                             lower_left,
                             lower_right,
@@ -1114,7 +1364,7 @@ fn merge_hulls<A: Allocator + Copy>(
             let mut next_apex = apex(&m.triangles, &next_edge);
             if next_apex != INVALID_IND {
                 // Check whether the edge is Delaunay
-                let mut bad_edge = incircle(
+                let mut bad_edge = incircle1(
                     m.points,
                     lower_left,
                     lower_right,
@@ -1149,7 +1399,7 @@ fn merge_hulls<A: Allocator + Copy>(
                     copy(&side_casing, &mut next_edge);
                     next_apex = apex(&m.triangles, &mut next_edge);
                     if next_apex != INVALID_IND {
-                        bad_edge = incircle(
+                        bad_edge = incircle1(
                             m.points,
                             lower_left,
                             lower_right,
@@ -1166,7 +1416,7 @@ fn merge_hulls<A: Allocator + Copy>(
 
         if left_finished
             || (!right_finished
-                && (incircle(
+                && (incircle1(
                     m.points,
                     upper_left,
                     lower_left,
@@ -1602,7 +1852,7 @@ fn delaunay_fixup<A: Allocator + Copy>(
     }
 
     if counterclockwise(&m.points, right_vertex, left_vertex, far_vertex, bump) > 0.0 {
-        if incircle(
+        if incircle1(
             &m.points,
             left_vertex,
             far_vertex,

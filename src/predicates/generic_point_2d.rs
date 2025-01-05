@@ -39,6 +39,7 @@ fn copy_exact_cache<A: Allocator + Copy>(
     }
 }
 
+#[derive(Clone)]
 pub struct ImplicitPointSSI {
     pub data: [usize; 4],
     ss_filter: RefCell<Option<(Implicit2DCache<f64>, f64)>>,
@@ -184,6 +185,16 @@ impl ImplicitPointSSI {
             }
         }
     }
+
+    fn to_explicit(&self, points: &[f64]) -> [f64; 2] {
+        let exact = self.exact(points, std::alloc::Global).unwrap();
+        let x = estimate(&exact.x);
+        let y = estimate(&exact.y);
+        let d = estimate(&exact.d);
+
+        let pa = point::<2>(points, self.data[0]);
+        [pa[0] + x / d, pa[1] + y / d]
+    }
 }
 
 fn ssi_lambda<const NEED_MAX: bool, T: GenericNum, F>(
@@ -239,7 +250,19 @@ fn normalize_lambda2d(x: &mut [f64], y: &mut [f64], d: &mut [f64]) {
     }
 }
 
+#[derive(Clone)]
 pub enum Point2D {
     E(usize),
     I(ImplicitPointSSI),
+}
+impl Point2D {
+    pub fn to_explicit(&self, points: &[f64]) -> [f64; 2] {
+        match self {
+            Point2D::E(idx) => {
+                let p = point::<2>(points, *idx);
+                [p[0], p[1]]
+            }
+            Point2D::I(implicit) => implicit.to_explicit(points),
+        }
+    }
 }
