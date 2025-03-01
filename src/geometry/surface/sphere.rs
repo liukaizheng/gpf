@@ -1,6 +1,6 @@
-use crate::math::norm;
+use crate::math::{norm, normalize};
 
-use super::Surface;
+use super::{adjust_angle_to_reference, Surface};
 
 pub struct Sphere {
     o: [f64; 3],
@@ -9,22 +9,25 @@ pub struct Sphere {
 
 impl Sphere {
     pub fn new(ox: f64, oy: f64, oz: f64, r: f64) -> Sphere {
-        Sphere {
-            o: [ox, oy, oz],
-            r,
-        }
+        Sphere { o: [ox, oy, oz], r }
     }
 }
 
 impl Surface for Sphere {
     fn eval(&self, p: &[f64]) -> [f64; 4] {
-        let d = [
-            p[0] - self.o[0],
-            p[1] - self.o[1],
-            p[2] - self.o[2],
-        ];
+        let d = [p[0] - self.o[0], p[1] - self.o[1], p[2] - self.o[2]];
         let l = norm(&d);
         let val = l - self.r;
         [val, d[0] / l, d[1] / l, d[2] / l]
+    }
+
+    fn uv(&self, pt: &[f64], ref_pt: Option<&[f64]>) -> [f64; 2] {
+        let mut d = [pt[0] - self.o[0], pt[1] - self.o[1], pt[2] - self.o[2]];
+        normalize::<3>(&mut d);
+        let mut uv = [d[1].atan2(d[0]), d[2].acos()];
+        if let Some(ref_pt) = ref_pt {
+            uv[0] = adjust_angle_to_reference(uv[0], ref_pt[0]);
+        }
+        uv
     }
 }
