@@ -1,5 +1,6 @@
 mod element;
 mod element_cache;
+mod hole_aware_mesh;
 mod manifold_mesh;
 mod mesh;
 mod mesh_core_data;
@@ -8,6 +9,7 @@ mod surface_mesh;
 use std::alloc::Allocator;
 
 pub use element::*;
+pub use hole_aware_mesh::*;
 pub use manifold_mesh::*;
 pub use mesh::*;
 pub use surface_mesh::*;

@@ -3,4 +3,4 @@ mod curve;
 mod surface;
 
 pub use bbox::BBox;
-pub use surface::{Cylinder, Plane, Sphere, Surface};
+pub use surface::*;

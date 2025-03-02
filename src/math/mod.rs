@@ -26,6 +26,14 @@ pub fn square_norm(a: &[f64]) -> f64 {
     a.iter().fold(0.0, |acc, x| acc + x * x)
 }
 
+pub fn normalize<const N: usize>(a: &mut [f64]) -> f64 {
+    let len = norm(a);
+    for i in 0..N {
+        a[i] /= len;
+    }
+    len
+}
+
 #[inline(always)]
 pub fn dot<T: Copy + Add<Output = T> + Mul<Output = T>>(a: &[T], b: &[T]) -> T {
     let mut ret = a[0] * b[0];

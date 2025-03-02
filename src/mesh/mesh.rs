@@ -86,7 +86,10 @@ pub trait Mesh: Sized {
     fn he_to(&self, hid: HalfedgeId) -> VertexId;
 
     /// the end vertex of the halfedge
-    fn he_from(&self, hid: HalfedgeId) -> VertexId;
+    #[inline(always)]
+    fn he_from(&self, hid: HalfedgeId) -> VertexId {
+        self.he_to(self.he_prev(hid))
+    }
 
     /// the end vertex of the next halfedge
     #[inline(always)]
@@ -138,6 +141,12 @@ pub trait Mesh: Sized {
 
     /// the first halfedge of the face
     fn f_halfedge(&self, fid: FaceId) -> HalfedgeId;
+
+    /// the next fist loop halfedge of the face of `hid`
+    #[inline(always)]
+    fn f_loop_next_first_halfedge(&self, hid: HalfedgeId) -> HalfedgeId {
+        hid
+    }
 
     /// the halfedge in the face that starts from the vertex
     fn fv_halfedge(&self, fid: FaceId, vid: VertexId) -> HalfedgeId {

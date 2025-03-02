@@ -1,7 +1,10 @@
 #![feature(allocator_api)]
 use std::alloc::Allocator;
 
-use gpf::mesh::{EdgeId, FaceId, HalfedgeId, ManifoldMesh, Mesh, SurfaceMesh, VertexId};
+use gpf::{
+    mesh::{EdgeId, FaceId, HalfedgeId, HoleAwareMesh, ManifoldMesh, Mesh, SurfaceMesh, VertexId},
+    utils::TwoDimArr,
+};
 
 fn validate_mesh_connectivity<A: Allocator + Copy>(mesh: &SurfaceMesh<A>) -> Result<(), String> {
     let validate_vertex = |vid: VertexId, msg: &str| {
@@ -277,4 +280,18 @@ fn test_manifold_mesh() {
         end_vertices.sort_unstable();
         assert_eq!(&end_vertices, &base_vertices);
     }
+}
+
+#[test]
+fn test_hole_aware_mesh() {
+    let loops = vec![0, 1, 2, 3, 4, 5, 6, 7, 8];
+    let mut face_loop_indices = TwoDimArr::<usize>::new();
+    face_loop_indices.push([0, 1]);
+    face_loop_indices.push([2]);
+    let mesh = HoleAwareMesh::new(
+        loops.chunks(3),
+        face_loop_indices.iter(),
+        std::alloc::Global,
+    );
+    assert_eq!(mesh.n_faces(), 2);
 }

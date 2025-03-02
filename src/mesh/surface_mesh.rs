@@ -179,19 +179,7 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
     pub fn new_halfedges(&mut self, n: usize) -> HalfedgeId {
         let hid = HalfedgeId::from(self.core_data.he_next_arr.len());
         let new_len = self.n_halfedges_capacity() + n;
-        self.core_data
-            .he_prev_arr
-            .resize(new_len, HalfedgeId::default());
-        self.core_data
-            .he_next_arr
-            .resize(new_len, HalfedgeId::default());
-        self.core_data
-            .he_vertex_arr
-            .resize(new_len, VertexId::default());
-
-        self.core_data
-            .he_face_arr
-            .resize(new_len, FaceId::default());
+        self.core_data.new_halfedges(n);
         self.he_sibling_arr.resize(new_len, HalfedgeId::default());
         self.he_edge_arr.resize(new_len, EdgeId::default());
         self.he_vert_in_next_arr
@@ -455,11 +443,6 @@ impl<A: Allocator + Copy> Mesh for SurfaceMesh<A> {
     #[inline(always)]
     fn e_is_valid(&self, eid: EdgeId) -> bool {
         self.e_halfedge_arr[eid].valid()
-    }
-
-    #[inline(always)]
-    fn he_from(&self, hid: HalfedgeId) -> VertexId {
-        self.he_to(self.he_prev(hid))
     }
 
     fn he_twin(&self, hid: HalfedgeId) -> HalfedgeId {

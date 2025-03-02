@@ -88,6 +88,11 @@ impl<A: Allocator + Copy> MeshCoreData<A> {
     }
 
     #[inline]
+    pub(crate) fn set_he_face(&mut self, hid: HalfedgeId, fid: FaceId) {
+        self.he_face_arr[hid] = fid;
+    }
+
+    #[inline]
     pub(crate) fn set_f_halfedge(&mut self, fid: FaceId, hid: HalfedgeId) {
         self.f_halfedge_arr[fid] = hid;
     }
@@ -116,5 +121,14 @@ impl<A: Allocator + Copy> MeshCoreData<A> {
         self.he_next_arr.reserve(n_halfedges);
         self.he_vertex_arr.reserve(n_halfedges);
         self.he_face_arr.reserve(n_halfedges);
+    }
+
+    #[inline]
+    pub(crate) fn new_halfedges(&mut self, n_halfedges: usize) {
+        let new_len = self.he_vertex_arr.len() + n_halfedges;
+        self.he_prev_arr.resize(new_len, HalfedgeId::default());
+        self.he_next_arr.resize(new_len, HalfedgeId::default());
+        self.he_vertex_arr.resize(new_len, VertexId::default());
+        self.he_face_arr.resize(new_len, FaceId::default());
     }
 }
