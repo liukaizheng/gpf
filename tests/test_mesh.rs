@@ -294,4 +294,32 @@ fn test_hole_aware_mesh() {
         std::alloc::Global,
     );
     assert_eq!(mesh.n_faces(), 2);
+
+    let f0_halfedges = mesh
+        .face(0.into())
+        .halfedges()
+        .map(|h| *h)
+        .collect::<Vec<_>>();
+    assert_eq!(f0_halfedges.len(), 6);
+    let f0_vertices = mesh
+        .face(0.into())
+        .vertices()
+        .map(|v| *v)
+        .collect::<Vec<_>>();
+    assert_eq!(f0_vertices.len(), 6);
+
+    let f0_rev_halfedges = mesh
+        .face(0.into())
+        .halfedges()
+        .rev()
+        .map(|h| *h)
+        .collect::<Vec<_>>();
+    assert_eq!(f0_rev_halfedges.len(), 6);
+
+    let f1_halfedges = mesh
+        .face(1.into())
+        .halfedges()
+        .map(|h| *h)
+        .collect::<Vec<_>>();
+    assert_eq!(f1_halfedges.len(), 3);
 }

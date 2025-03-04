@@ -46,7 +46,6 @@ impl<A: Allocator + Copy> HoleAwareMesh<A> {
                 mesh.core_data.he_vertex_arr[hid] = vid;
 
                 if i == 0 {
-                    mesh.core_data.f_halfedge_arr.push(hid);
                     first_hid = hid;
                 } else {
                     mesh.core_data.v_halfedge_arr[prev_vid] = hid;
