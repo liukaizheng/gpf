@@ -2,14 +2,15 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use std::alloc::Allocator;
 use std::ops::{Add, Index, Mul};
+use std::slice::SliceIndex;
 
 use bumpalo::Bump;
 
 use crate::math::{dot, sub_in};
-use crate::mesh::{ElementId, HalfedgeId, ManifoldMesh, Mesh, VertexId};
+use crate::mesh::{ElementId, FaceId, HalfedgeId, ManifoldMesh, Mesh, VertexId};
 use crate::predicates::{incircle, ImplicitPointSSI};
 use crate::predicates::{orient2d_2d, Orientation, Point2D};
-use crate::{point, predicates, twin_index, INVALID_IND};
+use crate::{is_negative, is_positive, point, predicates, twin_index, INVALID_IND};
 
 struct Triangulation<'a, A: Allocator + Copy> {
     points: &'a [f64],
@@ -389,6 +390,7 @@ impl<'a, A: Allocator + Copy> CDT<'a, A> {
             }
         }
     }
+
     fn insert_segment(&mut self, mut va: VertexId, mut vb: VertexId, mark: usize) {
         let start_hid = self.scout_segment(self.mesh.v_halfedge(va), vb, mark);
         va = self.mesh.he_from(start_hid);
@@ -415,27 +417,27 @@ impl<'a, A: Allocator + Copy> CDT<'a, A> {
         let mut left_vid = self.mesh.he_to_to(hid);
 
         let mut left_ori = self.orient(vb, va, left_vid);
-        let mut right_ori = self.orient(right_vid, va, vb);
-        if left_ori.is_pos() && right_ori.is_pos() {
-            right_ori = Orientation::Negative;
-        }
-
+        let mut right_ori = self.orient(vb, va, right_vid);
         loop {
-            if !left_ori.is_pos() {
-                break;
-            }
-            hid = self.mesh.he_prev_twin(hid);
-            left_vid = self.mesh.he_to_to(hid);
-            left_ori = self.orient(vb, va, left_vid);
-        }
-
-        loop {
-            if !right_ori.is_pos() {
+            if left_ori.is_pos() || right_ori.is_pos() {
                 break;
             }
             hid = self.mesh.he_twin_next(hid);
+            left_vid = right_vid;
+            left_ori = right_ori;
             right_vid = self.mesh.he_to(hid);
-            right_ori = self.orient(right_vid, va, vb);
+            right_ori = self.orient(vb, va, right_vid);
+        }
+
+        loop {
+            if !!right_ori.is_neg() && !left_ori.is_pos() {
+                break;
+            }
+            hid = self.mesh.he_prev_twin(hid);
+            right_vid = left_vid;
+            right_ori = left_ori;
+            left_vid = self.mesh.he_to_to(hid);
+            left_ori = self.orient(vb, va, left_vid);
         }
 
         let mut colinear = false;
@@ -629,31 +631,57 @@ impl<'a, A: Allocator + Copy> CDT<'a, A> {
         )
     }
 
-    fn write(&self, name: &str) {
-        use std::io::Write;
-        let mut points = Vec::with_capacity(self.point_indices.len() * 2);
-        points.extend_from_slice(self.points);
-        for i in points.len() / 2..self.point_indices.len() {
-            points.extend(&self.point_indices[i].to_explicit(self.points));
-        }
+    #[inline]
+    fn face_is_ghost(&self, fid: FaceId) -> bool {
+        !self.mesh.face(fid).halfedge().next().to().valid()
+    }
 
-        let mut f = std::fs::File::create(name).unwrap();
-        for p in points.chunks(2) {
-            writeln!(f, "v {} {} 0", p[0], p[1]).unwrap();
-        }
-
+    fn extract_invalid_faces(&self) -> Vec<FaceId, A> {
+        let mut result = Vec::with_capacity_in(self.mesh.n_faces_capacity(), self.alloc);
+        let mut visited = Vec::with_capacity_in(self.mesh.n_faces_capacity(), self.alloc);
+        visited.resize(self.mesh.n_faces_capacity(), false);
         for face in self.mesh.faces() {
             let fid = *face;
-            let ha = self.mesh.f_halfedge(fid);
-            let hb = self.mesh.he_next(ha);
-            let hc = self.mesh.he_next(hb);
-            let va = self.mesh.he_to(ha);
-            let vb = self.mesh.he_to(hb);
-            let vc = self.mesh.he_to(hc);
-            if va.valid() && vb.valid() && vc.valid() {
-                writeln!(f, "f {} {} {}", va.0 + 1, vb.0 + 1, vc.0 + 1).unwrap();
+            if visited[fid] {
+                continue;
+            }
+            visited[fid] = true;
+            if self.face_is_ghost(fid) {
+                continue;
+            }
+
+            let mut queue = Vec::new_in(alloc);
+            queue.push(fid);
+            let mut keep = true;
+            let idx = 0;
+            while idx < queue.len() {
+                let fid = queue[idx];
+                idx += 1;
+                for he in self.mesh.face(fid).halfedges() {
+                    let hid = *he;
+                    let mark = self.halfedge_marks[hid];
+                    if mark == INVALID_IND {
+                        let adj_fid = *he.twin().face();
+                        if visited[adj_fid] {
+                            continue;
+                        }
+                        visited[adj_fid] = true;
+                        if !keep && self.face_is_ghost(adj_fid) {
+                            keep = false;
+                        }
+                        queue.push(adj_fid);
+                    } else {
+                        if is_negative(self.halfedge_marks[hid]) {
+                            keep = false;
+                        }
+                    }
+                }
+            }
+            if keep {
+                result.extend(queue);
             }
         }
+        result
     }
 }
 
@@ -729,9 +757,15 @@ pub fn triangulate1<A: Allocator + Copy>(
         alloc,
     };
     cdt.perform();
-    // cdt.write("cdt.obj");
+    let valid_faces = cdt.extract_invalid_faces();
 
-    Vec::<usize, A>::new_in(alloc)
+    let mut result = Vec::<usize, A>::with_capacity_in(valid_faces.len() * 3, alloc);
+    for fid in valid_faces.into_iter() {
+        for he in cdt.mesh.face(fid).halfedges() {
+            result.push(*he.to().0);
+        }
+    }
+    result
 }
 
 fn set_boundary_vertex_halfedges<A: Allocator + Copy>(
@@ -746,6 +780,28 @@ fn set_boundary_vertex_halfedges<A: Allocator + Copy>(
         curr_hid = mesh.he_next_twin(curr_hid);
         if curr_hid == first_hid {
             break;
+        }
+    }
+}
+
+pub fn triangulate_face_into_mesh<
+    U: AsRef<[f64]>,
+    T: IntoIterator<Item = U>,
+    A: Allocator + Copy,
+>(
+    face_points: T,
+    alloc: A,
+) {
+    let mut points = Vec::new_in(alloc);
+    let mut segments = Vec::new_in(alloc);
+    let mut start = 0;
+    for polygon in face_points {
+        let loop_points = polygon.as_ref();
+        points.extend_from_slice(loop_points);
+        let end = (loop_points.len() >> 1) + start;
+        for (i, j) in (start..end).circular_tuple_windows() {
+            segments.push(i);
+            segments.push(j);
         }
     }
 }

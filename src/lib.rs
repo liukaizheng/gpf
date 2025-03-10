@@ -1,4 +1,3 @@
-#![feature(float_next_up_down)]
 #![feature(cell_leak)]
 #![feature(trait_alias)]
 #![feature(iter_partition_in_place)]
@@ -56,6 +55,11 @@ pub fn twin_index(idx: usize) -> usize {
 #[inline(always)]
 pub fn is_positive(idx: usize) -> bool {
     idx & 1 == 0
+}
+
+#[inline(always)]
+pub fn is_negative(idx: usize) -> bool {
+    idx & 1 == 1
 }
 
 #[inline(always)]

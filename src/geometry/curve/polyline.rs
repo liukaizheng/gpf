@@ -1,6 +1,6 @@
 use super::Curve;
 
-struct Polyline {
+pub struct Polyline {
     points: Vec<f64>,
 }
 

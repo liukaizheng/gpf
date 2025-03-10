@@ -1,12 +1,52 @@
 use std::alloc::Allocator;
 
 use crate::{
-    geometry::BBox,
-    mesh::{Mesh, SurfaceMesh, VertexId},
+    geometry::{BBox, Crv, Surf},
+    is_negative,
+    mesh::{HoleAwareMesh, ManifoldMesh, Mesh, SurfaceMesh, VertexId},
     point_3, strip_orientation,
     utils::{Bitmask, TwoDimArr},
     INVALID_IND,
 };
+
+pub struct UVFace<A: Allocator + Copy> {
+    pub(crate) mesh: ManifoldMesh<A>,
+    pub(crate) points: Vec<f64, A>,
+}
+
+pub struct BrepFace<A: Allocator + Copy> {
+    surface_id: usize,
+    bbox: BBox,
+    uv_face: Option<UVFace<A>>,
+}
+
+pub struct NewBrepModel<A: Allocator + Copy = std::alloc::Global> {
+    mesh: HoleAwareMesh<A>,
+    points: Vec<f64, A>,
+    faces: Vec<BrepFace<A>, A>,
+    surfaces: Vec<Surf, A>,
+    surf_bbox: Vec<BBox, A>,
+    edge_curves: Vec<Crv, A>,
+    bbox: BBox,
+}
+
+impl<A: Allocator + Copy> NewBrepModel<A> {
+    pub fn new_in<A1: Allocator + Copy>(
+        loops: TwoDimArr<usize, A>,
+        face_loops: TwoDimArr<usize, A>,
+        points: Vec<f64, A>,
+        face_surfaces: &[usize],
+        surfaces: Vec<Surf, A>,
+        edge_curves: Vec<Crv, A>,
+        alloc: A,
+    ) {
+        let mesh = HoleAwareMesh::new(loops.iter(), face_loops.iter(), alloc);
+        for (face, &surface_id) in mesh.faces().zip(face_surfaces) {
+            let reversed = is_negative(surface_id);
+            let surf = &surfaces[strip_orientation(surface_id)];
+        }
+    }
+}
 
 type LoopId = crate::mesh::FaceId;
 

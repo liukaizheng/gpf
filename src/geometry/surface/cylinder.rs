@@ -1,4 +1,7 @@
-use crate::math::{dot, norm};
+use crate::{
+    geometry::Crv,
+    math::{dot, norm},
+};
 
 use super::{adjust_angle_to_reference, Plane, Surface};
 
