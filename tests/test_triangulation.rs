@@ -1,9 +1,9 @@
 #![feature(test)]
 
 use bumpalo::Bump;
-use gpf::triangle::{tetrahedralize, triangulate, triangulate1, triangulate_points};
+use gpf::triangle::{tetrahedralize, triangulate_points, triangulate1};
 use itertools::Itertools;
-use rand::{distributions::Uniform, rngs::SmallRng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, distributions::Uniform, rngs::SmallRng};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::time::Instant;
@@ -56,7 +56,7 @@ fn test_triangulate() {
         .unwrap();
     let start = Instant::now();
     let bump = Bump::new();
-    let triangles = triangulate(&points, &[start_idx, end_idx], &bump);
+    let triangles = triangulate1(&points, &[start_idx, end_idx], true, &bump);
     println!("Time elapsed in {:?}", start.elapsed());
     assert_eq!(triangles.len(), 54684);
     // write_obj(&points, &triangles, "test.obj");
@@ -106,7 +106,7 @@ fn test_simple() {
 
     {
         let start = Instant::now();
-        let triangles = triangulate(&points, &[], &bump);
+        let triangles = triangulate1(&points, &[], true, &bump);
         println!("old Time elapsed in {:?}", start.elapsed());
         // write_obj(&points, &triangles, "123.obj");
     }

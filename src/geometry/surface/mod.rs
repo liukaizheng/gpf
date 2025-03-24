@@ -4,6 +4,10 @@ mod sphere;
 
 use std::alloc::Allocator;
 
+use itertools::Itertools;
+
+use crate::triangle::{triangulate_with_new_points, triangulate1};
+
 pub use self::cylinder::Cylinder;
 pub use self::plane::Plane;
 pub use self::sphere::Sphere;
@@ -34,6 +38,36 @@ pub trait Surface {
             result.push(loop_uv_points);
         }
         result
+    }
+
+    fn compute_uv_face<
+        'a,
+        T: IntoIterator<Item = impl IntoIterator<Item = (&'a Crv, bool)>>,
+        A: Allocator + Copy,
+    >(
+        &self,
+        face_loops: T,
+        alloc: A,
+    ) -> (Vec<f64, A>, Vec<usize, A>) {
+        let uv_loops = self.compute_face_uv_loops(face_loops, alloc);
+        let mut uv_points: Vec<f64, A> = Vec::new_in(alloc);
+        for loop_uv_points in &uv_loops {
+            uv_points.extend_from_slice(&loop_uv_points);
+        }
+        let mut segments = Vec::new_in(alloc);
+        let mut start = 0;
+        for loop_uv_points in uv_loops {
+            let end = start + (loop_uv_points.len() >> 1);
+            for (i, j) in (start..end).circular_tuple_windows() {
+                segments.push(i);
+                segments.push(j);
+            }
+            start = end;
+        }
+        let (new_points, triangles) =
+            triangulate_with_new_points(&uv_points, &segments, true, alloc);
+        uv_points.extend(new_points);
+        (uv_points, triangles)
     }
 }
 

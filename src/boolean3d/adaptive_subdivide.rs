@@ -10,7 +10,7 @@ use crate::{
     geometry::{Surf, Surface},
     math::{cross, cross_in, dot, square_norm, sub_short},
     mesh::{EdgeId, Mesh},
-    point_3, point_2,
+    point_2, point_3,
     triangle::{convex_2, convex_3},
 };
 
@@ -252,7 +252,7 @@ fn subdividable<A: Allocator + Copy>(
         active
             .iter()
             .enumerate()
-            .filter(|(_, &v)| v)
+            .filter(|&(_, &v)| v)
             .map(|(i, _)| i),
     );
     let mut pair_set = HashSet::new_in(alloc);

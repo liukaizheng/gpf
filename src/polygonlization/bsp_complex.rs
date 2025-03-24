@@ -6,17 +6,17 @@ use std::collections::{HashMap, HashSet};
 
 use super::{conforming_mesh::Constraints, point};
 use crate::{
+    INVALID_IND,
     graphcut::{ArcBuilder, MaxFlow, PushRelabelFifo},
     math::{cross_in, norm, sub_in},
     mesh::{EdgeId, ElementId, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     predicates::{
-        self, max_comp_in_tri_normal, orient2d_3d, orient2d_by_axis, orient3d::orient3d, sign_reverse,
-        sign_reversed, ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI,
-        Orientation, Point3D,
+        self, ExplicitPoint3D, ImplicitPoint3D, ImplicitPointLPI, ImplicitPointTPI, Orientation,
+        Point3D, max_comp_in_tri_normal, orient2d_3d, orient2d_by_axis, orient3d::orient3d,
+        sign_reverse, sign_reversed,
     },
-    triangle::{triangulate, TetMesh},
+    triangle::{TetMesh, triangulate1},
     utils::DisjointSet,
-    INVALID_IND,
 };
 
 struct EdgeGroup {
@@ -475,11 +475,7 @@ impl BSPComplex {
                                 new_face_triangles.push(face_tid);
                             }
                         }
-                        if !new_is_pos {
-                            has_pos
-                        } else {
-                            has_neg
-                        }
+                        if !new_is_pos { has_pos } else { has_neg }
                     });
                     let old_face_data = &self.face_data[fid];
                     self.face_data.push(BSPFaceData {
@@ -829,7 +825,7 @@ impl BSPComplex {
                 }
             }
 
-            let face_triangles = triangulate(&points_2d, &segments, &bump);
+            let face_triangles = triangulate1(&points_2d, &segments, true, &bump);
             triangles.extend(face_triangles.into_iter().map(|idx| face_new_verts[idx]));
         }
         (out_points, triangles)
@@ -1082,7 +1078,6 @@ impl BSPComplex {
             let vc = end_vertex(hb);
             let [pa, pb, pc] = [va, vb, vc].map(|vid| &self.points[vid]);
             orient2d_3d::orient2d_by_axis(pa, pb, pc, axis, bump) == Orientation::Zero
-
         };
         let start_idx = outline
             .iter()

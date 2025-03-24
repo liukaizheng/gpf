@@ -4,6 +4,7 @@
 #![feature(allocator_api)]
 #![feature(portable_simd)]
 #![feature(let_chains)]
+#![feature(iter_array_chunks)]
 
 use itertools::Itertools;
 

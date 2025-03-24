@@ -3,10 +3,10 @@ use std::{alloc::Allocator, collections::VecDeque};
 use crate::{
     mesh::{ElementId, FaceId, HalfedgeId, ManifoldMesh, Mesh, VertexId},
     point_3,
-    predicates::{max_comp_in_tri_normal, miss_alignment, orient3d::orient3d_eeee, Orientation},
+    predicates::{Orientation, max_comp_in_tri_normal, miss_alignment, orient3d::orient3d_eeee},
 };
 
-use super::triangulate;
+use super::triangulate1;
 
 pub enum Convex3Result<A: Allocator + Copy> {
     Dim0(usize),
@@ -40,12 +40,12 @@ pub fn convex_3<A: Allocator + Copy>(
         return Convex3Result::Dim0(indices[0]);
     }
 
-    let colinear_len = hull_1(points, &indices, alloc);
-    if colinear_len == indices.len() {
+    let collinear = hull_1(points, &indices, alloc);
+    if collinear == indices.len() {
         return Convex3Result::Dim1(indices);
     }
 
-    let coplanar_len = hull_2(points, &indices, colinear_len, alloc);
+    let coplanar_len = hull_2(points, &indices, collinear, alloc);
 
     let triangles = if coplanar_len == 3 {
         let mut triangles = Vec::with_capacity_in(3, alloc);
@@ -55,7 +55,7 @@ pub fn convex_3<A: Allocator + Copy>(
         let axis = max_comp_in_tri_normal(
             point_3(points, indices[0]),
             point_3(points, indices[1]),
-            point_3(points, indices[colinear_len]),
+            point_3(points, indices[collinear]),
             alloc,
         );
 
@@ -67,13 +67,13 @@ pub fn convex_3<A: Allocator + Copy>(
         }));
         let mut triangles = Vec::new_in(alloc);
         triangles.extend(
-            triangulate(&points_2d, &[], alloc)
+            triangulate1(&points_2d, &[], true, alloc)
                 .into_iter()
                 .map(|idx| indices[idx]),
         );
         triangles
     };
-    if colinear_len == indices.len() {
+    if collinear == indices.len() {
         return Convex3Result::Dim2(triangles);
     }
     let mesh = hull_3(points, &indices, coplanar_len, triangles, alloc);
