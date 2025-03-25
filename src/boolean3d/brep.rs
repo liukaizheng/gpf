@@ -1,11 +1,12 @@
 use std::alloc::Allocator;
 
+use tinyvec::TinyVec;
+
 use crate::{
-    INVALID_IND,
     geometry::{BBox, Crv, Surf, Surface},
     is_negative,
-    mesh::{ElementIndex, HoleAwareMesh, ManifoldMesh, Mesh, SurfaceMesh, VertexId},
-    point, point_3, strip_orientation,
+    mesh::{ElementIndex, FaceId, HoleAwareMesh, Mesh, VertexId},
+    point, strip_orientation,
     utils::{Bitmask, TwoDimArr},
 };
 
@@ -36,17 +37,18 @@ impl<A: Allocator + Copy> BrepFace<A> {
     }
 }
 
-pub struct NewBrepModel<A: Allocator + Copy = std::alloc::Global> {
-    mesh: HoleAwareMesh<A>,
+pub struct BrepModel<A: Allocator + Copy = std::alloc::Global> {
+    pub(crate) mesh: HoleAwareMesh<A>,
     points: Vec<f64, A>,
     faces: Vec<BrepFace<A>, A>,
     surfaces: Vec<Surf, A>,
-    surf_bbox: Vec<BBox, A>,
+    surf_bboxes: Vec<BBox, A>,
+    surf_faces: Vec<TinyVec<[FaceId; 1]>, A>,
     edge_curves: Vec<Crv, A>,
-    bbox: BBox,
+    pub(crate) bbox: BBox,
 }
 
-impl<A: Allocator + Copy> NewBrepModel<A> {
+impl<A: Allocator + Copy> BrepModel<A> {
     pub fn new_in<A1: Allocator + Copy>(
         loops: TwoDimArr<usize, A>,
         face_loops: TwoDimArr<usize, A>,
@@ -55,13 +57,18 @@ impl<A: Allocator + Copy> NewBrepModel<A> {
         surfaces: Vec<Surf, A>,
         edge_curves: Vec<Crv, A>,
         alloc: A,
-    ) {
+    ) -> Self {
         let mesh = HoleAwareMesh::new(loops.iter(), face_loops.iter(), alloc);
         let mut brep_faces = Vec::with_capacity_in(mesh.n_faces_capacity(), alloc);
-        for (face, &surface_id) in mesh.faces().zip(face_surfaces) {
-            let reversed = is_negative(surface_id);
-            let surf = &surfaces[strip_orientation(surface_id)];
-            let (face_box, uv_face) = if let Surf::Plane(p) = surf
+        let mut surf_faces = Vec::with_capacity_in(surfaces.len(), alloc);
+        surf_faces.resize(surfaces.len(), TinyVec::new());
+        brep_faces.extend(mesh.faces().zip(face_surfaces).map(|(face, &ori_surf_id)| {
+            let reversed = is_negative(ori_surf_id);
+
+            let surf_id = strip_orientation(ori_surf_id);
+            surf_faces[surf_id].push(*face);
+            let surf = &surfaces[surf_id];
+            let (face_box, uv_face) = if let Surf::Plane(_p) = surf
                 && face.halfedges().all(|he| edge_curves[*he].is_segment())
             {
                 (
@@ -93,106 +100,39 @@ impl<A: Allocator + Copy> NewBrepModel<A> {
                     Some(uv_face),
                 )
             };
-            brep_faces.push(BrepFace::new(surface_id, face_box, uv_face));
-        }
-    }
-}
-
-type LoopId = crate::mesh::FaceId;
-
-#[derive(Clone, Copy)]
-pub struct FaceId(usize);
-
-pub struct BrepModel<A: Allocator + Copy = std::alloc::Global> {
-    pub(crate) mesh: SurfaceMesh<A>,
-    loop_faces: Vec<FaceId, A>,
-    face_loops: TwoDimArr<LoopId, A>,
-    points: Vec<f64, A>,
-    pub bbox: BBox,
-    face_surfaces: Vec<usize, A>,
-}
-
-impl BrepModel {
-    pub fn new<U1, T1, U2, T2, T3, T4>(
-        loops: T1,
-        faces: T2,
-        surfaces: T3,
-        pts: T4,
-        bbox: BBox,
-    ) -> Self
-    where
-        U1: AsRef<[usize]>,
-        T1: IntoIterator<Item = U1>,
-        U2: AsRef<[usize]>,
-        T2: IntoIterator<Item = U2>,
-        T3: IntoIterator<Item = usize>,
-        T4: IntoIterator<Item = f64>,
-    {
-        Self::new_in(loops, faces, surfaces, pts, bbox, std::alloc::Global)
-    }
-}
-
-impl<A: Allocator + Copy> BrepModel<A> {
-    pub fn new_in<U1, T1, U2, T2, T3, T4>(
-        loops: T1,
-        faces: T2,
-        surfaces: T3,
-        pts: T4,
-        bbox: BBox,
-        alloc: A,
-    ) -> Self
-    where
-        U1: AsRef<[usize]>,
-        T1: IntoIterator<Item = U1>,
-        U2: AsRef<[usize]>,
-        T2: IntoIterator<Item = U2>,
-        T3: IntoIterator<Item = usize>,
-        T4: IntoIterator<Item = f64>,
-    {
-        let mesh = SurfaceMesh::new(loops, alloc);
-        let mut face_loops = TwoDimArr::<LoopId, A>::new_in(alloc);
-        let mut loop_faces = Vec::new_in(alloc);
-        loop_faces.resize(mesh.n_faces(), FaceId(INVALID_IND));
-        for (fid, loop_indices) in faces.into_iter().enumerate() {
-            for &loop_idx in loop_indices.as_ref() {
-                loop_faces[loop_idx] = FaceId(fid);
-            }
-            face_loops.push(
-                loop_indices
-                    .as_ref()
-                    .iter()
-                    .map(|&idx| crate::mesh::FaceId(idx)),
-            );
-        }
-        let mut face_surfaces = Vec::new_in(alloc);
-        face_surfaces.extend(surfaces);
-        let mut points = Vec::new_in(alloc);
-        points.extend(pts);
-        Self {
+            BrepFace::new(ori_surf_id, face_box, uv_face)
+        }));
+        let mut surf_bboxes = Vec::with_capacity_in(surfaces.len(), alloc);
+        surf_bboxes.extend(surf_faces.iter().map(|faces| {
+            BBox::from_boxes(faces.iter().map(|fid: &FaceId| &brep_faces[*fid].bbox))
+        }));
+        let bbox = BBox::from_boxes(surf_bboxes.iter());
+        BrepModel {
             mesh,
-            loop_faces,
-            face_loops,
             points,
+            faces: brep_faces,
+            surfaces,
+            surf_bboxes,
+            surf_faces,
+            edge_curves,
             bbox,
-            face_surfaces,
         }
     }
-
     pub fn v_mask(&self, vid: VertexId, n_surfaces: usize) -> Bitmask {
         let mut mask = Bitmask::new(n_surfaces);
-        for l in self
+        for face in self
             .mesh
             .vertex(vid)
             .incoming_halfedges()
             .map(|he| he.face())
         {
-            mask.set(strip_orientation(self.face_surfaces[self.loop_faces[*l].0]));
+            mask.set(strip_orientation(self.faces[*face].surface_id));
         }
         mask
     }
 
     #[inline]
     pub fn v_point(&self, vid: VertexId) -> &[f64] {
-        point_3(&self.points, vid.0)
+        point::<3>(&self.points, vid.0)
     }
 }

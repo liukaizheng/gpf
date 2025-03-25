@@ -3,12 +3,26 @@ pub struct BBox {
     pub max: [f64; 3],
 }
 
+impl AsRef<BBox> for BBox {
+    fn as_ref(&self) -> &BBox {
+        self
+    }
+}
+
 impl BBox {
     pub fn new(minx: f64, miny: f64, minz: f64, maxx: f64, maxy: f64, maxz: f64) -> BBox {
         BBox {
             min: [minx, miny, minz],
             max: [maxx, maxy, maxz],
         }
+    }
+
+    pub fn from_boxes<A: AsRef<BBox>, T: IntoIterator<Item = A>>(boxes: T) -> BBox {
+        let mut res = BBox::default();
+        for bbox in boxes {
+            res.merge(bbox.as_ref());
+        }
+        res
     }
 
     #[inline]
