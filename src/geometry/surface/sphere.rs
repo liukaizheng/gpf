@@ -1,6 +1,6 @@
 use crate::math::{norm, normalize};
 
-use super::{adjust_angle_to_reference, Surface};
+use super::{Surface, adjust_angle_to_reference};
 
 pub struct Sphere {
     o: [f64; 3],
@@ -29,5 +29,17 @@ impl Surface for Sphere {
             uv[0] = adjust_angle_to_reference(uv[0], ref_pt[0]);
         }
         uv
+    }
+
+    fn point(&self, uv: &[f64]) -> [f64; 3] {
+        let cos_phi = uv[0].cos();
+        let sin_phi = uv[0].sin();
+        let cos_theta = uv[1].cos();
+        let sin_theta = uv[1].sin();
+        [
+            self.o[0] + self.r * sin_phi * cos_theta,
+            self.o[1] + self.r * sin_phi * sin_theta,
+            self.o[2] + self.r * cos_phi,
+        ]
     }
 }

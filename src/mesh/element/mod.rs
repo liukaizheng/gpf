@@ -3,6 +3,7 @@ mod edge;
 mod face;
 mod halfedge;
 mod vertex;
+mod wire;
 
 use std::alloc::Allocator;
 
@@ -11,6 +12,7 @@ pub use edge::*;
 pub use face::*;
 pub use halfedge::*;
 pub use vertex::*;
+pub use wire::*;
 
 use crate::INVALID_IND;
 

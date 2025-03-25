@@ -1,6 +1,6 @@
 use std::alloc::Allocator;
 
-use super::{surface::Surf, Surface};
+use super::Surface;
 
 pub mod arc;
 pub mod polyline;
@@ -56,6 +56,16 @@ pub enum Crv {
     Arc(arc::Arc),
     Segment(segment::Segment),
     Polyline(polyline::Polyline),
+}
+
+impl Crv {
+    #[inline]
+    pub fn is_segment(&self) -> bool {
+        match self {
+            Crv::Segment(_) => true,
+            _ => false,
+        }
+    }
 }
 
 impl Curve for Crv {

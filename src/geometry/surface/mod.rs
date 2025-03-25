@@ -6,17 +6,18 @@ use std::alloc::Allocator;
 
 use itertools::Itertools;
 
-use crate::triangle::{triangulate_with_new_points, triangulate1};
+use crate::{triangle::triangulate_with_new_points, utils::montecarlo_sampling};
 
 pub use self::cylinder::Cylinder;
 pub use self::plane::Plane;
 pub use self::sphere::Sphere;
 
-use super::{Crv, Curve};
+use super::{BBox, Crv, Curve};
 
 pub trait Surface {
     fn eval(&self, p: &[f64]) -> [f64; 4];
     fn uv(&self, pt: &[f64], ref_pt: Option<&[f64]>) -> [f64; 2];
+    fn point(&self, uv: &[f64]) -> [f64; 3];
 
     fn compute_face_uv_loops<
         'a,
@@ -32,7 +33,8 @@ pub trait Surface {
             let mut ref_pt = None;
             let mut loop_uv_points = Vec::new_in(alloc);
             for (crv, reversed) in face_loop {
-                loop_uv_points.extend(crv.approx_on_surf(self, reversed, ref_pt, alloc));
+                loop_uv_points
+                    .extend_from_slice(&crv.approx_on_surf(self, reversed, ref_pt, alloc)[2..]);
                 ref_pt = Some(&loop_uv_points[(loop_uv_points.len() - 2)..]);
             }
             result.push(loop_uv_points);
@@ -69,6 +71,24 @@ pub trait Surface {
         uv_points.extend(new_points);
         (uv_points, triangles)
     }
+
+    fn compute_box_from_uv_face<A: Allocator + Copy>(
+        &self,
+        uv_points: &[f64],
+        uv_triangles: &[usize],
+        alloc: A,
+    ) -> BBox {
+        const N_SAMPLING: usize = 100;
+        let new_points = montecarlo_sampling::<2, _>(uv_points, uv_triangles, N_SAMPLING, alloc);
+        BBox::from_iter(
+            uv_points
+                .iter()
+                .map(|x| *x)
+                .chain(new_points)
+                .array_chunks::<2>()
+                .map(|uv| self.point(&uv)),
+        )
+    }
 }
 
 pub enum Surf {
@@ -91,6 +111,14 @@ impl Surface for Surf {
             Surf::Plane(plane) => plane.uv(pt, ref_pt),
             Surf::Cylinder(cylinder) => cylinder.uv(pt, ref_pt),
             Surf::Sphere(sphere) => sphere.uv(pt, ref_pt),
+        }
+    }
+
+    fn point(&self, uv: &[f64]) -> [f64; 3] {
+        match self {
+            Surf::Plane(plane) => plane.point(uv),
+            Surf::Cylinder(cylinder) => cylinder.point(uv),
+            Surf::Sphere(sphere) => sphere.point(uv),
         }
     }
 }

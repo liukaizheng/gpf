@@ -1,9 +1,6 @@
-use crate::{
-    geometry::Crv,
-    math::{dot, norm},
-};
+use crate::math::{add_with_coeff, dot, norm};
 
-use super::{adjust_angle_to_reference, Plane, Surface};
+use super::{Plane, Surface, adjust_angle_to_reference};
 
 pub struct Cylinder {
     plane: Plane,
@@ -64,5 +61,14 @@ impl Surface for Cylinder {
             uv[0] = adjust_angle_to_reference(uv[0], ref_pt[0]);
         }
         uv
+    }
+
+    fn point(&self, uv: &[f64]) -> [f64; 3] {
+        add_with_coeff([
+            (self.dx(), uv[0].cos()),
+            (self.dy(), uv[0].sin()),
+            (self.dz(), uv[1]),
+            (self.o(), 1.0),
+        ])
     }
 }

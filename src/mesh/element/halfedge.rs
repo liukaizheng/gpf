@@ -1,7 +1,7 @@
 use std::ops::{Add, Deref, DerefMut, Index, IndexMut, Mul};
 
-use super::{iter_next, Edge, Element, ElementId, ElementIndex, Face, Vertex};
-use crate::{element_id, mesh::Mesh, INVALID_IND};
+use super::{Edge, Element, ElementId, ElementIndex, Face, Vertex, iter_next};
+use crate::{INVALID_IND, element_id, mesh::Mesh};
 
 use std::alloc::Allocator;
 
@@ -55,6 +55,9 @@ impl<'a, M: Mesh> Halfedge<'a, M> {
 
     pub fn face(&self) -> Face<'a, M> {
         Face::new(self.mesh, self.mesh.he_face(self.id))
+    }
+    pub fn same_dir(&self) -> bool {
+        self.mesh.he_same_dir(self.id)
     }
 }
 

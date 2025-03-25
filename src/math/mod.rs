@@ -75,3 +75,15 @@ pub fn interpolate<const N: usize>(pa: &[f64], pb: &[f64], t: f64) -> [f64; N] {
     }
     res
 }
+
+pub fn add_with_coeff<const N: usize, T: IntoIterator<Item = (A, f64)>, A: AsRef<[f64]>>(
+    stream: T,
+) -> [f64; N] {
+    let mut res = [0.0; N];
+    for (arr, c) in stream {
+        for i in 0..N {
+            res[i] += arr.as_ref()[i] * c;
+        }
+    }
+    res
+}

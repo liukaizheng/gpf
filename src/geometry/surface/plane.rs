@@ -1,6 +1,6 @@
 use itertools::Itertools;
 
-use crate::math::{cross, dot, normalize};
+use crate::math::{add_with_coeff, cross, dot, normalize};
 
 use super::Surface;
 
@@ -47,5 +47,9 @@ impl Surface for Plane {
         let dx = &self.dx;
         let dy = &self.dy;
         [dot(&d, dx), dot(&d, dy)]
+    }
+
+    fn point(&self, uv: &[f64]) -> [f64; 3] {
+        add_with_coeff([(&self.dx, uv[0]), (&self.dy, uv[1]), (&self.o, 1.0)])
     }
 }

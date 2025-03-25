@@ -1,23 +1,39 @@
 use std::alloc::Allocator;
 
 use crate::{
-    geometry::{BBox, Crv, Surf},
-    is_negative,
-    mesh::{HoleAwareMesh, ManifoldMesh, Mesh, SurfaceMesh, VertexId},
-    point_3, strip_orientation,
-    utils::{Bitmask, TwoDimArr},
     INVALID_IND,
+    geometry::{BBox, Crv, Surf, Surface},
+    is_negative,
+    mesh::{ElementIndex, HoleAwareMesh, ManifoldMesh, Mesh, SurfaceMesh, VertexId},
+    point, point_3, strip_orientation,
+    utils::{Bitmask, TwoDimArr},
 };
 
 pub struct UVFace<A: Allocator + Copy> {
-    pub(crate) mesh: ManifoldMesh<A>,
     pub(crate) points: Vec<f64, A>,
+    pub(crate) triangles: Vec<usize, A>,
+}
+
+impl<A: Allocator + Copy> UVFace<A> {
+    pub fn new(points: Vec<f64, A>, triangles: Vec<usize, A>) -> Self {
+        Self { points, triangles }
+    }
 }
 
 pub struct BrepFace<A: Allocator + Copy> {
     surface_id: usize,
     bbox: BBox,
     uv_face: Option<UVFace<A>>,
+}
+
+impl<A: Allocator + Copy> BrepFace<A> {
+    pub fn new(surface_id: usize, bbox: BBox, uv_face: Option<UVFace<A>>) -> Self {
+        Self {
+            surface_id,
+            bbox,
+            uv_face,
+        }
+    }
 }
 
 pub struct NewBrepModel<A: Allocator + Copy = std::alloc::Global> {
@@ -41,9 +57,43 @@ impl<A: Allocator + Copy> NewBrepModel<A> {
         alloc: A,
     ) {
         let mesh = HoleAwareMesh::new(loops.iter(), face_loops.iter(), alloc);
+        let mut brep_faces = Vec::with_capacity_in(mesh.n_faces_capacity(), alloc);
         for (face, &surface_id) in mesh.faces().zip(face_surfaces) {
             let reversed = is_negative(surface_id);
             let surf = &surfaces[strip_orientation(surface_id)];
+            let (face_box, uv_face) = if let Surf::Plane(p) = surf
+                && face.halfedges().all(|he| edge_curves[*he].is_segment())
+            {
+                (
+                    BBox::from_iter(face.vertices().map(|v| point::<3>(&points, v.index()))),
+                    None,
+                )
+            } else {
+                let (uv_points, uv_triangles) = if reversed {
+                    surf.compute_uv_face(
+                        face.wires().map(|wire| {
+                            wire.halfedges()
+                                .rev()
+                                .map(|he| (&edge_curves[*he], he.same_dir()))
+                        }),
+                        alloc,
+                    )
+                } else {
+                    surf.compute_uv_face(
+                        face.wires().map(|wire| {
+                            wire.halfedges()
+                                .map(|he| (&edge_curves[*he], !he.same_dir()))
+                        }),
+                        alloc,
+                    )
+                };
+                let uv_face = UVFace::new(uv_points, uv_triangles);
+                (
+                    surf.compute_box_from_uv_face(&uv_face.points, &uv_face.triangles, alloc),
+                    Some(uv_face),
+                )
+            };
+            brep_faces.push(BrepFace::new(surface_id, face_box, uv_face));
         }
     }
 }
