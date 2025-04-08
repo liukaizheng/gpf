@@ -659,9 +659,9 @@ impl<'a, A: Allocator + Copy> CDT<'a, A> {
                         let adj_fid = *he.twin().face();
                         if visited[adj_fid] {
                             continue;
-                        }
+                        }    
                         visited[adj_fid] = true;
-                        if !keep && self.face_is_ghost(adj_fid) {
+                        if keep && self.face_is_ghost(adj_fid) {
                             keep = false;
                         }
                         queue.push(adj_fid);
