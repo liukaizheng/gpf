@@ -2,7 +2,6 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use std::alloc::Allocator;
 use std::ops::{Add, Index, Mul};
-use std::slice::SliceIndex;
 
 use bumpalo::Bump;
 
@@ -10,7 +9,7 @@ use crate::math::{dot, sub_in};
 use crate::mesh::{ElementId, FaceId, HalfedgeId, ManifoldMesh, Mesh, VertexId};
 use crate::predicates::{ImplicitPointSSI, incircle};
 use crate::predicates::{Orientation, Point2D, orient2d_2d};
-use crate::{INVALID_IND, is_negative, is_positive, point, predicates, twin_index};
+use crate::{INVALID_IND, is_negative, point, predicates, twin_index};
 
 struct Triangulation<'a, A: Allocator + Copy> {
     points: &'a [f64],
@@ -262,18 +261,34 @@ impl<'a, A: Allocator + Copy> Triangulation<'a, A> {
         ]);
 
         if is_horizontal {
-            top_hid = self.rotate_prev(top_hid, |pa, pb| pa[1] < pb[1]);
-            top_hid = self.rotate_next(top_hid, |pa, pb| pa[1] >= pb[1]);
+            top_hid = self.rotate_prev(top_hid, |pa, pb| {
+                pa[1] < pb[1] || (pa[1] == pb[1] && pa[0] > pb[0])
+            });
+            top_hid = self.rotate_next(top_hid, |pa, pb| {
+                pa[1] >= pb[1] && (pa[1] != pb[1] || pa[0] <= pb[0])
+            });
 
-            bottom_hid = self.rotate_next(bottom_hid, |pa, pb| pa[1] <= pb[1]);
-            bottom_hid = self.rotate_prev(bottom_hid, |pa, pb| pa[1] > pb[1]);
+            bottom_hid = self.rotate_next(bottom_hid, |pa, pb| {
+                pa[1] <= pb[1] && (pa[1] != pb[1] || pa[0] >= pb[0])
+            });
+            bottom_hid = self.rotate_prev(bottom_hid, |pa, pb| {
+                pa[1] > pb[1] || (pa[1] == pb[1] && pa[0] < pb[0])
+            });
             [self.mesh.he_next(bottom_hid), self.mesh.he_prev(top_hid)]
         } else {
-            top_hid = self.rotate_next(top_hid, |pa, pb| pa[0] <= pb[0]);
-            top_hid = self.rotate_prev(top_hid, |pa, pb| pa[0] > pb[0]);
+            top_hid = self.rotate_next(top_hid, |pa, pb| {
+                pa[0] <= pb[0] && (pa[0] != pb[0] || pa[1] <= pb[1])
+            });
+            top_hid = self.rotate_prev(top_hid, |pa, pb| {
+                pa[0] > pb[0] || (pa[0] == pb[0] && pa[1] > pb[1])
+            });
 
-            bottom_hid = self.rotate_prev(bottom_hid, |pa, pb| pa[0] < pb[0]);
-            bottom_hid = self.rotate_next(bottom_hid, |pa, pb| pa[0] >= pb[0]);
+            bottom_hid = self.rotate_prev(bottom_hid, |pa, pb| {
+                pa[0] < pb[0] || (pa[0] == pb[0] && pa[1] < pb[1])
+            });
+            bottom_hid = self.rotate_next(bottom_hid, |pa, pb| {
+                pa[0] >= pb[0] && (pa[0] != pb[0] || pa[1] >= pb[1])
+            });
             [self.mesh.he_next(top_hid), self.mesh.he_prev(bottom_hid)]
         }
     }
@@ -659,7 +674,7 @@ impl<'a, A: Allocator + Copy> CDT<'a, A> {
                         let adj_fid = *he.twin().face();
                         if visited[adj_fid] {
                             continue;
-                        }    
+                        }
                         visited[adj_fid] = true;
                         if keep && self.face_is_ghost(adj_fid) {
                             keep = false;
@@ -709,7 +724,7 @@ pub fn triangulate_points<A: Allocator + Copy>(
     alloc: A,
 ) -> Vec<usize, A> {
     let (_, mesh) = get_triangulated_mesh(points, is_horizontal, alloc);
-    let mut result = Vec::with_capacity_in(mesh.n_faces(), alloc);
+    let mut result = Vec::with_capacity_in(mesh.n_faces() * 3, alloc);
     result.extend(
         mesh.faces()
             .filter_map(|f| {
