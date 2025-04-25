@@ -4,6 +4,7 @@ use crate::math::{add_with_coeff, cross, dot, normalize};
 
 use super::Surface;
 
+#[derive(Clone, Debug)]
 pub struct Plane {
     pub o: [f64; 3],
     pub dx: [f64; 3],
@@ -32,6 +33,18 @@ impl Plane {
             dy,
             dz,
         }
+    }
+
+    #[inline]
+    pub fn from_x_y(o: [f64; 3], dx: [f64; 3], dy: [f64; 3]) -> Plane {
+        let dz = cross(&dx, &dy);
+        Plane { o, dx, dy, dz }
+    }
+
+    #[inline]
+    pub fn reversed(&self) -> Plane {
+        let dy = self.dy.map(|x| -x);
+        Plane::from_x_y(self.o, self.dx, dy)
     }
 }
 

@@ -2,6 +2,7 @@ use crate::math::{norm, normalize};
 
 use super::{Surface, adjust_angle_to_reference};
 
+#[derive(Clone, Debug)]
 pub struct Sphere {
     o: [f64; 3],
     r: f64,

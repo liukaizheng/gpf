@@ -2,6 +2,7 @@ use crate::math::{add_with_coeff, dot, norm};
 
 use super::{Plane, Surface, adjust_angle_to_reference};
 
+#[derive(Clone, Debug)]
 pub struct Cylinder {
     plane: Plane,
     r: f64,

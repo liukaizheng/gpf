@@ -5,6 +5,7 @@
 #![feature(portable_simd)]
 #![feature(let_chains)]
 #![feature(iter_array_chunks)]
+#![feature(array_chunks)]
 
 use itertools::Itertools;
 

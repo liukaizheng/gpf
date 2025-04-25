@@ -91,6 +91,7 @@ pub trait Surface {
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum Surf {
     Plane(Plane),
     Cylinder(Cylinder),

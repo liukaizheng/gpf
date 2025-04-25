@@ -3,11 +3,11 @@ use std::alloc::Allocator;
 use tinyvec::TinyVec;
 
 use crate::{
-    geometry::{BBox, Crv, Surf, Surface},
+    geometry::{BBox, Crv, Curve, Surf, Surface, segment::Segment},
     is_negative,
-    mesh::{ElementIndex, FaceId, HoleAwareMesh, Mesh, VertexId},
+    mesh::{ElementIndex, FaceId, HalfedgeId, HoleAwareMesh, Mesh, VertexId},
     point, strip_orientation,
-    utils::{Bitmask, TwoDimArr},
+    utils::Bitmask,
 };
 
 pub struct UVFace<A: Allocator + Copy> {
@@ -37,6 +37,16 @@ impl<A: Allocator + Copy> BrepFace<A> {
     }
 }
 
+fn get_halfedge_curve<'a, A: Allocator + Copy>(
+    mesh: &HoleAwareMesh<A>,
+    edge_curves: &'a [Crv],
+    hid: HalfedgeId,
+    surf_same_dir: bool,
+) -> (&'a Crv, bool) {
+    let crv = &edge_curves[mesh.he_edge(hid)];
+    (crv, mesh.he_same_dir(hid) ^ surf_same_dir)
+}
+
 pub struct BrepModel<A: Allocator + Copy = std::alloc::Global> {
     pub(crate) mesh: HoleAwareMesh<A>,
     points: Vec<f64, A>,
@@ -49,19 +59,46 @@ pub struct BrepModel<A: Allocator + Copy = std::alloc::Global> {
 }
 
 impl<A: Allocator + Copy> BrepModel<A> {
-    pub fn new_in<A1: Allocator + Copy>(
-        loops: TwoDimArr<usize, A>,
-        face_loops: TwoDimArr<usize, A>,
+    pub fn new_in<
+        U1: AsRef<[usize]>,
+        T1: IntoIterator<Item = U1>,
+        U2: AsRef<[usize]>,
+        T2: IntoIterator<Item = U2>,
+    >(
+        loops: T1,
+        face_loops: T2,
         points: Vec<f64, A>,
         face_surfaces: &[usize],
         surfaces: Vec<Surf, A>,
-        edge_curves: Vec<Crv, A>,
+        two_verts_curves: Vec<([usize; 2], Crv), A>,
         alloc: A,
     ) -> Self {
-        let mesh = HoleAwareMesh::new(loops.iter(), face_loops.iter(), alloc);
+        let mesh = HoleAwareMesh::new(loops.into_iter(), face_loops.into_iter(), alloc);
         let mut brep_faces = Vec::with_capacity_in(mesh.n_faces_capacity(), alloc);
         let mut surf_faces = Vec::with_capacity_in(surfaces.len(), alloc);
         surf_faces.resize(surfaces.len(), TinyVec::new());
+        let mut edge_curves = Vec::with_capacity_in(mesh.n_edges_capacity(), alloc);
+        edge_curves.resize(mesh.n_edges_capacity(), Crv::default());
+        for ([va, vb], curve) in two_verts_curves {
+            let [va, vb] = [va.into(), vb.into()];
+            let eid = mesh.e_from_va_vb(va, vb);
+            if *mesh.edge(eid).halfedge().from() == va {
+                edge_curves[eid] = curve;
+            } else {
+                edge_curves[eid] = curve.reversed();
+            }
+        }
+        for edge in mesh.edges() {
+            let eid = *edge;
+            if edge_curves[eid].is_none() {
+                let [va, vb] = mesh.e_vertices(eid);
+                let s = point::<3>(&points, va.index());
+                let e = point::<3>(&points, vb.index());
+                edge_curves[eid] =
+                    Crv::Segment(Segment::new([s[0], s[1], s[2]], [e[0], e[1], e[2]]));
+            }
+        }
+
         brep_faces.extend(mesh.faces().zip(face_surfaces).map(|(face, &ori_surf_id)| {
             let reversed = is_negative(ori_surf_id);
 
@@ -69,7 +106,9 @@ impl<A: Allocator + Copy> BrepModel<A> {
             surf_faces[surf_id].push(*face);
             let surf = &surfaces[surf_id];
             let (face_box, uv_face) = if let Surf::Plane(_p) = surf
-                && face.halfedges().all(|he| edge_curves[*he].is_segment())
+                && face
+                    .halfedges()
+                    .all(|he| edge_curves[*he.edge()].is_segment_or_none())
             {
                 (
                     BBox::from_iter(face.vertices().map(|v| point::<3>(&points, v.index()))),
@@ -81,7 +120,7 @@ impl<A: Allocator + Copy> BrepModel<A> {
                         face.wires().map(|wire| {
                             wire.halfedges()
                                 .rev()
-                                .map(|he| (&edge_curves[*he], he.same_dir()))
+                                .map(|he| get_halfedge_curve(&mesh, &edge_curves, *he, false))
                         }),
                         alloc,
                     )
@@ -89,7 +128,7 @@ impl<A: Allocator + Copy> BrepModel<A> {
                     surf.compute_uv_face(
                         face.wires().map(|wire| {
                             wire.halfedges()
-                                .map(|he| (&edge_curves[*he], !he.same_dir()))
+                                .map(|he| get_halfedge_curve(&mesh, &edge_curves, *he, true))
                         }),
                         alloc,
                     )
