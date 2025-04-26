@@ -1,7 +1,8 @@
-use hashbrown::{hash_map::Entry, HashMap};
+use hashbrown::{HashMap, hash_map::Entry};
 use itertools::Itertools;
 use tinyvec::TinyVec;
 
+use crate::geometry::Surf;
 use crate::math::{square_norm, sub_short};
 use crate::point_3;
 use crate::{
@@ -10,7 +11,7 @@ use crate::{
     utils::Bitmask,
 };
 
-use super::{extract_cells::identify_chain_edge, BrepModel};
+use super::{BrepModel, extract_cells::identify_chain_edge};
 
 pub(crate) struct ModelData {
     pub(crate) points: Vec<f64>,
@@ -93,6 +94,14 @@ impl ModelData {
             "model_isomesh_vertices_map: {:?}",
             model_isomesh_vertices_map
         );
+    }
+
+    fn resolve_face_patches(
+        &self,
+        surfaces: &[Surf],
+        model: &BrepModel,
+        non_manifold_vertices: &[VertexId],
+    ) {
     }
 
     #[inline]

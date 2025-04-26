@@ -10,15 +10,15 @@ pub use brep::BrepModel;
 use std::collections::HashMap;
 
 use adaptive_subdivide::adaptive_subdivide;
-use ar_in_tet::{extract_iso_surface, Arrangement, IsoVert};
+use ar_in_tet::{Arrangement, IsoVert, extract_iso_surface};
 use extract_cells::extract_cells;
 use itertools::Itertools;
 use tet_set::TetSet;
 
 use crate::{
-    geometry::{BBox, Surf},
-    mesh::{square_edge_length, EdgeId, ElementId, FaceId, Mesh, SurfaceMesh},
     INVALID_IND,
+    geometry::{BBox, Surf},
+    mesh::{EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, square_edge_length},
 };
 
 struct IsoSurfMesh {
@@ -38,7 +38,6 @@ where
     for model in &models {
         bbox.merge(&model.bbox);
     }
-    bbox.scale(1.1);
 
     let mut tets = init_mesh(bbox);
     let vals = adaptive_subdivide(&mut tets, &surfaces, eps * eps);
