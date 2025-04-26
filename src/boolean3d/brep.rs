@@ -105,13 +105,16 @@ impl<A: Allocator + Copy> BrepModel<A> {
             let surf_id = strip_orientation(ori_surf_id);
             surf_faces[surf_id].push(*face);
             let surf = &surfaces[surf_id];
-            let (face_box, uv_face) = if let Surf::Plane(_p) = surf
-                && face
-                    .halfedges()
-                    .all(|he| edge_curves[*he.edge()].is_segment_or_none())
-            {
+            let (face_box, uv_face) = if let Surf::Plane(plane) = surf {
                 (
-                    BBox::from_iter(face.vertices().map(|v| point::<3>(&points, v.index()))),
+                    plane.compute_box(
+                        face.wires()
+                            .next()
+                            .unwrap()
+                            .halfedges()
+                            .map(|he| &edge_curves[*he.edge()]),
+                        alloc,
+                    ),
                     None,
                 )
             } else {

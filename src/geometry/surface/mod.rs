@@ -14,6 +14,8 @@ pub use self::sphere::Sphere;
 
 use super::{BBox, Crv, Curve};
 
+pub const BOX_SCALE_FACTOR: f64 = 1.05;
+
 pub trait Surface {
     fn eval(&self, p: &[f64]) -> [f64; 4];
     fn uv(&self, pt: &[f64], ref_pt: Option<&[f64]>) -> [f64; 2];
@@ -78,7 +80,7 @@ pub trait Surface {
         uv_triangles: &[usize],
         alloc: A,
     ) -> BBox {
-        const N_SAMPLING: usize = 100;
+        const N_SAMPLING: usize = 200;
         let new_points = montecarlo_sampling::<2, _>(uv_points, uv_triangles, N_SAMPLING, alloc);
         BBox::from_iter(
             uv_points
@@ -88,6 +90,7 @@ pub trait Surface {
                 .array_chunks::<2>()
                 .map(|uv| self.point(&uv)),
         )
+        .scaled(BOX_SCALE_FACTOR)
     }
 }
 

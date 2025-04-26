@@ -1,8 +1,13 @@
+use std::alloc::Allocator;
+
 use itertools::Itertools;
 
-use crate::math::{add_with_coeff, cross, dot, normalize};
+use crate::{
+    geometry::{BBox, Crv, Curve},
+    math::{add_with_coeff, cross, dot, normalize},
+};
 
-use super::Surface;
+use super::{BOX_SCALE_FACTOR, Surface};
 
 #[derive(Clone, Debug)]
 pub struct Plane {
@@ -45,6 +50,29 @@ impl Plane {
     pub fn reversed(&self) -> Plane {
         let dy = self.dy.map(|x| -x);
         Plane::from_x_y(self.o, self.dx, dy)
+    }
+
+    pub fn compute_box<'a, T: IntoIterator<Item = &'a Crv>, A: Allocator + Copy>(
+        &self,
+        outer_wire_edge_curves: T,
+        alloc: A,
+    ) -> BBox {
+        let mut bbox = BBox::default();
+        for crv in outer_wire_edge_curves {
+            match crv {
+                Crv::Segment(seg) => {
+                    bbox.extend(&seg.start);
+                    bbox.extend(&seg.end);
+                }
+                crv => {
+                    bbox.merge(
+                        &BBox::from_iter(crv.discrete(alloc).array_chunks::<3>())
+                            .scaled(BOX_SCALE_FACTOR),
+                    );
+                }
+            }
+        }
+        bbox
     }
 }
 

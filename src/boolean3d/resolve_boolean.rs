@@ -3,7 +3,6 @@ use itertools::Itertools;
 use tinyvec::TinyVec;
 
 use crate::math::{square_norm, sub_short};
-use crate::mesh::EdgeId;
 use crate::point_3;
 use crate::{
     boolean3d::{extract_cells::write_chains, write_obj},

@@ -51,6 +51,11 @@ impl BBox {
             self.max[i] = center[i] + s * (self.max[i] - center[i]);
         }
     }
+
+    pub fn scaled(mut self, s: f64) -> Self {
+        self.scale(s);
+        self
+    }
 }
 
 impl Default for BBox {

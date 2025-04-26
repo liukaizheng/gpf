@@ -4,8 +4,8 @@ use super::Curve;
 
 #[derive(Clone, Debug)]
 pub struct Segment {
-    start: [f64; 3],
-    end: [f64; 3],
+    pub start: [f64; 3],
+    pub end: [f64; 3],
 }
 
 impl Segment {
