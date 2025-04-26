@@ -296,11 +296,12 @@ impl<'a, A: Allocator + Copy> Element for FaceWireIter<'a, A> {
     #[inline(always)]
     fn next(&mut self) {
         self.curr_hid = self.mesh.f_loop_next_first_halfedge(self.curr_hid);
+        self.first = false;
     }
 
     #[inline(always)]
     fn is_end(&self) -> bool {
-        self.curr_hid == self.first_hid && !self.first
+        !self.first && self.curr_hid == self.first_hid
     }
 }
 
