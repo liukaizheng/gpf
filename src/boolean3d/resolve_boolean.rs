@@ -44,6 +44,11 @@ impl ModelData {
         let mut mask_vertices_map = HashMap::<Bitmask, TinyVec<[VertexId; 1]>, _, _>::with_capacity(
             non_manifold_vertices.len(),
         );
+
+        let add_into_mask_vertices_map = |mask: Bitmask, vid: VertexId| {
+            mask_vertices_map.entry(mask).or_default().push(vid);
+        };
+
         for vid in non_manifold_vertices {
             let mut mask = Bitmask::<[usize; 1]>::new(self.surface_patches.len());
             for f in self
@@ -54,12 +59,17 @@ impl ModelData {
             {
                 mask.set(self.patch_surface_arr[self.face_patch_arr[*f]]);
             }
-            match mask_vertices_map.entry(mask) {
-                Entry::Occupied(mut entry) => {
-                    entry.get_mut().push(vid);
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(TinyVec::from_iter([vid]));
+
+            if mask.n_elements() <= 3 {
+                add_into_mask_vertices_map(mask, vid);
+            } else {
+                let bit_set = mask.iter_set_bits().collect_vec();
+                for (i, j, k) in bit_set.into_iter().tuple_windows() {
+                    let mut mask = Bitmask::<[usize; 1]>::new(self.surface_patches.len());
+                    mask.set(i);
+                    mask.set(j);
+                    mask.set(k);
+                    add_into_mask_vertices_map(mask, vid);
                 }
             }
         }

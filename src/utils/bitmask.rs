@@ -1,5 +1,7 @@
+/// reference: https://github.com/contain-rs/bit-vec
 use std::ops::{
-    Add, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Index, Not, Rem, Shl, Shr, Sub,
+    Add, BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Index, Not, Rem, Shl, ShlAssign, Shr,
+    ShrAssign, Sub,
 };
 
 use tinyvec::{Array, TinyVec};
@@ -13,7 +15,9 @@ pub trait BitBlock:
     + BitXor<Output = Self>
     + Not<Output = Self>
     + Shl<usize, Output = Self>
+    + ShlAssign<usize>
     + Shr<usize, Output = Self>
+    + ShrAssign<usize>
     + Rem<Output = Self>
     + BitOrAssign
     + BitAndAssign
@@ -40,6 +44,8 @@ pub trait BitBlock:
     fn zero() -> Self;
     /// Get `1`
     fn one() -> Self;
+    /// trailing zeros
+    fn trailing_zeros(self) -> usize;
 }
 
 macro_rules! bit_block_impl {
@@ -57,6 +63,8 @@ macro_rules! bit_block_impl {
             fn one() -> Self { 1 }
             #[inline]
             fn zero() -> Self { 0 }
+            #[inline]
+            fn trailing_zeros(self) -> usize { self.trailing_zeros() as usize }
         }
     )*)
 }
@@ -115,6 +123,27 @@ where
             .map(|(&a, &b)| (a & b).count_ones())
             .sum()
     }
+
+    /// Returns an iterator over the indices of set bits.
+    pub fn iter_set_bits(&self) -> impl Iterator<Item = usize> {
+        self.data
+            .iter()
+            .enumerate()
+            .flat_map(|(block_index, &block)| {
+                let mut current_block = block;
+                let bits_per_block = A::Item::bits();
+                let mut start_index = block_index * bits_per_block;
+                std::iter::from_fn(move || {
+                    if current_block == A::Item::zero() {
+                        return None;
+                    }
+                    let lowest_set_bit = current_block.trailing_zeros() as usize;
+                    current_block >>= lowest_set_bit + 1;
+                    start_index += lowest_set_bit + 1;
+                    Some(start_index - 1)
+                })
+            })
+    }
 }
 
 impl<A: Array> Index<usize> for Bitmask<A>
@@ -152,5 +181,13 @@ mod tests {
         [2, 7, 9].iter().for_each(|&i| bm2.set(i));
 
         assert_eq!(bm1.n_common(&bm2), 3);
+    }
+
+    #[test]
+    fn test_iter() {
+        let mut bm = Bitmask::<[u8; 1]>::new(15);
+        [11, 1, 2, 7, 9, 7, 12].iter().for_each(|&i| bm.set(i));
+        let set_bits: Vec<usize> = bm.iter_set_bits().collect();
+        assert_eq!(set_bits, vec![1, 2, 7, 9, 11, 12]);
     }
 }
