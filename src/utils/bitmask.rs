@@ -103,6 +103,12 @@ where
         self.data[block] |= A::Item::one() << bit;
     }
 
+    pub fn set_from_iter<T: IntoIterator<Item = usize>>(&mut self, iter: T) {
+        for i in iter {
+            self.set(i);
+        }
+    }
+
     #[inline]
     pub fn clear(&mut self, i: usize) {
         let block = i / A::Item::bits();
@@ -125,7 +131,7 @@ where
     }
 
     /// Returns an iterator over the indices of set bits.
-    pub fn iter_set_bits(&self) -> impl Iterator<Item = usize> {
+    pub fn iter_set_bits(&self) -> impl Iterator<Item = usize> + Clone {
         self.data
             .iter()
             .enumerate()
@@ -167,6 +173,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
+
     use super::*;
 
     #[test]
@@ -189,5 +197,17 @@ mod tests {
         [11, 1, 2, 7, 9, 7, 12].iter().for_each(|&i| bm.set(i));
         let set_bits: Vec<usize> = bm.iter_set_bits().collect();
         assert_eq!(set_bits, vec![1, 2, 7, 9, 11, 12]);
+    }
+
+    #[test]
+    fn test_bit_combinations() {
+        let mut bm = Bitmask::<[u8; 1]>::new(15);
+        [1, 2, 3, 4].iter().for_each(|&i| bm.set(i));
+        let combinations: Vec<(usize, usize, usize)> =
+            bm.iter_set_bits().tuple_combinations().collect();
+        assert_eq!(
+            combinations,
+            vec![(1, 2, 3), (1, 2, 4), (1, 3, 4), (2, 3, 4)]
+        );
     }
 }
