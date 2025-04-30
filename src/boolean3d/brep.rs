@@ -160,7 +160,7 @@ impl<A: Allocator + Copy> BrepModel<A> {
             bbox,
         }
     }
-    pub fn v_mask(&self, vid: VertexId, n_surfaces: usize) -> Bitmask {
+    pub fn vert_mask(&self, vid: VertexId, n_surfaces: usize) -> Bitmask {
         let mut mask = Bitmask::new(n_surfaces);
         for face in self
             .mesh

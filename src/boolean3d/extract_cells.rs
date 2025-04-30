@@ -2,23 +2,23 @@ use std::{alloc::Allocator, collections::VecDeque};
 
 use bumpalo::Bump;
 use hashbrown::{
-    hash_map::{DefaultHashBuilder, Entry},
     HashMap, HashSet,
+    hash_map::{DefaultHashBuilder, Entry},
 };
 use itertools::Itertools;
 use tinyvec::TinyVec;
 
 use crate::{
+    INVALID_IND,
     boolean3d::tet_set::EDGE_FACE_INDICES,
     is_positive,
     mesh::{EdgeId, ElementId, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     oriented_index, point_3, strip_orientation, twin_index,
     utils::{DisjointSet, TwoDimArr},
-    INVALID_IND,
 };
 
 use super::{
-    ar_in_tet::IsoVert, resolve_boolean::ModelData, tet_set::TetSet, Arrangement, IsoSurfMesh,
+    Arrangement, IsoSurfMesh, ar_in_tet::IsoVert, resolve_boolean::ModelData, tet_set::TetSet,
 };
 
 pub(crate) fn write_chains(name: &str, points: &[f64], mesh: &SurfaceMesh, is_chain_edge: &[bool]) {
@@ -118,7 +118,6 @@ where
     F: Fn(FaceId, FaceId) -> bool,
 {
     let mut vertex_edge_map = HashMap::<VertexId, TinyVec<[EdgeId; 2]>>::new();
-    let mut non_manifold_vertices = HashSet::new();
     for edge in mesh.edges() {
         let he = edge.halfedge();
         let next_he = he.sibling();
@@ -126,20 +125,7 @@ where
             if next_he.sibling().ne(&he) || !face_with_same_surf(*he.face(), *next_he.face()) {
                 let eid = *edge;
                 for vid in mesh.he_vertices(*he) {
-                    match vertex_edge_map.entry(vid) {
-                        Entry::Occupied(mut entry) => {
-                            let vert_edges = entry.get_mut();
-                            vert_edges.push(eid);
-                            if vert_edges.len() > 2 {
-                                non_manifold_vertices.insert(vid);
-                            }
-                        }
-                        Entry::Vacant(entry) => {
-                            let mut vals = TinyVec::new();
-                            vals.push(eid);
-                            entry.insert(vals);
-                        }
-                    }
+                    vertex_edge_map.entry(vid).or_default().push(eid);
                 }
             }
         }
@@ -179,14 +165,19 @@ where
     };
     let mut chains = Vec::new();
     let mut is_chain_edge = vec![false; mesh.n_edges_capacity()];
-    for vid in &non_manifold_vertices {
-        for &eid in &vertex_edge_map[vid] {
+    let mut non_manifold_vertices = Vec::new();
+    for (&vid, edges) in &vertex_edge_map {
+        if edges.len() < 3 {
+            continue;
+        }
+        non_manifold_vertices.push(vid);
+        for &eid in edges {
             if is_chain_edge[eid] {
                 continue;
             }
             let start_hid = {
                 let hid = mesh.e_halfedge(eid);
-                if mesh.he_to(hid) == *vid {
+                if mesh.he_to(hid) == vid {
                     mesh.he_twin(hid)
                 } else {
                     hid
@@ -198,11 +189,11 @@ where
                 continue;
             }
             debug_assert!(start_hid.valid());
-            debug_assert!(mesh.he_from(start_hid) == *vid);
+            debug_assert!(mesh.he_from(start_hid) == vid);
             chains.push(propagate_chain(start_hid, &mut is_chain_edge));
         }
     }
-    (Vec::from_iter(non_manifold_vertices), chains, is_chain_edge)
+    (non_manifold_vertices, chains, is_chain_edge)
 }
 
 fn identify_boundary_patches(mesh: &SurfaceMesh, face_patch_arr: &[usize]) -> Vec<bool> {

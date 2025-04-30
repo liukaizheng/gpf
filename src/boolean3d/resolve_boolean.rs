@@ -4,6 +4,7 @@ use tinyvec::TinyVec;
 
 use crate::geometry::Surf;
 use crate::math::{square_norm, sub_short};
+use crate::mesh::EdgeId;
 use crate::point_3;
 use crate::{
     boolean3d::{extract_cells::write_chains, write_obj},
@@ -41,9 +42,8 @@ impl ModelData {
         println!("the number of chains: {:?}", chains.len());
         write_chains("chain.obj", &self.points, &self.mesh, &is_chain_edge);
 
-        let mut mask_vertices_map = HashMap::<Bitmask, TinyVec<[VertexId; 1]>, _, _>::with_capacity(
-            non_manifold_vertices.len(),
-        );
+        let mut mask_vertices_map =
+            HashMap::<Bitmask, TinyVec<[VertexId; 1]>>::with_capacity(non_manifold_vertices.len());
 
         let mut add_into_mask_vertices_map = |mask: Bitmask, vid: VertexId| {
             mask_vertices_map.entry(mask).or_default().push(vid);
@@ -81,7 +81,7 @@ impl ModelData {
                     .vertices()
                     .map(|m_vert| {
                         let m_vid = *m_vert;
-                        let mask = model.v_mask(m_vid, self.surface_patches.len());
+                        let mask = model.vert_mask(m_vid, self.surface_patches.len());
                         let mut iso_vid = VertexId::default();
                         let mut min_dist = f64::MAX;
                         let m_pt = model.v_point(m_vid);
@@ -109,8 +109,35 @@ impl ModelData {
         &self,
         surfaces: &[Surf],
         model: &BrepModel,
-        non_manifold_vertices: &[VertexId],
+        mask_vertices_map: &HashMap<Bitmask, TinyVec<[VertexId; 1]>>,
     ) {
+        let iso_vertices = model
+            .mesh
+            .vertices()
+            .map(|m_vert| {
+                let m_vid = *m_vert;
+                let mask = model.vert_mask(m_vid, self.surface_patches.len());
+                let mut iso_vid = VertexId::default();
+                let mut min_dist = f64::MAX;
+                let m_pt = model.v_point(m_vid);
+                for &vid in mask_vertices_map.get(&mask).unwrap_or(&TinyVec::new()) {
+                    let pt = self.v_point(vid);
+                    let dist = square_norm(&sub_short::<3, _>(m_pt, pt));
+                    if dist < min_dist {
+                        min_dist = dist;
+                        iso_vid = vid;
+                    }
+                }
+                iso_vid
+            })
+            .collect_vec();
+        for edge in model.mesh.edges() {
+            self.propagate_edge_chain(*edge, model, &iso_vertices);
+        }
+    }
+
+    fn propagate_edge_chain(&self, eid: EdgeId, model: &BrepModel, iso_vertices: &[VertexId]) {
+        let [va, vb] = model.mesh.e_vertices(eid).map(|vid| iso_vertices[vid]);
     }
 
     #[inline]
