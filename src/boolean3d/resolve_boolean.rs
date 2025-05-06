@@ -4,7 +4,8 @@ use tinyvec::TinyVec;
 
 use crate::geometry::{Surf, Surface};
 use crate::math::{square_norm, sub_short};
-use crate::mesh::{EdgeId, HalfedgeId};
+use crate::mesh::{ElementId, HalfedgeId, HoleAwareMesh};
+use crate::utils::TwoDimArr;
 use crate::{INVALID_IND, face_area_2d, is_positive, oriented_index, point_3, strip_orientation};
 use crate::{
     boolean3d::{extract_cells::write_chains, write_obj},
@@ -32,6 +33,8 @@ impl ModelData {
             identify_chain_edge(&self.mesh, |fa, fb| {
                 self.face_patch_arr[fa] == self.face_patch_arr[fb]
             });
+        let (patch_mesh, chain_masks) =
+            self.build_patch_mesh(&chains, surfaces, &non_manifold_vertices);
 
         println!(
             "the number of non_manifold_vertices: {:?}",
@@ -41,73 +44,50 @@ impl ModelData {
         write_chains("chain.obj", &self.points, &self.mesh, &edge_chain_indices);
 
         let mut mask_vertices_map =
-            HashMap::<Bitmask, TinyVec<[VertexId; 1]>>::with_capacity(non_manifold_vertices.len());
+            HashMap::<Bitmask, TinyVec<[VertexId; 1]>>::with_capacity(patch_mesh.n_vertices());
 
         let mut add_into_mask_vertices_map = |mask: Bitmask, vid: VertexId| {
             mask_vertices_map.entry(mask).or_default().push(vid);
         };
 
-        for vid in non_manifold_vertices {
+        for v in patch_mesh.vertices() {
             let mut mask = Bitmask::<[usize; 1]>::new(self.surface_patches.len());
-            for f in self
-                .mesh
-                .vertex(vid)
-                .incoming_halfedges()
-                .map(|he| he.face())
-            {
-                mask.set(self.patch_surface_arr[self.face_patch_arr[*f]]);
+            for he in v.incoming_halfedges() {
+                mask.set(self.patch_surface_arr[*he.face()]);
             }
-
             if mask.n_elements() <= 3 {
-                add_into_mask_vertices_map(mask, vid);
+                add_into_mask_vertices_map(mask, *v);
             } else {
                 for k in 0..mask.n_elements() {
                     let mut m = Bitmask::<[usize; 1]>::new(self.surface_patches.len());
                     for elements in mask.iter_set_bits().combinations(k) {
                         m.set_from_iter(elements);
                     }
-                    add_into_mask_vertices_map(m, vid);
+                    add_into_mask_vertices_map(m, *v);
                 }
             }
         }
 
-        let model_isomesh_vertices_map = models
-            .iter()
-            .map(|model| {
-                model
-                    .mesh
-                    .vertices()
-                    .map(|m_vert| {
-                        let m_vid = *m_vert;
-                        let mask = model.vert_mask(m_vid, self.surface_patches.len());
-                        let mut iso_vid = VertexId::default();
-                        let mut min_dist = f64::MAX;
-                        let m_pt = model.v_point(m_vid);
-                        for &vid in mask_vertices_map.get(&mask).unwrap_or(&TinyVec::new()) {
-                            let pt = self.v_point(vid);
-                            let dist = square_norm(&sub_short::<3, _>(m_pt, pt));
-                            if dist < min_dist {
-                                min_dist = dist;
-                                iso_vid = vid;
-                            }
-                        }
-                        iso_vid
-                    })
-                    .collect_vec()
-            })
-            .collect_vec();
-
-        println!(
-            "model_isomesh_vertices_map: {:?}",
-            model_isomesh_vertices_map
-        );
+        for model in &models {
+            self.resolve_face_patches(
+                model,
+                &patch_mesh,
+                &chain_masks,
+                &mask_vertices_map,
+                &non_manifold_vertices,
+                surfaces,
+            );
+        }
     }
 
     fn resolve_face_patches(
         &self,
-        surfaces: &[Surf],
         model: &BrepModel,
+        patch_mesh: &HoleAwareMesh<std::alloc::Global>,
+        chain_masks: &[Bitmask],
         mask_vertices_map: &HashMap<Bitmask, TinyVec<[VertexId; 1]>>,
+        non_manifold_vertices: &[VertexId],
+        surfaces: &[Surf],
     ) {
         let iso_vertices = model
             .mesh
@@ -119,7 +99,7 @@ impl ModelData {
                 let mut min_dist = f64::MAX;
                 let m_pt = model.v_point(m_vid);
                 for &vid in mask_vertices_map.get(&mask).unwrap_or(&TinyVec::new()) {
-                    let pt = self.v_point(vid);
+                    let pt = self.v_point(non_manifold_vertices[vid]);
                     let dist = square_norm(&sub_short::<3, _>(m_pt, pt));
                     if dist < min_dist {
                         min_dist = dist;
@@ -129,12 +109,37 @@ impl ModelData {
                 iso_vid
             })
             .collect_vec();
-        for edge in model.mesh.edges() {
-            self.propagate_edge_chain(*edge, model, &iso_vertices);
-        }
+        let edge_chain_arr = Vec::from_iter(model.mesh.edges().map(|edge| {
+            let [va, vb] = model.mesh.e_vertices(*edge).map(|v| iso_vertices[v]);
+            if !va.valid() || !vb.valid() {
+                None
+            } else {
+                let edge_mask = model.edge_mask(*edge, self.surface_patches.len());
+                let mut edge_chains = Vec::new();
+                if self.propagate_edge_chain(
+                    &edge_mask,
+                    va,
+                    vb,
+                    patch_mesh,
+                    chain_masks,
+                    &mut edge_chains,
+                ) {
+                    Some(edge_chains)
+                } else {
+                    None
+                }
+            }
+        }));
+
+        println!("the edge chain arr is {:?}", edge_chain_arr);
     }
 
-    fn build_patch_mesh(&self, chains: &[Vec<HalfedgeId>], surfaces: &[Surf]) {
+    fn build_patch_mesh(
+        &self,
+        chains: &[Vec<HalfedgeId>],
+        surfaces: &[Surf],
+        non_manifold_vertices: &[VertexId],
+    ) -> (HoleAwareMesh<std::alloc::Global>, Vec<Bitmask>) {
         let mut patch_oriented_chain_arr = vec![Vec::with_capacity(4); self.patches.len()];
         for (chain_id, chain) in chains.iter().enumerate() {
             let chain_hid = chain[0];
@@ -147,11 +152,37 @@ impl ModelData {
             }
         }
 
+        let non_manifold_vert_idx_map = HashMap::<_, _>::from_iter(
+            non_manifold_vertices
+                .iter()
+                .enumerate()
+                .map(|(idx, &vid)| (vid, idx)),
+        );
+
         let mut chain_visited = vec![false; chains.len()];
+        let mut loops = TwoDimArr::new();
+        let mut face_loops = TwoDimArr::new();
         for (pid, ori_chains) in patch_oriented_chain_arr.into_iter().enumerate() {
             let surf = &surfaces[self.patch_surface_arr[pid]];
-            let wires = self.get_patch_wires(chains, &ori_chains, &mut chain_visited, surf);
+            let start = loops.len();
+            for wire in self.get_patch_wires(chains, &ori_chains, &mut chain_visited, surf) {
+                loops.push(wire.into_iter().map(|ori_chain_id| {
+                    *non_manifold_vert_idx_map
+                        .get(&get_ori_chain_vb(chains, ori_chain_id, &self.mesh))
+                        .unwrap()
+                }));
+            }
+            face_loops.push(start..loops.len());
         }
+        let mesh = HoleAwareMesh::new(loops.iter(), face_loops.iter(), std::alloc::Global);
+        let chain_masks = Vec::from_iter(mesh.edges().map(|edge| {
+            let mut edge_mask = Bitmask::<[usize; 1]>::new(self.surface_patches.len());
+            for he in edge.halfedges() {
+                edge_mask.set(self.patch_surface_arr[*he.face()]);
+            }
+            edge_mask
+        }));
+        (mesh, chain_masks)
     }
 
     fn get_patch_wires(
@@ -268,8 +299,43 @@ impl ModelData {
         }
     }
 
-    fn propagate_edge_chain(&self, eid: EdgeId, model: &BrepModel, iso_vertices: &[VertexId]) {
-        let [va, vb] = model.mesh.e_vertices(eid).map(|vid| iso_vertices[vid]);
+    fn propagate_edge_chain(
+        &self,
+        edge_mask: &Bitmask,
+        va: VertexId,
+        vb: VertexId,
+        patch_mesh: &HoleAwareMesh<std::alloc::Global>,
+        chain_masks: &[Bitmask],
+        result: &mut Vec<HalfedgeId>,
+    ) -> bool {
+        if va == vb {
+            return true;
+        }
+        for he in patch_mesh.vertex(va).outgoing_halfedges() {
+            let eid = *he.edge();
+            let mask = &chain_masks[eid];
+            if let Some(&prev_hid) = result.last()
+                && patch_mesh.he_edge(prev_hid) == eid
+            {
+                continue;
+            }
+            if mask.contain(edge_mask) {
+                result.push(*he);
+                if self.propagate_edge_chain(
+                    edge_mask,
+                    *he.to(),
+                    vb,
+                    patch_mesh,
+                    chain_masks,
+                    result,
+                ) {
+                    return true;
+                } else {
+                    result.pop();
+                }
+            }
+        }
+        false
     }
 
     #[inline]
@@ -303,14 +369,6 @@ fn get_ori_chain_vertex<M: Mesh>(
     } else {
         get_chain_vb(chain, mesh)
     }
-}
-
-fn get_ori_chain_va<M: Mesh>(
-    chains: &[Vec<HalfedgeId>],
-    ori_chain_id: usize,
-    mesh: &M,
-) -> VertexId {
-    get_ori_chain_vertex(chains, ori_chain_id, true, mesh)
 }
 
 fn get_ori_chain_vb<M: Mesh>(

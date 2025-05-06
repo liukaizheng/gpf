@@ -130,6 +130,25 @@ where
             .sum()
     }
 
+    pub fn contain(&self, other: &Self) -> bool {
+        let mut other_iter = other.iter_set_bits();
+        let mut iter = self.iter_set_bits();
+        loop {
+            let other_next = other_iter.next();
+            if other_next.is_none() {
+                return true;
+            }
+            let next = iter.next();
+            if let Some(next) = next {
+                if next != other_next.unwrap() {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+    }
+
     /// Returns an iterator over the indices of set bits.
     pub fn iter_set_bits(&self) -> impl Iterator<Item = usize> + Clone {
         self.data

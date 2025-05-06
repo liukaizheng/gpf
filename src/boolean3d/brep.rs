@@ -5,7 +5,7 @@ use tinyvec::TinyVec;
 use crate::{
     geometry::{BBox, Crv, Curve, Surf, Surface, segment::Segment},
     is_negative,
-    mesh::{ElementIndex, FaceId, HalfedgeId, HoleAwareMesh, Mesh, VertexId},
+    mesh::{EdgeId, ElementIndex, FaceId, HalfedgeId, HoleAwareMesh, Mesh, VertexId},
     point, strip_orientation,
     utils::Bitmask,
 };
@@ -168,6 +168,14 @@ impl<A: Allocator + Copy> BrepModel<A> {
             .incoming_halfedges()
             .map(|he| he.face())
         {
+            mask.set(strip_orientation(self.faces[*face].surface_id));
+        }
+        mask
+    }
+
+    pub fn edge_mask(&self, eid: EdgeId, n_surfaces: usize) -> Bitmask {
+        let mut mask = Bitmask::new(n_surfaces);
+        for face in self.mesh.edge(eid).halfedges().map(|he| he.face()) {
             mask.set(strip_orientation(self.faces[*face].surface_id));
         }
         mask
