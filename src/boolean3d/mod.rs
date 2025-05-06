@@ -47,7 +47,7 @@ where
     println!("mesh n tets: {}", tets.tet_faces.len());
 
     let model_data = extract_cells(iso_surf_mesh, &tets, surfaces.len());
-    model_data.resolve(models);
+    model_data.resolve(models, &surfaces);
 }
 
 fn init_mesh(bbox: BBox) -> TetSet {
