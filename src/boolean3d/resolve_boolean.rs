@@ -2,6 +2,7 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use tinyvec::TinyVec;
 
+use crate::boolean3d::extract_cells::write_shell;
 use crate::geometry::{Surf, Surface};
 use crate::math::{square_norm, sub_short};
 use crate::mesh::{ElementId, HalfedgeId, HoleAwareMesh};
@@ -70,15 +71,27 @@ impl ModelData {
             }
         }
 
+        let mut idx = 0;
         for model in &models {
-            self.resolve_face_patches(
+            let face_ori_patches = self.resolve_face_patches(
                 model,
                 &patch_mesh,
                 &chain_masks,
                 &mask_vertices_map,
                 &non_manifold_vertices,
-                surfaces,
             );
+            write_shell(
+                &format!("model{}.obj", idx),
+                &self.mesh,
+                &self.points,
+                &face_ori_patches
+                    .iter()
+                    .flatten()
+                    .map(|&pid| pid)
+                    .collect_vec(),
+                &self.patches,
+            );
+            idx += 1;
         }
     }
 
@@ -89,8 +102,7 @@ impl ModelData {
         chain_masks: &[Bitmask],
         mask_vertices_map: &HashMap<Bitmask, TinyVec<[VertexId; 1]>>,
         non_manifold_vertices: &[VertexId],
-        surfaces: &[Surf],
-    ) {
+    ) -> Vec<Vec<usize>> {
         let iso_vertices = model
             .mesh
             .vertices()
@@ -151,18 +163,17 @@ impl ModelData {
                 {
                     let mut start_patch_fid = FaceId::default();
                     for model_he in model_face.halfedges() {
+                        let model_he_same_dir = model_he.same_dir();
                         for &hid in edge_chains_arr[*model_he.edge()].as_ref().unwrap() {
                             let eid = patch_mesh.he_edge(hid);
-                            if patch_mesh.he_same_dir(hid) {
+                            if patch_mesh.he_same_dir(hid) == model_he_same_dir {
                                 bdy_edge_masks[eid] = 0;
                             } else {
                                 bdy_edge_masks[eid] = 1;
                             }
                             if !start_patch_fid.valid() {
                                 for he in patch_mesh.edge(eid).halfedges() {
-                                    if patch_mesh.hes_same_dir(*he, hid)
-                                        == (bdy_edge_masks[eid] == 0)
-                                    {
+                                    if patch_mesh.he_same_dir(*he) == (bdy_edge_masks[eid] == 0) {
                                         let patch_fid = *he.face();
                                         if self.patch_surface_arr[patch_fid] == face_surf_id {
                                             start_patch_fid = patch_fid;
@@ -201,6 +212,7 @@ impl ModelData {
             .collect_vec();
 
         println!("model face oriented patches {:?}", face_ori_patches);
+        face_ori_patches
     }
 
     fn find_face_occupied_patches(
@@ -223,16 +235,18 @@ impl ModelData {
             for he in patch_mesh.face(curr_fid).halfedges() {
                 let mask = bdy_edge_masks[*he.edge()];
                 if mask == 2 {
-                    let twin_he = he.sibling();
-                    let twin_fid = *twin_he.face();
-                    if patch_face_visited[twin_fid]
-                        || twin_he.sibling().ne(&he)
-                        || self.patch_surface_arr[*he.face()] != self.patch_surface_arr[twin_fid]
+                    let twin_fid = he
+                        .edge()
+                        .halfedges()
+                        .filter(|h| **h != *he)
+                        .map(|h| *h.face())
+                        .find(|&f| self.patch_surface_arr[f] == self.patch_surface_arr[curr_fid]);
+                    if let Some(twin_fid) = twin_fid
+                        && !patch_face_visited[twin_fid]
                     {
-                        continue;
+                        patch_face_visited[twin_fid] = true;
+                        occupied_patches.push(twin_fid);
                     }
-                    patch_face_visited[twin_fid] = true;
-                    occupied_patches.push(twin_fid);
                 } else if (mask == 1) == he.same_dir() {
                     valid = false;
                     break;
