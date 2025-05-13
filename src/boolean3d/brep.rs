@@ -182,6 +182,11 @@ impl<A: Allocator + Copy> BrepModel<A> {
     }
 
     #[inline]
+    pub fn oriented_face_surface(&self, fid: FaceId) -> usize {
+        self.faces[fid].surface_id
+    }
+
+    #[inline]
     pub fn v_point(&self, vid: VertexId) -> &[f64] {
         point::<3>(&self.points, vid.0)
     }

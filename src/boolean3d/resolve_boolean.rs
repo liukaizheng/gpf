@@ -6,7 +6,9 @@ use crate::geometry::{Surf, Surface};
 use crate::math::{square_norm, sub_short};
 use crate::mesh::{ElementId, HalfedgeId, HoleAwareMesh};
 use crate::utils::TwoDimArr;
-use crate::{INVALID_IND, face_area_2d, is_positive, oriented_index, point_3, strip_orientation};
+use crate::{
+    INVALID_IND, face_area_2d, is_negative, is_positive, oriented_index, point_3, strip_orientation,
+};
 use crate::{
     boolean3d::{extract_cells::write_chains, write_obj},
     mesh::{FaceId, Mesh, SurfaceMesh, VertexId},
@@ -109,7 +111,7 @@ impl ModelData {
                 iso_vid
             })
             .collect_vec();
-        let edge_chain_arr = Vec::from_iter(model.mesh.edges().map(|edge| {
+        let edge_chains_arr = Vec::from_iter(model.mesh.edges().map(|edge| {
             let [va, vb] = model.mesh.e_vertices(*edge).map(|v| iso_vertices[v]);
             if !va.valid() || !vb.valid() {
                 None
@@ -131,7 +133,119 @@ impl ModelData {
             }
         }));
 
-        println!("the edge chain arr is {:?}", edge_chain_arr);
+        // Initialize boundary edge masks,
+        // 2 means not visited
+        // 0 means boundary halfedge has same direction with edge
+        // 1 means boundary halfedge has opposite direction with edge
+        let mut bdy_edge_masks = vec![2u8; patch_mesh.n_edges()];
+        let mut patch_face_visited = vec![false; patch_mesh.n_faces()];
+        let face_ori_patches = model
+            .mesh
+            .faces()
+            .map(|model_face| {
+                let face_ori_surf_id = model.oriented_face_surface(*model_face);
+                let face_surf_id = strip_orientation(face_ori_surf_id);
+                if model_face
+                    .halfedges()
+                    .all(|he| edge_chains_arr[*he.edge()].is_some())
+                {
+                    let mut start_patch_fid = FaceId::default();
+                    for model_he in model_face.halfedges() {
+                        for &hid in edge_chains_arr[*model_he.edge()].as_ref().unwrap() {
+                            let eid = patch_mesh.he_edge(hid);
+                            if patch_mesh.he_same_dir(hid) {
+                                bdy_edge_masks[eid] = 0;
+                            } else {
+                                bdy_edge_masks[eid] = 1;
+                            }
+                            if !start_patch_fid.valid() {
+                                for he in patch_mesh.edge(eid).halfedges() {
+                                    if patch_mesh.hes_same_dir(*he, hid)
+                                        == (bdy_edge_masks[eid] == 0)
+                                    {
+                                        let patch_fid = *he.face();
+                                        if self.patch_surface_arr[patch_fid] == face_surf_id {
+                                            start_patch_fid = patch_fid;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let occupied_patches = self.find_face_occupied_patches(
+                        patch_mesh,
+                        start_patch_fid,
+                        &mut bdy_edge_masks,
+                        &mut patch_face_visited,
+                    );
+
+                    // reset mask
+                    for model_he in model_face.halfedges() {
+                        for &hid in edge_chains_arr[*model_he.edge()].as_ref().unwrap() {
+                            bdy_edge_masks[patch_mesh.he_edge(hid)] = 2;
+                        }
+                    }
+                    if let Some(occupied_patches) = occupied_patches {
+                        return Vec::from_iter(occupied_patches.into_iter().map(|fid| {
+                            oriented_index(
+                                *fid,
+                                is_negative(model.oriented_face_surface(*model_face)),
+                            )
+                        }));
+                    }
+                };
+                todo!("to implement");
+            })
+            .collect_vec();
+
+        println!("model face oriented patches {:?}", face_ori_patches);
+    }
+
+    fn find_face_occupied_patches(
+        &self,
+        patch_mesh: &HoleAwareMesh<std::alloc::Global>,
+        start_fid: FaceId,
+        bdy_edge_masks: &mut [u8],
+        patch_face_visited: &mut [bool],
+    ) -> Option<Vec<FaceId>> {
+        let mut occupied_patches = vec![start_fid];
+        patch_face_visited[start_fid] = true;
+        let mut idx = 0;
+        let mut valid = true;
+        loop {
+            if idx >= occupied_patches.len() {
+                break;
+            }
+            let curr_fid = occupied_patches[idx];
+            idx += 1;
+            for he in patch_mesh.face(curr_fid).halfedges() {
+                let mask = bdy_edge_masks[*he.edge()];
+                if mask == 2 {
+                    let twin_he = he.sibling();
+                    let twin_fid = *twin_he.face();
+                    if patch_face_visited[twin_fid]
+                        || twin_he.sibling().ne(&he)
+                        || self.patch_surface_arr[*he.face()] != self.patch_surface_arr[twin_fid]
+                    {
+                        continue;
+                    }
+                    patch_face_visited[twin_fid] = true;
+                    occupied_patches.push(twin_fid);
+                } else if (mask == 1) == he.same_dir() {
+                    valid = false;
+                    break;
+                }
+            }
+            if !valid {
+                break;
+            }
+        }
+        for i in 0..occupied_patches.len() {
+            patch_face_visited[occupied_patches[i]] = false;
+        }
+        if !valid { None } else { Some(occupied_patches) }
     }
 
     fn build_patch_mesh(
@@ -178,7 +292,7 @@ impl ModelData {
         let chain_masks = Vec::from_iter(mesh.edges().map(|edge| {
             let mut edge_mask = Bitmask::<[usize; 1]>::new(self.surface_patches.len());
             for he in edge.halfedges() {
-                edge_mask.set(self.patch_surface_arr[*he.face()]);
+                edge_mask.set(self.patch_surface_arr[*he.face()]); //`*he.face()` means patch id
             }
             edge_mask
         }));
