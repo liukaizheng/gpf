@@ -11,7 +11,7 @@ use tinyvec::TinyVec;
 use crate::{
     INVALID_IND,
     boolean3d::tet_set::EDGE_FACE_INDICES,
-    is_positive,
+    is_negative, is_positive,
     mesh::{EdgeId, ElementId, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     oriented_index, point_3, strip_orientation, twin_index,
     utils::{DisjointSet, TwoDimArr},
@@ -80,7 +80,7 @@ pub(crate) fn write_shell(
             for v in mesh.face(fid).vertices() {
                 v_ids.push(vertex_map[*v] + 1);
             }
-            if ori_pid & 1 == 0 {
+            if is_negative(ori_pid) {
                 v_ids.reverse();
             }
             for (va, vb) in v_ids[1..].iter().tuple_windows() {
@@ -1343,7 +1343,7 @@ fn remove_unused_patches(
                 oriented_index(patch_indices[patch_id], !is_positive(*oriented_patch_id));
         }
     }
-    let mut patch_cell_arr = vec![INVALID_IND; patches.len() << 1];
+    let mut patch_cell_arr = vec![cells.len(); patches.len() << 1];
     for (cid, cell) in cells.iter().enumerate() {
         for &patch_id in cell {
             patch_cell_arr[patch_id] = cid;
@@ -1358,14 +1358,14 @@ fn remove_unused_patches(
     //         &patches,
     //     );
     // }
-    ModelData {
+    ModelData::new(
         points,
-        face_patch_arr,
+        patches,
         patch_surface_arr,
         surface_patches,
-        patches,
+        face_patch_arr,
         cells,
         patch_cell_arr,
         mesh,
-    }
+    )
 }

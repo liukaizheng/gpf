@@ -16,7 +16,6 @@ fn get_angle(plane: &Plane, pt: &[f64]) -> f64 {
     let v = [pt[0] - o[0], pt[1] - o[1], pt[2] - o[2]];
     let x = dot(&v, &plane.dx);
     let y = dot(&v, &plane.dy);
-    let rr = x * x + y * y;
     y.atan2(x)
 }
 
@@ -236,6 +235,6 @@ fn test_boolean1() {
                 .reduce(|res, e| (res | e))
                 .unwrap()
         },
-        0.1,
+        0.001,
     );
 }

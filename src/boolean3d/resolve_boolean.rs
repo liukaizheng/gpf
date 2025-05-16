@@ -1,16 +1,17 @@
-use hashbrown::HashMap;
+use std::cell::RefCell;
+
+use hashbrown::{HashMap, HashSet};
 use itertools::Itertools;
 use tinyvec::TinyVec;
 
-use crate::boolean3d::extract_cells::write_shell;
 use crate::geometry::{Surf, Surface};
 use crate::graphcut::{ArcBuilder, MaxFlow, PushRelabelFifo};
-use crate::math::{norm, square_norm, sub_short};
+use crate::math::{cross, norm, square_norm, sub_short};
 use crate::mesh::{EdgeId, ElementId, HalfedgeId, HoleAwareMesh};
 use crate::utils::TwoDimArr;
 use crate::{
     INVALID_IND, face_area_2d, is_negative, is_positive, oriented_index, point, point_3,
-    strip_orientation,
+    strip_orientation, twin_index,
 };
 use crate::{
     boolean3d::{extract_cells::write_chains, write_obj},
@@ -21,17 +22,41 @@ use crate::{
 use super::{BrepModel, extract_cells::identify_chain_edge};
 
 pub(crate) struct ModelData {
-    pub(crate) points: Vec<f64>,
-    pub(crate) patches: Vec<Vec<FaceId>>,
-    pub(crate) patch_surface_arr: Vec<usize>,
-    pub(crate) surface_patches: Vec<Vec<usize>>,
-    pub(crate) face_patch_arr: Vec<usize>,
-    pub(crate) cells: Vec<Vec<usize>>,
-    pub(crate) patch_cell_arr: Vec<usize>,
-    pub(crate) mesh: SurfaceMesh,
+    points: Vec<f64>,
+    patches: Vec<Vec<FaceId>>,
+    patch_surface_arr: Vec<usize>,
+    surface_patches: Vec<Vec<usize>>,
+    face_patch_arr: Vec<usize>,
+    cells: Vec<Vec<usize>>,
+    patch_cell_arr: Vec<usize>,
+    mesh: SurfaceMesh,
+    patch_areas: RefCell<Option<Vec<f64>>>,
 }
 
 impl ModelData {
+    pub(crate) fn new(
+        points: Vec<f64>,
+        patches: Vec<Vec<FaceId>>,
+        patch_surface_arr: Vec<usize>,
+        surface_patches: Vec<Vec<usize>>,
+        face_patch_arr: Vec<usize>,
+        cells: Vec<Vec<usize>>,
+        patch_cell_arr: Vec<usize>,
+        mesh: SurfaceMesh,
+    ) -> Self {
+        Self {
+            points,
+            patches,
+            patch_surface_arr,
+            surface_patches,
+            face_patch_arr,
+            cells,
+            patch_cell_arr,
+            mesh,
+            patch_areas: RefCell::new(None),
+        }
+    }
+
     pub(crate) fn resolve(&self, models: Vec<BrepModel>, surfaces: &[Surf]) {
         write_obj("123.obj", &self.points, &self.mesh);
         let (non_manifold_vertices, chains, edge_chain_indices) =
@@ -76,40 +101,42 @@ impl ModelData {
             }
         }
 
-        let mut idx = 0;
-        for model in &models {
-            let face_ori_patches = self.resolve_face_patches(
-                model,
-                &patch_mesh,
-                &chain_masks,
-                &mask_vertices_map,
-                &non_manifold_vertices,
-                &mut chain_data,
-            );
-            write_shell(
-                &format!("model{}.obj", idx),
-                &self.mesh,
-                &self.points,
-                &face_ori_patches
-                    .iter()
-                    .flatten()
-                    .map(|&pid| pid)
-                    .collect_vec(),
-                &self.patches,
-            );
-            idx += 1;
-        }
+        // Initialize boundary patche masks,
+        // 2 means unvisited
+        // 0 means boundary oriented patch has same direction with patch
+        // 1 means boundary oriented halfedge has opposite direction with patch
+        let mut bdy_patch_masks = vec![2u8; self.patches.len()];
+        let mut cell_visited = vec![false; self.cells.len()];
+        let model_cells = models
+            .iter()
+            .map(|model| {
+                self.identify_model_cells(
+                    model,
+                    &patch_mesh,
+                    &chain_masks,
+                    &mask_vertices_map,
+                    &non_manifold_vertices,
+                    &mut bdy_patch_masks,
+                    &mut cell_visited,
+                    &mut chain_data,
+                )
+            })
+            .collect_vec();
+
+        println!("model_cells: {:?}", model_cells);
     }
 
-    fn resolve_face_patches(
+    fn identify_model_cells(
         &self,
         model: &BrepModel,
         patch_mesh: &HoleAwareMesh<std::alloc::Global>,
         chain_masks: &[Bitmask],
         mask_vertices_map: &HashMap<Bitmask, TinyVec<[VertexId; 1]>>,
         non_manifold_vertices: &[VertexId],
+        bdy_patch_masks: &mut [u8],
+        cell_visited: &mut [bool],
         chain_data: &mut ChainData,
-    ) -> Vec<Vec<usize>> {
+    ) -> Vec<usize> {
         let iso_vertices = model
             .mesh
             .vertices()
@@ -164,7 +191,7 @@ impl ModelData {
         // 1 means boundary halfedge has opposite direction with edge
         let mut bdy_edge_masks = vec![2u8; patch_mesh.n_edges()];
         let mut patch_face_visited = vec![false; patch_mesh.n_faces()];
-        let face_ori_patches = model
+        let model_face_ori_patches = model
             .mesh
             .faces()
             .map(|model_face| {
@@ -229,8 +256,32 @@ impl ModelData {
             })
             .collect_vec();
 
-        println!("model face oriented patches {:?}", face_ori_patches);
-        face_ori_patches
+        println!("model face oriented patches {:?}", model_face_ori_patches);
+        for &ori_pid in model_face_ori_patches.iter().flatten() {
+            let pid = strip_orientation(ori_pid);
+            if is_positive(ori_pid) {
+                bdy_patch_masks[pid] = 1;
+            } else {
+                bdy_patch_masks[pid] = 0;
+            }
+        }
+
+        // the patches of model are oriented opposite to its interior,
+        // the patches of cell are oriented to its interior
+        let model_cells = self.find_model_occupied_cells(
+            self.patch_cell_arr[twin_index(model_face_ori_patches[0][0])],
+            bdy_patch_masks,
+            cell_visited,
+        );
+        for &ori_pid in model_face_ori_patches.iter().flatten() {
+            bdy_patch_masks[strip_orientation(ori_pid)] = 2;
+        }
+
+        if let Some(model_cells) = model_cells {
+            model_cells
+        } else {
+            self.find_model_occupied_cells_fallback(model_face_ori_patches.into_iter().flatten())
+        }
     }
 
     fn find_face_occupied_patches(
@@ -290,7 +341,6 @@ impl ModelData {
         model_face_halfedges: T,
         chain_data: &mut ChainData,
     ) -> Vec<FaceId> {
-        use std::collections::HashMap;
         let patch_to_idx_map = HashMap::<FaceId, usize>::from_iter(
             self.surface_patches[surf_id]
                 .iter()
@@ -374,6 +424,89 @@ impl ModelData {
         Vec::from_iter(patch_to_idx_map.into_iter().filter_map(|(fid, idx)| {
             if max_flow.is_sink(idx + 1) {
                 Some(fid)
+            } else {
+                None
+            }
+        }))
+    }
+
+    fn find_model_occupied_cells(
+        &self,
+        first_cid: usize,
+        bdy_patch_masks: &mut [u8],
+        cell_visited: &mut [bool],
+    ) -> Option<Vec<usize>> {
+        let mut occupied_cells = vec![first_cid];
+        cell_visited[first_cid] = true;
+        let mut idx = 0;
+        let mut valid = true;
+        loop {
+            if idx >= occupied_cells.len() {
+                break;
+            }
+            let curr_cid = occupied_cells[idx];
+            idx += 1;
+            for &oriented_pid in &self.cells[curr_cid] {
+                let mask = bdy_patch_masks[strip_orientation(oriented_pid)];
+                if mask == 2 {
+                    let twin_cid = self.patch_cell_arr[twin_index(oriented_pid)];
+                    if !cell_visited[twin_cid] {
+                        cell_visited[twin_cid] = true;
+                        occupied_cells.push(twin_cid);
+                    }
+                } else if (mask == 1) == is_positive(oriented_pid) {
+                    valid = false;
+                    break;
+                }
+            }
+            if !valid {
+                break;
+            }
+        }
+        for &cid in &occupied_cells {
+            cell_visited[cid] = false;
+        }
+
+        if valid { Some(occupied_cells) } else { None }
+    }
+
+    fn find_model_occupied_cells_fallback<T: IntoIterator<Item = usize>>(
+        &self,
+        model_bry_ori_patches: T,
+    ) -> Vec<usize> {
+        let mut internal_cost = vec![0.0; self.cells.len() + 1];
+        let mut external_cost = vec![0.0; self.cells.len() + 1];
+        let mut boundary_patches = HashSet::new();
+        for ori_pid in model_bry_ori_patches {
+            let pid = strip_orientation(ori_pid);
+            boundary_patches.insert(pid);
+            let area = self.get_patch_area(pid);
+            let twin_ori_pid = twin_index(ori_pid);
+            external_cost[self.patch_cell_arr[twin_ori_pid]] += area;
+            internal_cost[self.patch_cell_arr[ori_pid]] += area;
+        }
+        internal_cost[self.cells.len()] = 1.0;
+
+        let mut builder = ArcBuilder::new(internal_cost, external_cost);
+        for pid in 0..self.patches.len() {
+            if boundary_patches.contains(&pid) {
+                continue;
+            }
+            let pos_ori_pid = oriented_index(pid, false);
+            let neg_ori_pid = twin_index(pos_ori_pid);
+            builder.add_arc(
+                self.patch_cell_arr[pos_ori_pid],
+                self.patch_cell_arr[neg_ori_pid],
+                self.get_patch_area(pid),
+                true,
+            );
+        }
+        let mut max_flow = PushRelabelFifo::from((builder.arcs, self.cells.len() + 3));
+        max_flow.find_max_flow();
+
+        Vec::from_iter((0..self.cells.len()).filter_map(|cid| {
+            if max_flow.is_sink(cid + 1) {
+                Some(cid)
             } else {
                 None
             }
@@ -594,6 +727,42 @@ impl ModelData {
     #[inline]
     fn v_point(&self, vid: VertexId) -> &[f64] {
         point_3(&self.points, vid.0)
+    }
+
+    fn get_patch_area(&self, pid: usize) -> f64 {
+        if let Some(patch_areas) = self.patch_areas.borrow().as_ref() {
+            return patch_areas[pid];
+        }
+        let mut patch_areas = self
+            .patches
+            .iter()
+            .map(|faces| {
+                let mut area = 0.0;
+                for &fid in faces {
+                    let polygon = self
+                        .mesh
+                        .face(fid)
+                        .vertices()
+                        .map(|v| self.v_point(*v))
+                        .collect_vec();
+                    let pa = &polygon[0];
+                    area += polygon[1..]
+                        .windows(2)
+                        .map(|pts| {
+                            let v1 = sub_short::<3, _>(pts[0], pa);
+                            let v2 = sub_short::<3, _>(pts[1], pa);
+                            norm(&cross(&v1, &v2))
+                        })
+                        .sum::<f64>();
+                }
+                area
+            })
+            .collect_vec();
+        let area_sum: f64 = patch_areas.iter().sum();
+        patch_areas.iter_mut().for_each(|area| *area /= area_sum);
+        let ret = patch_areas[pid];
+        self.patch_areas.borrow_mut().replace(patch_areas);
+        ret
     }
 }
 
