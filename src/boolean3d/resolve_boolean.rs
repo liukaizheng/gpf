@@ -152,6 +152,12 @@ impl ModelData {
             }
         }));
 
+        let get_ori_patch_indices = |model_fid, occupied_patches: Vec<FaceId>| {
+            Vec::from_iter(occupied_patches.into_iter().map(|fid| {
+                oriented_index(*fid, is_negative(model.oriented_face_surface(model_fid)))
+            }))
+        };
+
         // Initialize boundary edge masks,
         // 2 means unvisited
         // 0 means boundary halfedge has same direction with edge
@@ -206,20 +212,19 @@ impl ModelData {
                         }
                     }
                     if let Some(occupied_patches) = occupied_patches {
-                        return Vec::from_iter(occupied_patches.into_iter().map(|fid| {
-                            oriented_index(
-                                *fid,
-                                is_negative(model.oriented_face_surface(*model_face)),
-                            )
-                        }));
+                        return get_ori_patch_indices(*model_face, occupied_patches);
                     }
                 };
-                self.find_face_occupied_patches_inexactly(
-                    face_surf_id,
-                    patch_mesh,
-                    &edge_chains_arr,
-                    model_face.halfedges().map(|he| *he.edge()),
-                    chain_data,
+                get_ori_patch_indices(
+                    *model_face,
+                    self.find_face_occupied_patches_fallback(
+                        face_surf_id,
+                        patch_mesh,
+                        &model.mesh,
+                        &edge_chains_arr,
+                        model_face.halfedges().map(|he| *he),
+                        chain_data,
+                    ),
                 )
             })
             .collect_vec();
@@ -276,14 +281,16 @@ impl ModelData {
     }
 
     /// use graphcut to label patches
-    fn find_face_occupied_patches_inexactly<T: IntoIterator<Item = EdgeId>>(
+    fn find_face_occupied_patches_fallback<T: IntoIterator<Item = HalfedgeId>, M: Mesh>(
         &self,
         surf_id: usize,
-        patch_mesh: &HoleAwareMesh<std::alloc::Global>,
+        patch_mesh: &M,
+        model_mesh: &M,
         model_edge_chains_arr: &[Option<Vec<HalfedgeId>>],
-        model_face_edges: T,
+        model_face_halfedges: T,
         chain_data: &mut ChainData,
-    ) -> Vec<usize> {
+    ) -> Vec<FaceId> {
+        use std::collections::HashMap;
         let patch_to_idx_map = HashMap::<FaceId, usize>::from_iter(
             self.surface_patches[surf_id]
                 .iter()
@@ -307,7 +314,9 @@ impl ModelData {
 
         let mut internal_costs = vec![0.0; patch_to_idx_map.len()];
         let mut external_costs = vec![0.0; patch_to_idx_map.len()];
-        for model_eid in model_face_edges {
+        for model_hid in model_face_halfedges {
+            let model_eid = model_mesh.he_edge(model_hid);
+            let model_he_same_dir = model_mesh.he_same_dir(model_hid);
             if let Some(chains) = &model_edge_chains_arr[model_eid] {
                 for &chain_hid in chains {
                     let chain_eid = patch_mesh.he_edge(chain_hid);
@@ -316,7 +325,7 @@ impl ModelData {
                         let hid = *he;
                         let patch_fid = *he.face();
                         if let Some(&idx) = patch_to_idx_map.get(&patch_fid) {
-                            if patch_mesh.hes_same_dir(chain_hid, hid) {
+                            if patch_mesh.hes_same_dir(chain_hid, hid) == model_he_same_dir {
                                 external_costs[idx] +=
                                     chain_data.get_edge_length(chain_eid) / edge_len_sum;
                             } else {
@@ -362,14 +371,13 @@ impl ModelData {
         let mut max_flow = PushRelabelFifo::from((arc_builder.arcs, patch_to_idx_map.len() + 2));
         max_flow.find_max_flow();
 
-        let result = Vec::from_iter(patch_to_idx_map.into_iter().filter_map(|(fid, idx)| {
+        Vec::from_iter(patch_to_idx_map.into_iter().filter_map(|(fid, idx)| {
             if max_flow.is_sink(idx + 1) {
-                Some(*fid)
+                Some(fid)
             } else {
                 None
             }
-        }));
-        result
+        }))
     }
 
     fn build_patch_mesh(
