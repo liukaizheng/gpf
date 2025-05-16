@@ -4,11 +4,13 @@ use tinyvec::TinyVec;
 
 use crate::boolean3d::extract_cells::write_shell;
 use crate::geometry::{Surf, Surface};
-use crate::math::{square_norm, sub_short};
-use crate::mesh::{ElementId, HalfedgeId, HoleAwareMesh};
+use crate::graphcut::{ArcBuilder, MaxFlow, PushRelabelFifo};
+use crate::math::{norm, square_norm, sub_short};
+use crate::mesh::{EdgeId, ElementId, HalfedgeId, HoleAwareMesh};
 use crate::utils::TwoDimArr;
 use crate::{
-    INVALID_IND, face_area_2d, is_negative, is_positive, oriented_index, point_3, strip_orientation,
+    INVALID_IND, face_area_2d, is_negative, is_positive, oriented_index, point, point_3,
+    strip_orientation,
 };
 use crate::{
     boolean3d::{extract_cells::write_chains, write_obj},
@@ -36,7 +38,7 @@ impl ModelData {
             identify_chain_edge(&self.mesh, |fa, fb| {
                 self.face_patch_arr[fa] == self.face_patch_arr[fb]
             });
-        let (patch_mesh, chain_masks) =
+        let (patch_mesh, chain_masks, patch_edge_chain_indices) =
             self.build_patch_mesh(&chains, surfaces, &non_manifold_vertices);
 
         println!(
@@ -52,6 +54,9 @@ impl ModelData {
         let mut add_into_mask_vertices_map = |mask: Bitmask, vid: VertexId| {
             mask_vertices_map.entry(mask).or_default().push(vid);
         };
+
+        let mut chain_data =
+            ChainData::new(chains, patch_edge_chain_indices, &self.mesh, &self.points);
 
         for v in patch_mesh.vertices() {
             let mut mask = Bitmask::<[usize; 1]>::new(self.surface_patches.len());
@@ -79,6 +84,7 @@ impl ModelData {
                 &chain_masks,
                 &mask_vertices_map,
                 &non_manifold_vertices,
+                &mut chain_data,
             );
             write_shell(
                 &format!("model{}.obj", idx),
@@ -102,6 +108,7 @@ impl ModelData {
         chain_masks: &[Bitmask],
         mask_vertices_map: &HashMap<Bitmask, TinyVec<[VertexId; 1]>>,
         non_manifold_vertices: &[VertexId],
+        chain_data: &mut ChainData,
     ) -> Vec<Vec<usize>> {
         let iso_vertices = model
             .mesh
@@ -146,7 +153,7 @@ impl ModelData {
         }));
 
         // Initialize boundary edge masks,
-        // 2 means not visited
+        // 2 means unvisited
         // 0 means boundary halfedge has same direction with edge
         // 1 means boundary halfedge has opposite direction with edge
         let mut bdy_edge_masks = vec![2u8; patch_mesh.n_edges()];
@@ -207,7 +214,13 @@ impl ModelData {
                         }));
                     }
                 };
-                todo!("to implement");
+                self.find_face_occupied_patches_inexactly(
+                    face_surf_id,
+                    patch_mesh,
+                    &edge_chains_arr,
+                    model_face.halfedges().map(|he| *he.edge()),
+                    chain_data,
+                )
             })
             .collect_vec();
 
@@ -262,18 +275,115 @@ impl ModelData {
         if !valid { None } else { Some(occupied_patches) }
     }
 
+    /// use graphcut to label patches
+    fn find_face_occupied_patches_inexactly<T: IntoIterator<Item = EdgeId>>(
+        &self,
+        surf_id: usize,
+        patch_mesh: &HoleAwareMesh<std::alloc::Global>,
+        model_edge_chains_arr: &[Option<Vec<HalfedgeId>>],
+        model_face_edges: T,
+        chain_data: &mut ChainData,
+    ) -> Vec<usize> {
+        let patch_to_idx_map = HashMap::<FaceId, usize>::from_iter(
+            self.surface_patches[surf_id]
+                .iter()
+                .enumerate()
+                .map(|(idx, &pid)| (pid.into(), idx)),
+        );
+
+        let mut edge_is_boundary_map =
+            HashMap::<EdgeId, bool>::with_capacity(patch_to_idx_map.len() * 2);
+
+        let mut edge_len_sum = 0.0;
+        for &fid in &self.surface_patches[surf_id] {
+            for he in patch_mesh.face(fid.into()).halfedges() {
+                let eid = *he.edge();
+                if !edge_is_boundary_map.contains_key(&eid) {
+                    edge_is_boundary_map.insert(eid, false);
+                    edge_len_sum += chain_data.get_edge_length(eid);
+                }
+            }
+        }
+
+        let mut internal_costs = vec![0.0; patch_to_idx_map.len()];
+        let mut external_costs = vec![0.0; patch_to_idx_map.len()];
+        for model_eid in model_face_edges {
+            if let Some(chains) = &model_edge_chains_arr[model_eid] {
+                for &chain_hid in chains {
+                    let chain_eid = patch_mesh.he_edge(chain_hid);
+                    edge_is_boundary_map.insert(chain_eid, true);
+                    for he in patch_mesh.edge(chain_eid).halfedges() {
+                        let hid = *he;
+                        let patch_fid = *he.face();
+                        if let Some(&idx) = patch_to_idx_map.get(&patch_fid) {
+                            if patch_mesh.hes_same_dir(chain_hid, hid) {
+                                external_costs[idx] +=
+                                    chain_data.get_edge_length(chain_eid) / edge_len_sum;
+                            } else {
+                                internal_costs[idx] +=
+                                    chain_data.get_edge_length(chain_eid) / edge_len_sum;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut arc_builder = ArcBuilder::new(internal_costs, external_costs);
+        for (eid, is_boundary) in edge_is_boundary_map {
+            if is_boundary {
+                continue;
+            }
+
+            let mut two_side_patch_node = [INVALID_IND; 2];
+            for he in patch_mesh.edge(eid).halfedges() {
+                if let Some(&idx) = patch_to_idx_map.get(&*he.face()) {
+                    if he.same_dir() {
+                        two_side_patch_node[0] = idx;
+                    } else {
+                        two_side_patch_node[1] = idx;
+                    }
+                    if two_side_patch_node.iter().all(|&x| x != INVALID_IND) {
+                        break;
+                    }
+                }
+            }
+
+            if two_side_patch_node.iter().all(|&x| x != INVALID_IND) {
+                arc_builder.add_arc(
+                    two_side_patch_node[0],
+                    two_side_patch_node[1],
+                    chain_data.get_edge_length(eid) / edge_len_sum,
+                    true,
+                );
+            }
+        }
+
+        let mut max_flow = PushRelabelFifo::from((arc_builder.arcs, patch_to_idx_map.len() + 2));
+        max_flow.find_max_flow();
+
+        let result = Vec::from_iter(patch_to_idx_map.into_iter().filter_map(|(fid, idx)| {
+            if max_flow.is_sink(idx + 1) {
+                Some(*fid)
+            } else {
+                None
+            }
+        }));
+        result
+    }
+
     fn build_patch_mesh(
         &self,
         chains: &[Vec<HalfedgeId>],
         surfaces: &[Surf],
         non_manifold_vertices: &[VertexId],
-    ) -> (HoleAwareMesh<std::alloc::Global>, Vec<Bitmask>) {
-        let mut patch_oriented_chain_arr = vec![Vec::with_capacity(4); self.patches.len()];
+    ) -> (HoleAwareMesh<std::alloc::Global>, Vec<Bitmask>, Vec<usize>) {
+        let mut patch_oriented_chains_arr = vec![Vec::with_capacity(4); self.patches.len()];
         for (chain_id, chain) in chains.iter().enumerate() {
             let chain_hid = chain[0];
             for he in self.mesh.halfedge(chain_hid).edge().halfedges() {
                 let patch_id = self.face_patch_arr[*he.face()];
-                patch_oriented_chain_arr[patch_id].push(oriented_index(
+                patch_oriented_chains_arr[patch_id].push(oriented_index(
                     chain_id,
                     !self.mesh.hes_same_dir(chain_hid, *he),
                 ));
@@ -290,7 +400,7 @@ impl ModelData {
         let mut chain_visited = vec![false; chains.len()];
         let mut loops = TwoDimArr::new();
         let mut face_loops = TwoDimArr::new();
-        for (pid, ori_chains) in patch_oriented_chain_arr.into_iter().enumerate() {
+        for (pid, ori_chains) in patch_oriented_chains_arr.into_iter().enumerate() {
             let surf = &surfaces[self.patch_surface_arr[pid]];
             let start = loops.len();
             for wire in self.get_patch_wires(chains, &ori_chains, &mut chain_visited, surf) {
@@ -310,7 +420,14 @@ impl ModelData {
             }
             edge_mask
         }));
-        (mesh, chain_masks)
+        let mut edge_chain_indices = vec![INVALID_IND; mesh.n_edges()];
+        for (chain_id, chain) in chains.iter().enumerate() {
+            let [va, vb] = get_chain_vertices(&chain, &self.mesh)
+                .map(|vid| *non_manifold_vert_idx_map.get(&vid).unwrap());
+            let eid = mesh.e_from_va_vb(va.into(), vb.into());
+            edge_chain_indices[eid] = chain_id;
+        }
+        (mesh, chain_masks, edge_chain_indices)
     }
 
     fn get_patch_wires(
@@ -333,7 +450,7 @@ impl ModelData {
 
         let mut wires = Vec::new();
 
-        let propagate_wire = |first_ori_chain: usize, chain_visited: &mut Vec<bool>| {
+        let propagate_wire = |first_ori_chain: usize, chain_visited: &mut [bool]| {
             let mut wire = vec![first_ori_chain];
             let mut current_ori_chain = first_ori_chain;
             let mut current_vid = get_ori_chain_vb(chains, current_ori_chain, &self.mesh);
@@ -469,6 +586,50 @@ impl ModelData {
     #[inline]
     fn v_point(&self, vid: VertexId) -> &[f64] {
         point_3(&self.points, vid.0)
+    }
+}
+
+struct ChainData<'a> {
+    chains: Vec<Vec<HalfedgeId>>,
+    patch_edge_chain_indices: Vec<usize>,
+    chain_lengths: Vec<f64>,
+    mesh: &'a SurfaceMesh,
+    points: &'a [f64],
+}
+
+impl<'a> ChainData<'a> {
+    fn new(
+        chains: Vec<Vec<HalfedgeId>>,
+        patch_edge_chain_indices: Vec<usize>,
+        mesh: &'a SurfaceMesh,
+        points: &'a [f64],
+    ) -> Self {
+        let chain_lengths = vec![f64::NAN; chains.len()];
+        Self {
+            chains,
+            patch_edge_chain_indices,
+            mesh,
+            points,
+            chain_lengths,
+        }
+    }
+
+    fn get_edge_length(&mut self, patch_eid: EdgeId) -> f64 {
+        let chain_id = self.patch_edge_chain_indices[patch_eid];
+        if !self.chain_lengths[chain_id].is_nan() {
+            return self.chain_lengths[chain_id];
+        }
+        let chain = &self.chains[chain_id];
+        let mut prev_pt = point::<3>(self.points, *self.mesh.he_from(chain[0]));
+        chain
+            .iter()
+            .map(|&hid| {
+                let pt = point::<3>(self.points, *self.mesh.he_to(hid));
+                let length = norm(&sub_short::<3, _>(pt, prev_pt));
+                prev_pt = pt;
+                length
+            })
+            .sum()
     }
 }
 
