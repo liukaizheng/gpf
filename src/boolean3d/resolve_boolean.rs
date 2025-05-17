@@ -4,6 +4,7 @@ use hashbrown::{HashMap, HashSet};
 use itertools::Itertools;
 use tinyvec::TinyVec;
 
+use crate::boolean3d::extract_cells::write_shell;
 use crate::geometry::{Surf, Surface};
 use crate::graphcut::{ArcBuilder, MaxFlow, PushRelabelFifo};
 use crate::math::{cross, norm, square_norm, sub_short};
@@ -57,7 +58,10 @@ impl ModelData {
         }
     }
 
-    pub(crate) fn resolve(&self, models: Vec<BrepModel>, surfaces: &[Surf]) {
+    pub(crate) fn resolve<F>(&self, models: Vec<BrepModel>, surfaces: &[Surf], func: F)
+    where
+        F: Fn(&[bool]) -> bool,
+    {
         write_obj("123.obj", &self.points, &self.mesh);
         let (non_manifold_vertices, chains, edge_chain_indices) =
             identify_chain_edge(&self.mesh, |fa, fb| {
@@ -101,10 +105,10 @@ impl ModelData {
             }
         }
 
-        // Initialize boundary patche masks,
-        // 2 means unvisited
-        // 0 means boundary oriented patch has same direction with patch
-        // 1 means boundary oriented halfedge has opposite direction with patch
+        /* Initialize boundary patche masks,
+        2 means unvisited
+        0 means boundary oriented patch has same direction with patch
+        1 means boundary oriented halfedge has opposite direction with patch */
         let mut bdy_patch_masks = vec![2u8; self.patches.len()];
         let mut cell_visited = vec![false; self.cells.len()];
         let model_cells = models
@@ -124,6 +128,15 @@ impl ModelData {
             .collect_vec();
 
         println!("model_cells: {:?}", model_cells);
+
+        let result_oriented_patches = self.get_result_oriented_patches(model_cells, func);
+        write_shell(
+            "result.obj",
+            &self.mesh,
+            &self.points,
+            &result_oriented_patches,
+            &self.patches,
+        );
     }
 
     fn identify_model_cells(
@@ -185,10 +198,10 @@ impl ModelData {
             }))
         };
 
-        // Initialize boundary edge masks,
-        // 2 means unvisited
-        // 0 means boundary halfedge has same direction with edge
-        // 1 means boundary halfedge has opposite direction with edge
+        /* Initialize boundary edge masks,
+        2 means unvisited
+        0 means boundary halfedge has same direction with edge
+        1 means boundary halfedge has opposite direction with edge */
         let mut bdy_edge_masks = vec![2u8; patch_mesh.n_edges()];
         let mut patch_face_visited = vec![false; patch_mesh.n_faces()];
         let model_face_ori_patches = model
@@ -763,6 +776,44 @@ impl ModelData {
         let ret = patch_areas[pid];
         self.patch_areas.borrow_mut().replace(patch_areas);
         ret
+    }
+
+    fn get_result_oriented_patches(
+        &self,
+        model_cells_arr: Vec<Vec<usize>>,
+        func: impl Fn(&[bool]) -> bool,
+    ) -> Vec<usize> {
+        let mut cell_is_in_model_interior =
+            vec![vec![false; model_cells_arr.len()]; self.cells.len()];
+        for (i, model_cells) in model_cells_arr.into_iter().enumerate() {
+            for cid in model_cells {
+                cell_is_in_model_interior[cid][i] = true;
+            }
+        }
+
+        let mut is_cell_kept = Vec::with_capacity(cell_is_in_model_interior.len() + 1);
+
+        is_cell_kept.extend(
+            cell_is_in_model_interior
+                .into_iter()
+                .map(|flags| func(&flags)),
+        );
+        is_cell_kept.push(false);
+        Vec::from_iter((0..self.patch_surface_arr.len()).filter_map(|pid| {
+            let pos_pid = oriented_index(pid, false);
+            let neg_pid = oriented_index(pid, true);
+            let pos_cid = self.patch_cell_arr[pos_pid];
+            let neg_cid = self.patch_cell_arr[neg_pid];
+            if is_cell_kept[pos_cid] != is_cell_kept[neg_cid] {
+                if is_cell_kept[pos_cid] {
+                    Some(neg_pid)
+                } else {
+                    Some(pos_pid)
+                }
+            } else {
+                None
+            }
+        }))
     }
 }
 

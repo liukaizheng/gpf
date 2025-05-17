@@ -228,13 +228,7 @@ fn test_boolean1() {
     boolean3d(
         vec![model1, model2],
         surfaces,
-        |is_kept_arr| {
-            is_kept_arr
-                .iter()
-                .map(|&e| e)
-                .reduce(|res, e| (res | e))
-                .unwrap()
-        },
+        |is_kept_arr| is_kept_arr.iter().any(|&val| val),
         0.001,
     );
 }
