@@ -1,6 +1,7 @@
 mod cylinder;
 mod plane;
 mod sphere;
+mod utils;
 
 use std::alloc::Allocator;
 
@@ -11,6 +12,7 @@ use crate::{triangle::triangulate_with_new_points, utils::montecarlo_sampling};
 pub use self::cylinder::Cylinder;
 pub use self::plane::Plane;
 pub use self::sphere::Sphere;
+pub use self::utils::*;
 
 use super::{BBox, Crv, Curve};
 
@@ -129,7 +131,7 @@ impl Surface for Surf {
 
 #[inline]
 fn adjust_angle_to_reference(angle: f64, reference: f64) -> f64 {
-    const TWO_PI: f64 = 2.0 * std::f64::consts::PI;
+    const TWO_PI: f64 = std::f64::consts::TAU;
     let delta = angle - reference;
     angle - (delta / TWO_PI).round() * TWO_PI
 }

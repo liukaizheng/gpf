@@ -3,6 +3,7 @@ use std::alloc::Allocator;
 use tinyvec::TinyVec;
 
 use crate::{
+    INVALID_IND,
     geometry::{BBox, Crv, Curve, Surf, Surface, segment::Segment},
     is_negative,
     mesh::{EdgeId, ElementIndex, FaceId, HalfedgeId, HoleAwareMesh, Mesh, VertexId},
@@ -22,17 +23,19 @@ impl<A: Allocator + Copy> UVFace<A> {
 }
 
 pub struct BrepFace<A: Allocator + Copy> {
-    surface_id: usize,
-    bbox: BBox,
+    surface: Surf,
+    reversed: bool,
+    ori_surf_id: usize,
     uv_face: Option<UVFace<A>>,
 }
 
 impl<A: Allocator + Copy> BrepFace<A> {
-    pub fn new(surface_id: usize, bbox: BBox, uv_face: Option<UVFace<A>>) -> Self {
+    pub fn new(surface: Surf, reversed: bool) -> Self {
         Self {
-            surface_id,
-            bbox,
-            uv_face,
+            surface,
+            reversed,
+            ori_surf_id: INVALID_IND,
+            uv_face: None,
         }
     }
 }
@@ -51,11 +54,7 @@ pub struct BrepModel<A: Allocator + Copy = std::alloc::Global> {
     pub(crate) mesh: HoleAwareMesh<A>,
     points: Vec<f64, A>,
     faces: Vec<BrepFace<A>, A>,
-    surfaces: Vec<Surf, A>,
-    surf_bboxes: Vec<BBox, A>,
-    surf_faces: Vec<TinyVec<[FaceId; 1]>, A>,
     edge_curves: Vec<Crv, A>,
-    pub(crate) bbox: BBox,
 }
 
 impl<A: Allocator + Copy> BrepModel<A> {
@@ -68,15 +67,14 @@ impl<A: Allocator + Copy> BrepModel<A> {
         loops: T1,
         face_loops: T2,
         points: Vec<f64, A>,
-        face_surfaces: &[usize],
-        surfaces: Vec<Surf, A>,
+        face_surfaces: Vec<(Surf, bool), A>,
         two_verts_curves: Vec<([usize; 2], Crv), A>,
         alloc: A,
     ) -> Self {
         let mesh = HoleAwareMesh::new(loops.into_iter(), face_loops.into_iter(), alloc);
         let mut brep_faces = Vec::with_capacity_in(mesh.n_faces_capacity(), alloc);
-        let mut surf_faces = Vec::with_capacity_in(surfaces.len(), alloc);
-        surf_faces.resize(surfaces.len(), TinyVec::new());
+        // let mut surf_faces = Vec::with_capacity_in(surfaces.len(), alloc);
+        // surf_faces.resize(surfaces.len(), TinyVec::new());
         let mut edge_curves = Vec::with_capacity_in(mesh.n_edges_capacity(), alloc);
         edge_curves.resize(mesh.n_edges_capacity(), Crv::default());
         for ([va, vb], curve) in two_verts_curves {
@@ -99,7 +97,13 @@ impl<A: Allocator + Copy> BrepModel<A> {
             }
         }
 
-        brep_faces.extend(mesh.faces().zip(face_surfaces).map(|(face, &ori_surf_id)| {
+        brep_faces.extend(
+            face_surfaces
+                .into_iter()
+                .map(|(surf, reversed)| BrepFace::new(surf, reversed)),
+        );
+
+        /*brep_faces.extend(mesh.faces().zip(face_surfaces).map(|(face, &ori_surf_id)| {
             let reversed = is_negative(ori_surf_id);
 
             let surf_id = strip_orientation(ori_surf_id);
@@ -148,16 +152,12 @@ impl<A: Allocator + Copy> BrepModel<A> {
         surf_bboxes.extend(surf_faces.iter().map(|faces| {
             BBox::from_boxes(faces.iter().map(|fid: &FaceId| &brep_faces[*fid].bbox))
         }));
-        let bbox = BBox::from_boxes(surf_bboxes.iter());
+        let bbox = BBox::from_boxes(surf_bboxes.iter());*/
         BrepModel {
             mesh,
             points,
             faces: brep_faces,
-            surfaces,
-            surf_bboxes,
-            surf_faces,
             edge_curves,
-            bbox,
         }
     }
     pub fn vert_mask(&self, vid: VertexId, n_surfaces: usize) -> Bitmask {
@@ -168,7 +168,7 @@ impl<A: Allocator + Copy> BrepModel<A> {
             .incoming_halfedges()
             .map(|he| he.face())
         {
-            mask.set(strip_orientation(self.faces[*face].surface_id));
+            mask.set(strip_orientation(self.faces[*face].ori_surf_id));
         }
         mask
     }
@@ -176,14 +176,14 @@ impl<A: Allocator + Copy> BrepModel<A> {
     pub fn edge_mask(&self, eid: EdgeId, n_surfaces: usize) -> Bitmask {
         let mut mask = Bitmask::new(n_surfaces);
         for face in self.mesh.edge(eid).halfedges().map(|he| he.face()) {
-            mask.set(strip_orientation(self.faces[*face].surface_id));
+            mask.set(strip_orientation(self.faces[*face].ori_surf_id));
         }
         mask
     }
 
     #[inline]
     pub fn oriented_face_surface(&self, fid: FaceId) -> usize {
-        self.faces[fid].surface_id
+        self.faces[fid].ori_surf_id
     }
 
     #[inline]

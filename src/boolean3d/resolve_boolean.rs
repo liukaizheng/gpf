@@ -111,21 +111,18 @@ impl ModelData {
         1 means boundary oriented halfedge has opposite direction with patch */
         let mut bdy_patch_masks = vec![2u8; self.patches.len()];
         let mut cell_visited = vec![false; self.cells.len()];
-        let model_cells = models
-            .iter()
-            .map(|model| {
-                self.identify_model_cells(
-                    model,
-                    &patch_mesh,
-                    &chain_masks,
-                    &mask_vertices_map,
-                    &non_manifold_vertices,
-                    &mut bdy_patch_masks,
-                    &mut cell_visited,
-                    &mut chain_data,
-                )
-            })
-            .collect_vec();
+        let model_cells = Vec::from_iter(models.iter().map(|model| {
+            self.identify_model_cells(
+                model,
+                &patch_mesh,
+                &chain_masks,
+                &mask_vertices_map,
+                &non_manifold_vertices,
+                &mut bdy_patch_masks,
+                &mut cell_visited,
+                &mut chain_data,
+            )
+        }));
 
         println!("model_cells: {:?}", model_cells);
 

@@ -135,6 +135,29 @@ fn test_boolean1() {
         Surf::Plane(Plane::new(0.0, 1.0, 0.0, 0.0, 1.0, 0.0)),
     ];
     let model1 = {
+        let face_surfaces = vec![
+            (
+                Surf::Plane(Plane::new(0.0, -0.5, 0.0, 0.0, -1.0, 0.0)),
+                false,
+            ),
+            (
+                Surf::Cylinder(Cylinder::new(-0.5, 0.0, 0.0, 0.9, 0.3, 0.1f64.sqrt(), 1.1)),
+                false,
+            ),
+            (Surf::Plane(Plane::new(0.0, 0.5, 0.0, 0.0, 1.0, 0.0)), false),
+            (
+                Surf::Plane(Plane::new(-0.5, 0.0, 0.0, -1.0, 0.0, 0.0)),
+                false,
+            ),
+            (
+                Surf::Plane(Plane::new(0.0, 0.0, -0.5, 0.0, 0.0, -1.0)),
+                false,
+            ),
+            (
+                Surf::Cylinder(Cylinder::new(0.0, 0.0, -0.5, 0.0, 1.0, 0.0, 1.0)),
+                false,
+            ),
+        ];
         #[rustfmt::skip]
         let points = vec![
             -0.5, -0.5, -0.5,
@@ -178,13 +201,11 @@ fn test_boolean1() {
             vec![1, 2, 4, 7, 6],
         ];
         let face_loops = vec![vec![0], vec![1], vec![2], vec![3], vec![4], vec![5]];
-        let face_surfaces = vec![8, 2, 10, 0, 4, 6];
         BrepModel::new_in(
             loops,
             face_loops,
             points,
             &face_surfaces,
-            surfaces.clone(),
             edge_curves,
             std::alloc::Global,
         )
@@ -212,6 +233,23 @@ fn test_boolean1() {
             vec![3, 7, 6, 2],
         ];
         let face_loops = vec![vec![0], vec![1], vec![2], vec![3], vec![4], vec![5]];
+        let face_surfaces = [
+            (
+                Surf::Plane(Plane::new(0.0, 0.0, 0.0, -1.0, 0.0, 0.0)),
+                false,
+            ),
+            (Surf::Plane(Plane::new(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)), false),
+            (
+                Surf::Plane(Plane::new(0.0, 0.0, 0.0, 0.0, 0.0, -1.0)),
+                false,
+            ),
+            (Surf::Plane(Plane::new(0.0, 0.0, 1.0, 0.0, 0.0, 1.0)), false),
+            (
+                Surf::Plane(Plane::new(0.0, 0.0, 0.0, 0.0, -1.0, 0.0)),
+                false,
+            ),
+            (Surf::Plane(Plane::new(0.0, 1.0, 0.0, 0.0, 1.0, 0.0)), false),
+        ];
 
         let face_surfaces = vec![12, 14, 16, 18, 20, 22];
         BrepModel::new_in(
@@ -219,7 +257,6 @@ fn test_boolean1() {
             face_loops,
             points,
             &face_surfaces,
-            surfaces.clone(),
             Vec::new(),
             std::alloc::Global,
         )
@@ -227,8 +264,7 @@ fn test_boolean1() {
 
     boolean3d(
         vec![model1, model2],
-        surfaces,
-        |is_kept_arr| is_kept_arr.iter().any(|&val| val),
+        |is_kept_arr| is_kept_arr[0] && !is_kept_arr[1],
         0.001,
     );
 }

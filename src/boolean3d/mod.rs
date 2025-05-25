@@ -7,7 +7,7 @@ mod tet_set;
 
 pub use brep::BrepModel;
 
-use std::collections::HashMap;
+use std::{alloc::Allocator, collections::HashMap};
 
 use adaptive_subdivide::adaptive_subdivide;
 use ar_in_tet::{Arrangement, IsoVert, extract_iso_surface};
@@ -30,7 +30,7 @@ struct IsoSurfMesh {
     face_parents: Vec<usize>,
 }
 
-pub fn boolean3d<F>(models: Vec<BrepModel>, surfaces: Vec<Surf>, bool_func: F, eps: f64)
+pub fn boolean3d<F>(models: Vec<BrepModel>, bool_func: F, eps: f64)
 where
     F: Fn(&[bool]) -> bool,
 {
@@ -147,6 +147,8 @@ fn init_mesh(bbox: BBox) -> TetSet {
         tet_indices: vec![0; 6],
     }
 }
+
+fn merge_same_surfaces<A: Allocator + Copy>(models: &mut [BrepModel<A>]) {}
 
 fn write_obj(name: &str, points: &[f64], mesh: &SurfaceMesh) {
     let mut file = std::fs::File::create(name).unwrap();

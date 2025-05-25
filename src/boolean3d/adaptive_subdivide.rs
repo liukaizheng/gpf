@@ -7,7 +7,7 @@ use bumpalo::Bump;
 use itertools::Itertools;
 
 use crate::{
-    geometry::{Surf, Surface},
+    geometry::{BBox, Surf, Surface},
     math::{cross, cross_in, dot, square_norm, sub_short},
     mesh::{EdgeId, Mesh},
     point_2, point_3,
@@ -43,6 +43,12 @@ impl Ord for EdgeAndLen {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.partial_cmp(&other).unwrap()
     }
+}
+
+struct SurfaceData<'a> {
+    surf: &'a Surf,
+    bbox: BBox,
+    bboxes: Vec<BBox>,
 }
 
 struct SubdivisionData<'a> {

@@ -7,6 +7,8 @@
 #![feature(iter_array_chunks)]
 #![feature(array_chunks)]
 
+use std::cell;
+
 use itertools::Itertools;
 
 pub mod boolean3d;
@@ -18,6 +20,25 @@ pub mod polygonlization;
 pub mod predicates;
 pub mod triangle;
 pub mod utils;
+
+pub struct Tolerance {
+    pub dist_tol: f64,
+    pub cos_tol: f64,
+}
+
+impl Tolerance {
+    pub fn new(dist_tol: f64, cos_tol: f64) -> Self {
+        Tolerance { dist_tol, cos_tol }
+    }
+}
+impl Default for Tolerance {
+    fn default() -> Self {
+        Tolerance {
+            dist_tol: 1e-6,
+            cos_tol: 1e-6,
+        }
+    }
+}
 
 const INVALID_IND: usize = usize::MAX;
 
