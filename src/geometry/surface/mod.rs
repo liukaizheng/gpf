@@ -3,11 +3,11 @@ mod plane;
 mod sphere;
 mod utils;
 
-use std::alloc::Allocator;
+use std::{alloc::Allocator, any::TypeId};
 
 use itertools::Itertools;
 
-use crate::{triangle::triangulate_with_new_points, utils::montecarlo_sampling};
+use crate::{Tolerance, triangle::triangulate_with_new_points, utils::montecarlo_sampling};
 
 pub use self::cylinder::Cylinder;
 pub use self::plane::Plane;
@@ -19,9 +19,11 @@ use super::{BBox, Crv, Curve};
 pub const BOX_SCALE_FACTOR: f64 = 1.05;
 
 pub trait Surface {
+    fn dist(&self, p: &[f64]) -> f64;
     fn eval(&self, p: &[f64]) -> [f64; 4];
     fn uv(&self, pt: &[f64], ref_pt: Option<&[f64]>) -> [f64; 2];
     fn point(&self, uv: &[f64]) -> [f64; 3];
+    fn equal(&self, other: &Self, tol: &Tolerance) -> bool;
 
     fn compute_face_uv_loops<
         'a,
@@ -103,7 +105,32 @@ pub enum Surf {
     Sphere(Sphere),
 }
 
+impl Surf {
+    pub fn real_type_id(&self) -> TypeId {
+        match self {
+            Surf::Plane(_) => TypeId::of::<Plane>(),
+            Surf::Cylinder(_) => TypeId::of::<Cylinder>(),
+            Surf::Sphere(_) => TypeId::of::<Sphere>(),
+        }
+    }
+
+    pub fn as_plane(&self) -> Option<&Plane> {
+        match self {
+            Surf::Plane(p) => Some(p),
+            _ => None,
+        }
+    }
+}
+
 impl Surface for Surf {
+    fn dist(&self, p: &[f64]) -> f64 {
+        match self {
+            Surf::Plane(surf) => surf.dist(p),
+            Surf::Cylinder(surf) => surf.dist(p),
+            Surf::Sphere(surf) => surf.dist(p),
+        }
+    }
+
     fn eval(&self, p: &[f64]) -> [f64; 4] {
         match self {
             Surf::Plane(surf) => surf.eval(p),
@@ -125,6 +152,15 @@ impl Surface for Surf {
             Surf::Plane(plane) => plane.point(uv),
             Surf::Cylinder(cylinder) => cylinder.point(uv),
             Surf::Sphere(sphere) => sphere.point(uv),
+        }
+    }
+
+    fn equal(&self, other: &Self, tol: &Tolerance) -> bool {
+        match (self, other) {
+            (Surf::Plane(surf1), Surf::Plane(surf2)) => surf1.equal(surf2, tol),
+            (Surf::Cylinder(surf1), Surf::Cylinder(surf2)) => surf1.equal(surf2, tol),
+            (Surf::Sphere(surf1), Surf::Sphere(surf2)) => surf1.equal(surf2, tol),
+            _ => false,
         }
     }
 }

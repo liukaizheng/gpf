@@ -1,11 +1,7 @@
 use std::alloc::Allocator;
 
-use tinyvec::TinyVec;
-
 use crate::{
-    INVALID_IND,
-    geometry::{BBox, Crv, Curve, Surf, Surface, segment::Segment},
-    is_negative,
+    geometry::{Crv, Curve, Surf, segment::Segment},
     mesh::{EdgeId, ElementIndex, FaceId, HalfedgeId, HoleAwareMesh, Mesh, VertexId},
     point, strip_orientation,
     utils::Bitmask,
@@ -22,19 +18,38 @@ impl<A: Allocator + Copy> UVFace<A> {
     }
 }
 
+pub enum SurfRep {
+    S((Surf, bool)),
+    I(usize),
+}
+
+impl SurfRep {
+    #[inline]
+    pub fn as_index(&self) -> Option<usize> {
+        match self {
+            SurfRep::I(idx) => Some(*idx),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn as_ori_surf(&self) -> Option<(&Surf, bool)> {
+        match self {
+            SurfRep::S((surf, reversed)) => Some((surf, *reversed)),
+            _ => None,
+        }
+    }
+}
+
 pub struct BrepFace<A: Allocator + Copy> {
-    surface: Surf,
-    reversed: bool,
-    ori_surf_id: usize,
+    pub(crate) surf: SurfRep,
     uv_face: Option<UVFace<A>>,
 }
 
 impl<A: Allocator + Copy> BrepFace<A> {
     pub fn new(surface: Surf, reversed: bool) -> Self {
         Self {
-            surface,
-            reversed,
-            ori_surf_id: INVALID_IND,
+            surf: SurfRep::S((surface, reversed)),
             uv_face: None,
         }
     }
@@ -53,7 +68,7 @@ fn get_halfedge_curve<'a, A: Allocator + Copy>(
 pub struct BrepModel<A: Allocator + Copy = std::alloc::Global> {
     pub(crate) mesh: HoleAwareMesh<A>,
     points: Vec<f64, A>,
-    faces: Vec<BrepFace<A>, A>,
+    pub(crate) faces: Vec<BrepFace<A>, A>,
     edge_curves: Vec<Crv, A>,
 }
 
@@ -168,7 +183,9 @@ impl<A: Allocator + Copy> BrepModel<A> {
             .incoming_halfedges()
             .map(|he| he.face())
         {
-            mask.set(strip_orientation(self.faces[*face].ori_surf_id));
+            mask.set(strip_orientation(
+                self.faces[*face].surf.as_index().unwrap(),
+            ));
         }
         mask
     }
@@ -176,14 +193,16 @@ impl<A: Allocator + Copy> BrepModel<A> {
     pub fn edge_mask(&self, eid: EdgeId, n_surfaces: usize) -> Bitmask {
         let mut mask = Bitmask::new(n_surfaces);
         for face in self.mesh.edge(eid).halfedges().map(|he| he.face()) {
-            mask.set(strip_orientation(self.faces[*face].ori_surf_id));
+            mask.set(strip_orientation(
+                self.faces[*face].surf.as_index().unwrap(),
+            ));
         }
         mask
     }
 
     #[inline]
     pub fn oriented_face_surface(&self, fid: FaceId) -> usize {
-        self.faces[fid].ori_surf_id
+        self.faces[fid].surf.as_index().unwrap()
     }
 
     #[inline]

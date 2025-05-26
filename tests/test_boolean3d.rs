@@ -120,20 +120,7 @@ fn get_polyline_from_file(name: &str) -> Vec<f64> {
 
 #[test]
 fn test_boolean1() {
-    let surfaces = vec![
-        Surf::Plane(Plane::new(-0.5, 0.0, 0.0, -1.0, 0.0, 0.0)),
-        Surf::Cylinder(Cylinder::new(-0.5, 0.0, 0.0, 0.9, 0.3, 0.1f64.sqrt(), 1.1)),
-        Surf::Plane(Plane::new(0.0, 0.0, -0.5, 0.0, 0.0, -1.0)),
-        Surf::Cylinder(Cylinder::new(0.0, 0.0, -0.5, 0.0, 1.0, 0.0, 1.0)),
-        Surf::Plane(Plane::new(0.0, -0.5, 0.0, 0.0, -1.0, 0.0)),
-        Surf::Plane(Plane::new(0.0, 0.5, 0.0, 0.0, 1.0, 0.0)),
-        Surf::Plane(Plane::new(0.0, 0.0, 0.0, -1.0, 0.0, 0.0)),
-        Surf::Plane(Plane::new(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)),
-        Surf::Plane(Plane::new(0.0, 0.0, 0.0, 0.0, 0.0, -1.0)),
-        Surf::Plane(Plane::new(0.0, 0.0, 1.0, 0.0, 0.0, 1.0)),
-        Surf::Plane(Plane::new(0.0, 0.0, 0.0, 0.0, -1.0, 0.0)),
-        Surf::Plane(Plane::new(0.0, 1.0, 0.0, 0.0, 1.0, 0.0)),
-    ];
+
     let model1 = {
         let face_surfaces = vec![
             (
@@ -205,7 +192,7 @@ fn test_boolean1() {
             loops,
             face_loops,
             points,
-            &face_surfaces,
+            face_surfaces,
             edge_curves,
             std::alloc::Global,
         )
@@ -233,7 +220,7 @@ fn test_boolean1() {
             vec![3, 7, 6, 2],
         ];
         let face_loops = vec![vec![0], vec![1], vec![2], vec![3], vec![4], vec![5]];
-        let face_surfaces = [
+        let face_surfaces = vec![
             (
                 Surf::Plane(Plane::new(0.0, 0.0, 0.0, -1.0, 0.0, 0.0)),
                 false,
@@ -251,12 +238,11 @@ fn test_boolean1() {
             (Surf::Plane(Plane::new(0.0, 1.0, 0.0, 0.0, 1.0, 0.0)), false),
         ];
 
-        let face_surfaces = vec![12, 14, 16, 18, 20, 22];
         BrepModel::new_in(
             loops,
             face_loops,
             points,
-            &face_surfaces,
+            face_surfaces,
             Vec::new(),
             std::alloc::Global,
         )

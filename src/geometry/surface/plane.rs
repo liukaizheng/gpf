@@ -3,7 +3,7 @@ use std::alloc::Allocator;
 use itertools::Itertools;
 
 use crate::{
-    geometry::{BBox, Crv, Curve},
+    geometry::{is_parallel, BBox, Crv, Curve},
     math::{add_with_coeff, cross, dot, normalize},
 };
 
@@ -77,6 +77,10 @@ impl Plane {
 }
 
 impl Surface for Plane {
+    fn dist(&self, p: &[f64]) -> f64 {
+        let d = [p[0] - self.o[0], p[1] - self.o[1], p[2] - self.o[2]];
+        dot(&d, &self.dz)
+    }
     fn eval(&self, p: &[f64]) -> [f64; 4] {
         let d = [p[0] - self.o[0], p[1] - self.o[1], p[2] - self.o[2]];
         let dz = &self.dz;
@@ -92,5 +96,13 @@ impl Surface for Plane {
 
     fn point(&self, uv: &[f64]) -> [f64; 3] {
         add_with_coeff([(&self.dx, uv[0]), (&self.dy, uv[1]), (&self.o, 1.0)])
+    }
+
+    fn equal(&self, other: &Self, tol: &crate::Tolerance) -> bool {
+        if self.dist(&other.o).abs() < tol.dist_tol && other.dist(&self.o).abs() < tol.dist_tol {
+            is_parallel(&self.dz, &other.dz, tol.cos_tol)
+        } else {
+            false
+        }
     }
 }

@@ -6,8 +6,7 @@
 #![feature(let_chains)]
 #![feature(iter_array_chunks)]
 #![feature(array_chunks)]
-
-use std::cell;
+#![feature(btree_cursors)]
 
 use itertools::Itertools;
 
@@ -23,18 +22,31 @@ pub mod utils;
 
 pub struct Tolerance {
     pub dist_tol: f64,
+    pub sq_tol: f64,
     pub cos_tol: f64,
 }
 
 impl Tolerance {
     pub fn new(dist_tol: f64, cos_tol: f64) -> Self {
-        Tolerance { dist_tol, cos_tol }
+        Tolerance {
+            dist_tol,
+            sq_tol: dist_tol * dist_tol,
+            cos_tol,
+        }
+    }
+
+    pub fn global() -> &'static Tolerance {
+        use std::sync::LazyLock;
+        static GLOBAL: LazyLock<Tolerance> = LazyLock::new(Tolerance::default);
+        &GLOBAL
     }
 }
+
 impl Default for Tolerance {
     fn default() -> Self {
         Tolerance {
             dist_tol: 1e-6,
+            sq_tol: 1e-12,
             cos_tol: 1e-6,
         }
     }

@@ -6,8 +6,9 @@ mod resolve_boolean;
 mod tet_set;
 
 pub use brep::BrepModel;
+use brep::SurfRep;
 
-use std::{alloc::Allocator, collections::HashMap};
+use std::{alloc::Allocator, any::TypeId, collections::HashMap};
 
 use adaptive_subdivide::adaptive_subdivide;
 use ar_in_tet::{Arrangement, IsoVert, extract_iso_surface};
@@ -16,9 +17,11 @@ use itertools::Itertools;
 use tet_set::TetSet;
 
 use crate::{
-    INVALID_IND,
-    geometry::{BBox, Surf},
+    INVALID_IND, Tolerance,
+    geometry::{BBox, Plane, Surf, UniqueSurface},
+    math::dot,
     mesh::{EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, square_edge_length},
+    oriented_index,
 };
 
 struct IsoSurfMesh {
@@ -30,11 +33,12 @@ struct IsoSurfMesh {
     face_parents: Vec<usize>,
 }
 
-pub fn boolean3d<F>(models: Vec<BrepModel>, bool_func: F, eps: f64)
+pub fn boolean3d<F>(mut models: Vec<BrepModel>, bool_func: F, eps: f64)
 where
     F: Fn(&[bool]) -> bool,
 {
-    let mut bbox = BBox::default();
+    let surfaces = merge_same_surfaces(&mut models);
+    /*let mut bbox = BBox::default();
     for model in &models {
         bbox.merge(&model.bbox);
     }
@@ -47,7 +51,7 @@ where
     println!("mesh n tets: {}", tets.tet_faces.len());
 
     let model_data = extract_cells(iso_surf_mesh, &tets, surfaces.len());
-    model_data.resolve(models, &surfaces, bool_func);
+    model_data.resolve(models, &surfaces, bool_func);*/
 }
 
 fn init_mesh(bbox: BBox) -> TetSet {
@@ -148,7 +152,54 @@ fn init_mesh(bbox: BBox) -> TetSet {
     }
 }
 
-fn merge_same_surfaces<A: Allocator + Copy>(models: &mut [BrepModel<A>]) {}
+fn merge_same_surfaces<A: Allocator + Copy>(models: &mut [BrepModel<A>]) -> Vec<Surf> {
+    let tol = Tolerance::global();
+    let mut unique_surface_map = HashMap::<TypeId, UniqueSurface<Surf>>::new();
+    let mut surf_positions = Vec::new();
+    for (i, model) in models.iter().enumerate() {
+        for (j, brep_face) in model.faces.iter().enumerate() {
+            let surf = brep_face.surf.as_ori_surf().unwrap().0;
+            unique_surface_map
+                .entry(surf.real_type_id())
+                .or_insert(UniqueSurface::new())
+                .add_surf(surf, surf_positions.len(), tol);
+            surf_positions.push((i, j));
+        }
+    }
+
+    let mut surfaces = Vec::new();
+    for (surf_type_id, unique_surfaces) in unique_surface_map {
+        if surf_type_id == TypeId::of::<Plane>() {
+            for (surf, indices) in unique_surfaces.surfaces() {
+                let sid = surfaces.len();
+                let dz = surf.as_plane().unwrap().dz;
+                for idx in indices {
+                    let (i, j) = surf_positions[idx];
+                    let brep_face = &mut models[i].faces[j];
+                    let reversed = {
+                        let (s, reversed) = brep_face.surf.as_ori_surf().unwrap();
+                        (dot(&s.as_plane().unwrap().dz, &dz) < 0.0) ^ reversed
+                    };
+
+                    brep_face.surf = SurfRep::I(oriented_index(sid, reversed));
+                }
+                surfaces.push(surf);
+            }
+        } else {
+            for (surf, indices) in unique_surfaces.surfaces() {
+                let sid = surfaces.len();
+                for idx in indices {
+                    let (i, j) = surf_positions[idx];
+                    let brep_face = &mut models[i].faces[j];
+                    let reversed = brep_face.surf.as_ori_surf().unwrap().1;
+                    brep_face.surf = SurfRep::I(oriented_index(sid, reversed));
+                }
+                surfaces.push(surf);
+            }
+        }
+    }
+    surfaces
+}
 
 fn write_obj(name: &str, points: &[f64], mesh: &SurfaceMesh) {
     let mut file = std::fs::File::create(name).unwrap();

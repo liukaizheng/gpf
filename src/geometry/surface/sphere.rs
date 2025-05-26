@@ -1,4 +1,4 @@
-use crate::math::{norm, normalize};
+use crate::math::{norm, normalize, square_norm};
 
 use super::{Surface, adjust_angle_to_reference};
 
@@ -15,6 +15,12 @@ impl Sphere {
 }
 
 impl Surface for Sphere {
+
+    fn dist(&self, p: &[f64]) -> f64 {
+        let d = [p[0] - self.o[0], p[1] - self.o[1], p[2] - self.o[2]];
+        norm(&d) - self.r
+    }
+
     fn eval(&self, p: &[f64]) -> [f64; 4] {
         let d = [p[0] - self.o[0], p[1] - self.o[1], p[2] - self.o[2]];
         let l = norm(&d);
@@ -42,5 +48,14 @@ impl Surface for Sphere {
             self.o[1] + self.r * sin_phi * sin_theta,
             self.o[2] + self.r * cos_phi,
         ]
+    }
+
+    fn equal(&self, other: &Self, tol: &crate::Tolerance) -> bool {
+        if (self.r - other.r).abs() < tol.dist_tol {
+            let d = [self.o[0] - other.o[0], self.o[1] - other.o[1], self.o[2] - other.o[2]];
+            square_norm(&d) < tol.sq_tol
+        } else {
+            false
+        }
     }
 }

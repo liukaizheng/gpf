@@ -1,4 +1,7 @@
-use crate::math::{add_with_coeff, dot, norm};
+use crate::{
+    geometry::{sq_dist_to_line, is_parallel},
+    math::{add_with_coeff, dot, norm},
+};
 
 use super::{Plane, Surface, adjust_angle_to_reference};
 
@@ -38,6 +41,16 @@ impl Cylinder {
 }
 
 impl Surface for Cylinder {
+    fn dist(&self, p: &[f64]) -> f64 {
+        let o = self.o();
+        let d = [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
+        let dz = self.dz();
+        let h = dot(&d, dz);
+        let d = [d[0] - h * dz[0], d[1] - h * dz[1], d[2] - h * dz[2]];
+        let l = norm(&d);
+        l - self.r
+    }
+
     fn eval(&self, p: &[f64]) -> [f64; 4] {
         let o = self.o();
         let d = [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
@@ -71,5 +84,14 @@ impl Surface for Cylinder {
             (self.dz(), uv[1]),
             (self.o(), 1.0),
         ])
+    }
+
+    fn equal(&self, other: &Self, tol: &crate::Tolerance) -> bool {
+        if (self.r - other.r).abs() >= tol.dist_tol {
+            return false;
+        }
+        is_parallel(self.dz(), other.dz(), tol.cos_tol)
+            && sq_dist_to_line(self.o(), other.o(), other.dz()).abs() < tol.sq_tol
+            && sq_dist_to_line(other.o(), self.o(), self.dz()).abs() < tol.sq_tol
     }
 }
