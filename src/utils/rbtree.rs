@@ -119,11 +119,12 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
     }
 
     fn insert_case3(&mut self, node_id: usize) {
-        let uncle_id = self.uncle(node_id);
+        let parent_id = self.nodes[node_id].parent;
+        let grandparent_id = self.nodes[parent_id].parent;
+        let uncle_id = self.twin(parent_id, grandparent_id);
         if uncle_id != INVALID_IND && self.nodes[uncle_id].color == Color::Red {
-            self.nodes[node_id].color = Color::Black;
+            self.nodes[parent_id].color = Color::Black;
             self.nodes[uncle_id].color = Color::Black;
-            let grandparent_id = self.grandparent(node_id);
             self.nodes[grandparent_id].color = Color::Red;
             self.insert_case1(grandparent_id);
         } else {
@@ -158,26 +159,12 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
         }
     }
 
-    fn grandparent(&mut self, node_id: usize) -> usize {
-        let parent_id = self.nodes[node_id].parent;
-        if parent_id == INVALID_IND {
-            INVALID_IND
+    fn twin(&mut self, node_id: usize, parent_id: usize) -> usize {
+        let parent_node = &self.nodes[parent_id];
+        if node_id == parent_node.left {
+            parent_node.right
         } else {
-            self.nodes[parent_id].parent
-        }
-    }
-
-    fn uncle(&mut self, node_id: usize) -> usize {
-        let grandparent_id = self.grandparent(node_id);
-        if grandparent_id == INVALID_IND {
-            INVALID_IND
-        } else {
-            let grandparent_node = &self.nodes[grandparent_id];
-            if self.nodes[node_id].parent == grandparent_node.left {
-                grandparent_node.right
-            } else {
-                grandparent_node.left
-            }
+            parent_node.left
         }
     }
 
@@ -236,9 +223,9 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
 
 #[cfg(test)]
 mod tests {
-    use std::alloc::Allocator;
+    use std::{alloc::Allocator, random};
 
-    use crate::INVALID_IND;
+    use crate::{utils::rbtree::Color, INVALID_IND};
 
     use super::RBTree;
 
@@ -265,15 +252,37 @@ mod tests {
                 stack.push(node.right);
             }
         }
+        black_height(tree, tree.root);
         true
+    }
+
+    fn black_height<V: PartialOrd, A: Allocator + Copy>(
+        tree: &RBTree<V, A>,
+        node_id: usize,
+    ) -> usize {
+        if node_id == INVALID_IND {
+            return 1; // Null nodes contribute one black height
+        }
+        let left_height = black_height(tree, tree.nodes[node_id].left);
+        let right_height = black_height(tree, tree.nodes[node_id].right);
+        if tree.nodes[node_id].color == Color::Black && left_height != right_height {
+            panic!("Black heights do not match at node {}", node_id);
+        }
+        if tree.nodes[node_id].color == super::Color::Black {
+            left_height + 1
+        } else {
+            left_height
+        }
     }
 
     #[test]
     fn test_insert() {
         let mut tree = RBTree::new(std::alloc::Global, false);
-        for v in [2, 3, 1, 0, 7, 9, 4, 8, 5, 6] {
-            tree.insert(v);
-            assert!(validate_tree(&tree), "Tree is not valid after inserting {}", v);
+        // randomly generate 100 integers and insert them into the tree
+        let values: Vec<i32> = (0..100).map(|_| random::random::<i32>() % 100).collect();
+        for val in values {
+            tree.insert(val);
+            assert!(validate_tree(&tree), "Tree is not valid after inserting {}", val);
         }
         let a = 2;
     }

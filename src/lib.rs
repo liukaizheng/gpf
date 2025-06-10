@@ -7,6 +7,7 @@
 #![feature(iter_array_chunks)]
 #![feature(array_chunks)]
 #![feature(btree_cursors)]
+#![feature(random)]
 
 use itertools::Itertools;
 
