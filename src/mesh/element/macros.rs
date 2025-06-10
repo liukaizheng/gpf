@@ -7,6 +7,11 @@ macro_rules! element_id {
                 Self(id)
             }
         }
+        impl From<$name> for usize {
+            fn from(id: $name) -> Self {
+                id.0
+            }
+        }
 
         impl Default for $name {
             #[inline(always)]
