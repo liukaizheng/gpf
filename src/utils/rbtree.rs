@@ -34,6 +34,8 @@ pub struct RBTree<V, A: Allocator + Copy> {
     removed_nodes: Option<VecDeque<usize, A>>,
 }
 
+
+
 impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
     /// Returns an iterator over the values in the tree
     pub fn iter<'a>(&'a self) -> impl Iterator<Item = &'a V> {
@@ -108,6 +110,78 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
         })
     }
 
+    /// Returns a mutable iterator over the values in the tree that are in the specified range
+    pub fn range_mut<'a, R>(&'a mut self, range: R) -> impl Iterator<Item = &'a mut V>
+    where
+        R: std::ops::RangeBounds<V>,
+        V: Clone,
+    {
+        use std::ops::Bound;
+
+        let mut stack = Vec::new();
+        
+        // Build initial stack for range start
+        if self.root != INVALID_IND {
+            self.build_range_stack(&mut stack, self.root, &range);
+        }
+
+        // Clone the end bound for use in the closure
+        let end_bound = match range.end_bound() {
+            Bound::Included(v) => Some((v.clone(), true)),
+            Bound::Excluded(v) => Some((v.clone(), false)),
+            Bound::Unbounded => None,
+        };
+
+        // Get a raw pointer to the nodes for safe access within the closure
+        let nodes_ptr = self.nodes.as_mut_ptr();
+        let nodes_len = self.nodes.len();
+
+        std::iter::from_fn(move || {
+            // Pop the next node from stack
+            let node_id = stack.pop()?;
+            
+            // Safety check: ensure node_id is within bounds
+            if node_id >= nodes_len {
+                return None;
+            }
+            
+            // SAFETY: We know node_id is valid and within bounds
+            let node_value = unsafe { &(*nodes_ptr.add(node_id)).value };
+            
+            // Check if we've reached the end bound before returning the value
+            if let Some((bound_value, inclusive)) = &end_bound {
+                let should_exclude = if *inclusive {
+                    node_value.partial_cmp(bound_value).unwrap().is_gt()
+                } else {
+                    node_value.partial_cmp(bound_value).unwrap().is_ge()
+                };
+                
+                if should_exclude {
+                    stack.clear(); // Clear remaining stack to end iteration
+                    return None;
+                }
+            }
+
+            // If this node has a right child, push all left nodes from right subtree
+            // SAFETY: We know node_id is valid and within bounds
+            let right_child = unsafe { (*nodes_ptr.add(node_id)).right };
+            if right_child != INVALID_IND {
+                let mut current = right_child;
+                while current != INVALID_IND && current < nodes_len {
+                    stack.push(current);
+                    // SAFETY: We know current is valid and within bounds
+                    current = unsafe { (*nodes_ptr.add(current)).left };
+                }
+            }
+            
+            // SAFETY: We know node_id is valid and we're returning a mutable reference
+            // with the same lifetime as the iterator, which ensures exclusive access
+            unsafe {
+                Some(&mut (*nodes_ptr.add(node_id)).value)
+            }
+        })
+    }
+
     /// Helper function to push all nodes along the leftmost path starting from the given node
     fn push_left_path(&self, stack: &mut Vec<usize>, mut node_id: usize) {
         while node_id != INVALID_IND {
@@ -126,7 +200,7 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
         // Navigate to the appropriate starting point and build stack
         while current != INVALID_IND {
             let curr_val = &self.nodes[current].value;
-
+            
             let go_right = match range.start_bound() {
                 Bound::Included(v) => curr_val.partial_cmp(v).unwrap().is_lt(),
                 Bound::Excluded(v) => curr_val.partial_cmp(v).unwrap().is_le(),
@@ -327,6 +401,8 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
     }
 }
 
+
+
 #[cfg(test)]
 mod tests {
     use std::{alloc::Allocator, random};
@@ -498,4 +574,49 @@ mod tests {
         range_items.sort();
         assert_eq!(range_items, sorted_values);
     }
+
+    #[test]
+    fn test_range_mut() {
+        let mut tree = RBTree::new(std::alloc::Global, false);
+        let values = [5, 3, 7, 2, 4, 6, 8, 1, 9];
+
+        // Insert all values
+        for &val in &values {
+            tree.insert(val);
+        }
+
+        // Test basic range_mut functionality
+        let mut count = 0;
+        let mut found_values = Vec::new();
+        for value in tree.range_mut(3..=7) {
+            found_values.push(*value);
+            *value += 100; // Add 100 to each value
+            count += 1;
+        }
+        
+        assert_eq!(count, 5); // Should find 5 values
+        assert_eq!(found_values, [3, 4, 5, 6, 7]);
+
+        // Test empty range
+        let mut tree2 = RBTree::new(std::alloc::Global, false);
+        tree2.insert(5);
+        
+        let mut empty_count = 0;
+        for _value in tree2.range_mut(10..20) {
+            empty_count += 1;
+        }
+        assert_eq!(empty_count, 0); // No values in range 10..20
+
+        // Test single element modification
+        let mut single_tree = RBTree::new(std::alloc::Global, false);
+        single_tree.insert(42);
+        
+        for value in single_tree.range_mut(42..=42) {
+            *value = 100;
+        }
+        
+        let result: Vec<i32> = single_tree.iter().copied().collect();
+        assert_eq!(result, [100]);
+    }
+
 }
