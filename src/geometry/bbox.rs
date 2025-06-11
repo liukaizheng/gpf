@@ -1,3 +1,4 @@
+#[derive(Clone)]
 pub struct BBox {
     pub min: [f64; 3],
     pub max: [f64; 3],

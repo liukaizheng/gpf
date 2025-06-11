@@ -7,6 +7,7 @@ mod tet_set;
 
 pub use brep::BrepModel;
 use brep::SurfRep;
+use tinyvec::TinyVec;
 
 use std::{alloc::Allocator, any::TypeId, collections::HashMap};
 
@@ -17,12 +18,11 @@ use itertools::Itertools;
 use tet_set::TetSet;
 
 use crate::{
-    INVALID_IND, Tolerance,
-    geometry::{BBox, Plane, Surf, UniqueSurface},
-    math::dot,
-    mesh::{EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, square_edge_length},
-    oriented_index,
+    geometry::{BBox, Surf, UniqueSurface}, math::dot, mesh::{
+        square_edge_length, EdgeId, ElementId, FaceId, Mesh, SurfaceMesh
+    }, oriented_index, strip_orientation, Tolerance, INVALID_IND
 };
+use crate::geometry::Plane;
 
 struct IsoSurfMesh {
     arrangements: Vec<Option<Arrangement>>,
@@ -33,15 +33,18 @@ struct IsoSurfMesh {
     face_parents: Vec<usize>,
 }
 
+struct SurfaceBBox {
+    bbox: BBox,
+    sub_bboxes: TinyVec<[BBox; 1]>,
+}
+
 pub fn boolean3d<F>(mut models: Vec<BrepModel>, bool_func: F, eps: f64)
 where
     F: Fn(&[bool]) -> bool,
 {
     let surfaces = merge_same_surfaces(&mut models);
-    let mut bbox = BBox::default();
-    // for model in &models {
-    //     bbox.merge(&model.bbox);
-    // }
+    let surface_bboxes = compute_surface_boxes(&surfaces, &mut models);
+    let bbox = BBox::from_boxes(surface_bboxes.iter().map(|b| &b.bbox));
 
     let mut tets = init_mesh(bbox);
     let vals = adaptive_subdivide(&mut tets, &surfaces, eps * eps);
@@ -199,6 +202,21 @@ fn merge_same_surfaces<A: Allocator + Copy>(models: &mut [BrepModel<A>]) -> Vec<
         }
     }
     surfaces
+}
+
+fn compute_surface_boxes<A: Allocator + Copy>(surfaces: &[Surf], models: &mut [BrepModel<A>]) -> Vec<SurfaceBBox> {
+    let mut surface_boxes = Vec::with_capacity(surfaces.len());
+    surface_boxes.resize(surfaces.len(), TinyVec::<[BBox; 1]>::new());
+    for model in models {
+        for fid in 0..model.faces.len() {
+            let (ori_surf_id, bbox) = model.compute_face_box(fid.into(), surfaces);
+            surface_boxes[strip_orientation(ori_surf_id)].push(bbox);
+        }
+    }
+    surface_boxes.into_iter().map(|sub_bboxes| SurfaceBBox{
+        bbox: BBox::from_boxes(&sub_bboxes),
+        sub_bboxes,
+    }).collect_vec()
 }
 
 fn write_obj(name: &str, points: &[f64], mesh: &SurfaceMesh) {
