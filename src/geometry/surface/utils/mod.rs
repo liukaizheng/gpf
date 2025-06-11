@@ -1,70 +1,89 @@
-use std::collections::BTreeMap;
+use std::cmp::Ordering;
 use std::ops::Bound::*;
 
 use tinyvec::{TinyVec, tiny_vec};
 
 use crate::Tolerance;
+use crate::utils::RBTree;
 
 use super::Surface;
-struct Num(f64);
 
-impl PartialEq for Num {
+struct DistAndSurf<S: Surface> {
+    d: f64,
+    surf: S,
+    surf_indices: TinyVec<[usize; 1]>,
+}
+
+impl<S: Surface> PartialEq for DistAndSurf<S> {
     fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
+        self.d == other.d
     }
 }
 
-impl Eq for Num {}
-
-impl PartialOrd for Num {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.0.partial_cmp(&other.0)
+impl<S: Surface> PartialOrd for DistAndSurf<S> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.d.partial_cmp(&other.d)
     }
 }
 
-impl Ord for Num {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other).unwrap()
+impl<S: Surface> PartialEq<f64> for DistAndSurf<S> {
+    fn eq(&self, other: &f64) -> bool {
+        self.d == *other
     }
 }
 
-impl From<f64> for Num {
-    fn from(value: f64) -> Self {
-        Self(value)
+impl<S: Surface> PartialOrd<f64> for DistAndSurf<S> {
+    fn partial_cmp(&self, other: &f64) -> Option<Ordering> {
+        self.d.partial_cmp(other)
+    }
+}
+
+impl<S: Surface> PartialEq<DistAndSurf<S>> for f64 {
+    fn eq(&self, other: &DistAndSurf<S>) -> bool {
+        *self == other.d
+    }
+}
+
+impl<S: Surface> PartialOrd<DistAndSurf<S>> for f64 {
+    fn partial_cmp(&self, other: &DistAndSurf<S>) -> Option<Ordering> {
+        self.partial_cmp(&other.d)
     }
 }
 
 pub struct UniqueSurface<S: Surface> {
-    surfaces: BTreeMap<Num, (S, TinyVec<[usize; 1]>)>,
+    inner: RBTree<DistAndSurf<S>, std::alloc::Global>,
 }
 
 impl<S: Surface + Clone> UniqueSurface<S> {
     pub fn new() -> Self {
         UniqueSurface {
-            surfaces: BTreeMap::new(),
+            inner: RBTree::new(std::alloc::Global, false),
         }
     }
 
     pub fn add_surf(&mut self, surf: &S, index: usize, tol: &Tolerance) {
         const ZERO: [f64; 3] = [0.0, 0.0, 0.0];
         let dist = surf.dist(&ZERO).abs();
-        for (_, (s, indices)) in self.surfaces.range_mut((
-            Excluded(Num(dist - tol.dist_tol)),
-            Excluded((dist + tol.dist_tol).into()),
-        )) {
-            if s.equal(surf, tol) {
-                indices.push(index);
+        for entry in self
+            .inner
+            .range_mut((Excluded(dist - tol.dist_tol), Excluded(dist + tol.dist_tol)))
+        {
+            if entry.surf.equal(surf, tol) {
+                entry.surf_indices.push(index);
                 return;
             }
         }
 
-        self.surfaces
-            .insert(dist.into(), (surf.clone(), tiny_vec!([usize; 1] => index)));
+        self.inner.insert(DistAndSurf {
+            d: dist,
+            surf: surf.clone(),
+            surf_indices: tiny_vec!([usize; 1] => index),
+        });
     }
 
     #[inline]
-    pub fn surfaces(self) -> impl IntoIterator<Item = (S, TinyVec<[usize; 1]>)> {
-        self.surfaces.into_values()
+    pub fn into_surfaces(self) -> impl IntoIterator<Item = (S, TinyVec<[usize; 1]>)> {
+        self.inner.into_iter().map(|e| (e.surf, e.surf_indices))
     }
 }
 
@@ -84,6 +103,10 @@ mod tests {
         let mut unique_surfaces = UniqueSurface::<Plane>::new();
         unique_surfaces.add_surf(&plane1, 0, &tol);
         unique_surfaces.add_surf(&plane2, 1, &tol);
-        debug_assert_eq!(unique_surfaces.surfaces.len(), 1);
+        let surfaces = unique_surfaces
+            .into_surfaces()
+            .into_iter()
+            .collect::<Vec<_>>();
+        debug_assert_eq!(surfaces.len(), 1);
     }
 }

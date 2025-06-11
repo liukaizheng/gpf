@@ -166,9 +166,14 @@ fn merge_same_surfaces<A: Allocator + Copy>(models: &mut [BrepModel<A>]) -> Vec<
             surf_positions.push((i, j));
         }
     }
+    for (_, unique_surf) in unique_surface_map {
+        for surf in unique_surf.into_surfaces() {
+            println!("surface: {:?}", surf);
+        }
+    }
 
     let mut surfaces = Vec::new();
-    for (surf_type_id, unique_surfaces) in unique_surface_map {
+    /*for (surf_type_id, unique_surfaces) in unique_surface_map {
         if surf_type_id == TypeId::of::<Plane>() {
             for (surf, indices) in unique_surfaces.surfaces() {
                 let sid = surfaces.len();
@@ -197,7 +202,7 @@ fn merge_same_surfaces<A: Allocator + Copy>(models: &mut [BrepModel<A>]) -> Vec<
                 surfaces.push(surf);
             }
         }
-    }
+    }*/
     surfaces
 }
 

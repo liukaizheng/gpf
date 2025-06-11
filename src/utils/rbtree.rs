@@ -1,4 +1,8 @@
-use std::{alloc::Allocator, collections::VecDeque};
+use std::{
+    alloc::Allocator,
+    collections::VecDeque,
+    ops::{Bound, RangeBounds},
+};
 
 use crate::INVALID_IND;
 
@@ -6,6 +10,8 @@ use crate::INVALID_IND;
 enum Color {
     Red,
     Black,
+    #[allow(dead_code)]
+    Gray,
 }
 
 struct Node<V> {
@@ -34,11 +40,18 @@ pub struct RBTree<V, A: Allocator + Copy> {
     removed_nodes: Option<VecDeque<usize, A>>,
 }
 
-
-
 impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
+
+    pub fn into_iter(self) -> impl Iterator<Item = V> {
+        self.nodes.into_iter().filter_map(|node| {
+            match node.color {
+                Color::Gray => None,
+                _ => Some(node.value)
+            }
+        })
+    }
     /// Returns an iterator over the values in the tree
-    pub fn iter<'a>(&'a self) -> impl Iterator<Item = &'a V> {
+    pub fn inorder_iter<'a>(&'a self) -> impl Iterator<Item = &'a V> {
         let mut stack = Vec::new();
 
         // Initialize stack with leftmost path from root
@@ -61,13 +74,12 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
     }
 
     /// Returns an iterator over the values in the tree that are in the specified range
-    pub fn range<'a, R>(&'a self, range: R) -> impl Iterator<Item = &'a V>
+    pub fn range<'a, U, R>(&'a self, range: R) -> impl Iterator<Item = &'a V>
     where
-        R: std::ops::RangeBounds<V>,
-        V: Clone,
+        R: RangeBounds<U>,
+        V: PartialOrd<U>,
+        U: PartialOrd<V>,
     {
-        use std::ops::Bound;
-
         let mut stack = Vec::new();
 
         // Build initial stack for range start
@@ -75,30 +87,24 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
             self.build_range_stack(&mut stack, self.root, &range);
         }
 
-        // Clone the end bound for use in the closure
-        let end_bound = match range.end_bound() {
-            Bound::Included(v) => Some((v.clone(), true)),
-            Bound::Excluded(v) => Some((v.clone(), false)),
-            Bound::Unbounded => None,
-        };
-
         std::iter::from_fn(move || {
             // Pop the next node from stack
             let node_id = stack.pop()?;
             let value = &self.nodes[node_id].value;
 
             // Check if we've reached the end bound
-            if let Some((bound_value, inclusive)) = &end_bound {
-                let should_exclude = if *inclusive {
-                    value.partial_cmp(bound_value).unwrap().is_gt()
-                } else {
-                    value.partial_cmp(bound_value).unwrap().is_ge()
-                };
-
-                if should_exclude {
-                    stack.clear(); // Clear remaining stack to end iteration
-                    return None;
+            match range.end_bound() {
+                Bound::Included(bound_value) => {
+                    if value.partial_cmp(bound_value).unwrap().is_gt() {
+                        return None;
+                    }
                 }
+                Bound::Excluded(bound_value) => {
+                    if value.partial_cmp(bound_value).unwrap().is_ge() {
+                        return None;
+                    }
+                }
+                Bound::Unbounded => {}
             }
 
             // If this node has a right child, push all left nodes from right subtree
@@ -111,26 +117,18 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
     }
 
     /// Returns a mutable iterator over the values in the tree that are in the specified range
-    pub fn range_mut<'a, R>(&'a mut self, range: R) -> impl Iterator<Item = &'a mut V>
+    pub fn range_mut<'a, U, R>(&'a mut self, range: R) -> impl Iterator<Item = &'a mut V>
     where
-        R: std::ops::RangeBounds<V>,
-        V: Clone,
+        R: RangeBounds<U>,
+        V: PartialOrd<U>,
+        U: PartialOrd<V>,
     {
-        use std::ops::Bound;
-
         let mut stack = Vec::new();
-        
+
         // Build initial stack for range start
         if self.root != INVALID_IND {
             self.build_range_stack(&mut stack, self.root, &range);
         }
-
-        // Clone the end bound for use in the closure
-        let end_bound = match range.end_bound() {
-            Bound::Included(v) => Some((v.clone(), true)),
-            Bound::Excluded(v) => Some((v.clone(), false)),
-            Bound::Unbounded => None,
-        };
 
         // Get a raw pointer to the nodes for safe access within the closure
         let nodes_ptr = self.nodes.as_mut_ptr();
@@ -139,27 +137,28 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
         std::iter::from_fn(move || {
             // Pop the next node from stack
             let node_id = stack.pop()?;
-            
+
             // Safety check: ensure node_id is within bounds
             if node_id >= nodes_len {
                 return None;
             }
-            
+
             // SAFETY: We know node_id is valid and within bounds
             let node_value = unsafe { &(*nodes_ptr.add(node_id)).value };
-            
+
             // Check if we've reached the end bound before returning the value
-            if let Some((bound_value, inclusive)) = &end_bound {
-                let should_exclude = if *inclusive {
-                    node_value.partial_cmp(bound_value).unwrap().is_gt()
-                } else {
-                    node_value.partial_cmp(bound_value).unwrap().is_ge()
-                };
-                
-                if should_exclude {
-                    stack.clear(); // Clear remaining stack to end iteration
-                    return None;
+            match range.end_bound() {
+                Bound::Included(bound_value) => {
+                    if node_value.partial_cmp(bound_value).unwrap().is_gt() {
+                        return None;
+                    }
                 }
+                Bound::Excluded(bound_value) => {
+                    if node_value.partial_cmp(bound_value).unwrap().is_ge() {
+                        return None;
+                    }
+                }
+                Bound::Unbounded => {}
             }
 
             // If this node has a right child, push all left nodes from right subtree
@@ -173,12 +172,10 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
                     current = unsafe { (*nodes_ptr.add(current)).left };
                 }
             }
-            
+
             // SAFETY: We know node_id is valid and we're returning a mutable reference
             // with the same lifetime as the iterator, which ensures exclusive access
-            unsafe {
-                Some(&mut (*nodes_ptr.add(node_id)).value)
-            }
+            unsafe { Some(&mut (*nodes_ptr.add(node_id)).value) }
         })
     }
 
@@ -191,16 +188,16 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
     }
 
     /// Helper function to build initial stack for range queries
-    fn build_range_stack<R>(&self, stack: &mut Vec<usize>, mut current: usize, range: &R)
+    fn build_range_stack<U, R>(&self, stack: &mut Vec<usize>, mut current: usize, range: &R)
     where
-        R: std::ops::RangeBounds<V>,
+        R: RangeBounds<U>,
+        V: PartialOrd<U>,
+        U: PartialOrd<V>,
     {
-        use std::ops::Bound;
-
         // Navigate to the appropriate starting point and build stack
         while current != INVALID_IND {
             let curr_val = &self.nodes[current].value;
-            
+
             let go_right = match range.start_bound() {
                 Bound::Included(v) => curr_val.partial_cmp(v).unwrap().is_lt(),
                 Bound::Excluded(v) => curr_val.partial_cmp(v).unwrap().is_le(),
@@ -401,8 +398,6 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use std::{alloc::Allocator, random};
@@ -483,27 +478,22 @@ mod tests {
         }
 
         // Test full range iteration
-        let mut items: Vec<i32> = tree.iter().copied().collect();
-        items.sort();
+        let items: Vec<i32> = tree.inorder_iter().copied().collect();
         assert_eq!(items, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
         // Test range from 3..=7
-        let mut range_items: Vec<i32> = tree.range(3..=7).copied().collect();
-        range_items.sort();
+        let range_items: Vec<i32> = tree.range(3..=7).copied().collect();
         assert_eq!(range_items, [3, 4, 5, 6, 7]);
 
         // Test range from 3..7 (exclusive upper bound)
-        let mut range_items: Vec<i32> = tree.range(3..7).copied().collect();
-        range_items.sort();
+        let range_items: Vec<i32> = tree.range(3..7).copied().collect();
         assert_eq!(range_items, [3, 4, 5, 6]);
 
         // Test unbounded ranges
-        let mut range_items: Vec<i32> = tree.range(5..).copied().collect();
-        range_items.sort();
+        let range_items: Vec<i32> = tree.range(5..).copied().collect();
         assert_eq!(range_items, [5, 6, 7, 8, 9]);
 
-        let mut range_items: Vec<i32> = tree.range(..5).copied().collect();
-        range_items.sort();
+        let range_items: Vec<i32> = tree.range(..5).copied().collect();
         assert_eq!(range_items, [1, 2, 3, 4]);
     }
 
@@ -511,7 +501,7 @@ mod tests {
     fn test_edge_cases() {
         // Test empty tree
         let empty_tree: RBTree<i32, _> = RBTree::new(std::alloc::Global, false);
-        let items: Vec<i32> = empty_tree.iter().copied().collect();
+        let items: Vec<i32> = empty_tree.inorder_iter().copied().collect();
         assert_eq!(items, []);
 
         let range_items: Vec<i32> = empty_tree.range(1..10).copied().collect();
@@ -521,7 +511,7 @@ mod tests {
         let mut single_tree = RBTree::new(std::alloc::Global, false);
         single_tree.insert(5);
 
-        let items: Vec<i32> = single_tree.iter().copied().collect();
+        let items: Vec<i32> = single_tree.inorder_iter().copied().collect();
         assert_eq!(items, [5]);
 
         let range_items: Vec<i32> = single_tree.range(5..=5).copied().collect();
@@ -564,7 +554,7 @@ mod tests {
         assert_eq!(range_items, [5, 6, 7, 8, 10]);
 
         // Test that iteration order is correct (in-order traversal)
-        let items: Vec<i32> = tree.iter().copied().collect();
+        let items: Vec<i32> = tree.inorder_iter().copied().collect();
         let mut sorted_values = values.to_vec();
         sorted_values.sort();
         assert_eq!(items, sorted_values);
@@ -593,14 +583,14 @@ mod tests {
             *value += 100; // Add 100 to each value
             count += 1;
         }
-        
+
         assert_eq!(count, 5); // Should find 5 values
         assert_eq!(found_values, [3, 4, 5, 6, 7]);
 
         // Test empty range
         let mut tree2 = RBTree::new(std::alloc::Global, false);
         tree2.insert(5);
-        
+
         let mut empty_count = 0;
         for _value in tree2.range_mut(10..20) {
             empty_count += 1;
@@ -610,13 +600,12 @@ mod tests {
         // Test single element modification
         let mut single_tree = RBTree::new(std::alloc::Global, false);
         single_tree.insert(42);
-        
+
         for value in single_tree.range_mut(42..=42) {
             *value = 100;
         }
-        
-        let result: Vec<i32> = single_tree.iter().copied().collect();
+
+        let result: Vec<i32> = single_tree.inorder_iter().copied().collect();
         assert_eq!(result, [100]);
     }
-
 }

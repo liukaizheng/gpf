@@ -10,7 +10,7 @@ use crate::math::{cross, dot, square_norm};
 
 #[inline]
 fn is_parallel(a: &[f64], b: &[f64], cos_tol: f64) -> bool {
-    return (dot(a, b).abs() - 1.0) < cos_tol;
+    return (dot(a, b).abs() - 1.0).abs() < cos_tol;
 }
 
 #[inline]
