@@ -38,10 +38,10 @@ where
     F: Fn(&[bool]) -> bool,
 {
     let surfaces = merge_same_surfaces(&mut models);
-    /*let mut bbox = BBox::default();
-    for model in &models {
-        bbox.merge(&model.bbox);
-    }
+    let mut bbox = BBox::default();
+    // for model in &models {
+    //     bbox.merge(&model.bbox);
+    // }
 
     let mut tets = init_mesh(bbox);
     let vals = adaptive_subdivide(&mut tets, &surfaces, eps * eps);
@@ -51,7 +51,7 @@ where
     println!("mesh n tets: {}", tets.tet_faces.len());
 
     let model_data = extract_cells(iso_surf_mesh, &tets, surfaces.len());
-    model_data.resolve(models, &surfaces, bool_func);*/
+    model_data.resolve(models, &surfaces, bool_func);
 }
 
 fn init_mesh(bbox: BBox) -> TetSet {
@@ -166,16 +166,11 @@ fn merge_same_surfaces<A: Allocator + Copy>(models: &mut [BrepModel<A>]) -> Vec<
             surf_positions.push((i, j));
         }
     }
-    for (_, unique_surf) in unique_surface_map {
-        for surf in unique_surf.into_surfaces() {
-            println!("surface: {:?}", surf);
-        }
-    }
 
     let mut surfaces = Vec::new();
-    /*for (surf_type_id, unique_surfaces) in unique_surface_map {
+    for (surf_type_id, unique_surfaces) in unique_surface_map {
         if surf_type_id == TypeId::of::<Plane>() {
-            for (surf, indices) in unique_surfaces.surfaces() {
+            for (surf, indices) in unique_surfaces.into_surfaces() {
                 let sid = surfaces.len();
                 let dz = surf.as_plane().unwrap().dz;
                 for idx in indices {
@@ -191,7 +186,7 @@ fn merge_same_surfaces<A: Allocator + Copy>(models: &mut [BrepModel<A>]) -> Vec<
                 surfaces.push(surf);
             }
         } else {
-            for (surf, indices) in unique_surfaces.surfaces() {
+            for (surf, indices) in unique_surfaces.into_surfaces() {
                 let sid = surfaces.len();
                 for idx in indices {
                     let (i, j) = surf_positions[idx];
@@ -202,7 +197,7 @@ fn merge_same_surfaces<A: Allocator + Copy>(models: &mut [BrepModel<A>]) -> Vec<
                 surfaces.push(surf);
             }
         }
-    }*/
+    }
     surfaces
 }
 
