@@ -8,6 +8,7 @@ use itertools::Itertools;
 use tinyvec::TinyVec;
 
 use crate::{
+    INVALID_IND,
     geometry::{BBox, Surf, Surface},
     math::{cross, cross_in, dot, square_norm, sub_short},
     mesh::{EdgeId, Mesh},
@@ -169,11 +170,30 @@ fn subdividable<A: Allocator + Copy>(
     alloc: A,
 ) -> bool {
     let n_surfaces = data.surface_datum.len();
-    let mut active = Vec::with_capacity_in(n_surfaces, alloc);
-    active.resize(n_surfaces, true);
     let verts = tets.tet_vertices[tid];
     let tet_points = verts.map(|vid| point_3(&tets.points, vid.0));
     let tet_box = BBox::from_iter(tet_points);
+    let mut activated = Vec::new_in(alloc);
+
+    for (sid, surf_data) in data.surface_datum.iter().enumerate() {
+        if tet_box.contains(&surf_data.bbox) {
+            return true;
+        }
+        if !tet_box.intersects(&surf_data.bbox) {
+            continue;
+        }
+
+        activated.push(sid);
+        if surf_data.sub_bboxes.len() > 1
+            && surf_data.sub_bboxes.iter().any(|b| tet_box.contains(b))
+        {
+            return true;
+        }
+    }
+
+    if activated.is_empty() {
+        return false;
+    }
 
     let trans_vmat = [
         sub_short::<3, _>(tet_points[1], tet_points[0]),
@@ -199,7 +219,10 @@ fn subdividable<A: Allocator + Copy>(
     let mut interpolant_diff_vec = Vec::with_capacity_in(n_surfaces, alloc);
     let mut val_diff_vec = Vec::with_capacity_in(n_surfaces, alloc);
     let mut n_activated = 0;
-    for (sid, surf_data) /*surface id*/ in data.surface_datum.iter().enumerate() {
+    for i in 0..activated.len() {
+        let sid = activated[i];
+
+        // for (sid, surf_data) /*surface id*/ in data.surface_datum.iter().enumerate() {
         let tet_vals_grads = verts.map(|vid| &data.vals_and_grads[sid][vid]);
 
         let mut vals = Vec::with_capacity_in(20, alloc);
@@ -208,26 +231,64 @@ fn subdividable<A: Allocator + Copy>(
         let v0 = tet_vals_grads[0][0];
         let g = &tet_vals_grads[0][1..];
         const S: f64 = 1.0 / 3.0;
-        vals.extend([v0 + S * dot(g, &trans_vmat[0]), v0 + S * dot(g, &trans_vmat[1]), v0 + S * dot(g, &trans_vmat[2])]);
+        vals.extend([
+            v0 + S * dot(g, &trans_vmat[0]),
+            v0 + S * dot(g, &trans_vmat[1]),
+            v0 + S * dot(g, &trans_vmat[2]),
+        ]);
 
         let v1 = tet_vals_grads[1][0];
         let g = &tet_vals_grads[1][1..];
-        vals.extend([v1 + S *dot(g, &trans_vmat[3]), v1 + S * dot(g, &trans_vmat[4]), v1 - S * dot(g, &trans_vmat[0])]);
+        vals.extend([
+            v1 + S * dot(g, &trans_vmat[3]),
+            v1 + S * dot(g, &trans_vmat[4]),
+            v1 - S * dot(g, &trans_vmat[0]),
+        ]);
 
         let v2 = tet_vals_grads[2][0];
         let g = &tet_vals_grads[2][1..];
-        vals.extend([v2 + S * dot(g, &trans_vmat[5]), v2 - S * dot(g, &trans_vmat[1]), v2 - S * dot(g, &trans_vmat[3])]);
-
+        vals.extend([
+            v2 + S * dot(g, &trans_vmat[5]),
+            v2 - S * dot(g, &trans_vmat[1]),
+            v2 - S * dot(g, &trans_vmat[3]),
+        ]);
 
         let v3 = tet_vals_grads[3][0];
         let g = &tet_vals_grads[3][1..];
-        vals.extend([v3 - S * dot(g, &trans_vmat[2]), v3 - S * dot(g, &trans_vmat[4]), v3 - S * dot(g, &trans_vmat[5])]);
+        vals.extend([
+            v3 - S * dot(g, &trans_vmat[2]),
+            v3 - S * dot(g, &trans_vmat[4]),
+            v3 - S * dot(g, &trans_vmat[5]),
+        ]);
 
-        vals.push(((vals[7] + vals[8] + vals[10] + vals[12] + vals[14] + vals[15]) * 1.5 - vals[1] - vals[2] - vals[3]) / 6.0);
-        vals.push(((vals[5] + vals[6] + vals[10] + vals[11] + vals[13] + vals[15]) * 1.5 - vals[0] - vals[2] - vals[3]) / 6.0);
-        vals.push(((vals[4] + vals[6] + vals[8] + vals[9] + vals[13] + vals[14]) * 1.5 - vals[0] - vals[1] - vals[3]) / 6.0);
-        vals.push(((vals[4] + vals[5] + vals[7] + vals[9] + vals[11] + vals[12]) * 1.5 - vals[0] - vals[1] - vals[2]) / 6.0);
-
+        vals.push(
+            ((vals[7] + vals[8] + vals[10] + vals[12] + vals[14] + vals[15]) * 1.5
+                - vals[1]
+                - vals[2]
+                - vals[3])
+                / 6.0,
+        );
+        vals.push(
+            ((vals[5] + vals[6] + vals[10] + vals[11] + vals[13] + vals[15]) * 1.5
+                - vals[0]
+                - vals[2]
+                - vals[3])
+                / 6.0,
+        );
+        vals.push(
+            ((vals[4] + vals[6] + vals[8] + vals[9] + vals[13] + vals[14]) * 1.5
+                - vals[0]
+                - vals[1]
+                - vals[3])
+                / 6.0,
+        );
+        vals.push(
+            ((vals[4] + vals[5] + vals[7] + vals[9] + vals[11] + vals[12]) * 1.5
+                - vals[0]
+                - vals[1]
+                - vals[2])
+                / 6.0,
+        );
 
         let mut diffs = Vec::with_capacity_in(16, alloc);
         for i in 0..16 {
@@ -236,42 +297,39 @@ fn subdividable<A: Allocator + Copy>(
         }
 
         let val_diff = [v1 - v0, v2 - v0, v3 - v0];
-        active[sid] = *vals.iter().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap() > 0.0 &&
-                *vals.iter().min_by(|x, y| x.partial_cmp(y).unwrap()).unwrap() < 0.0;
-        if active[sid]  {
-
+        let is_active = *vals
+            .iter()
+            .max_by(|x, y| x.partial_cmp(y).unwrap())
+            .unwrap()
+            > 0.0
+            && *vals
+                .iter()
+                .min_by(|x, y| x.partial_cmp(y).unwrap())
+                .unwrap()
+                < 0.0;
+        if is_active {
             if test_distance_1(&adj_vmat, val_diff, &diffs, sq_det_vmat, sq_eps) {
                 return true;
             }
+            if n_activated != i {
+                activated[n_activated] = sid;
+            }
+            interpolant_vec.push(vals);
+            interpolant_diff_vec.push(diffs);
+            val_diff_vec.push(val_diff);
             n_activated += 1;
         }
-
-        interpolant_vec.push(vals);
-        interpolant_diff_vec.push(diffs);
-        val_diff_vec.push(val_diff);
     }
 
+    activated.resize(n_activated, INVALID_IND);
     if n_activated < 2 {
         return false;
     }
 
-    let mut activated = Vec::with_capacity_in(n_activated, alloc);
-    activated.extend(
-        active
-            .iter()
-            .enumerate()
-            .filter(|&(_, &v)| v)
-            .map(|(i, _)| i),
-    );
     let mut pair_set = HashSet::new_in(alloc);
-    for (&i, &j) in activated.iter().tuple_combinations() {
+    for ((i, v1), (j, v2)) in interpolant_vec.iter().enumerate().tuple_windows() {
         let mut points = Vec::with_capacity_in(42, alloc);
-        points.extend(
-            interpolant_vec[i]
-                .iter()
-                .interleave(&interpolant_vec[j])
-                .map(|v| *v),
-        );
+        points.extend(v1.iter().interleave(v2).map(|v| *v));
 
         if !contain_zero_2(points, alloc) {
             continue;
@@ -289,17 +347,16 @@ fn subdividable<A: Allocator + Copy>(
         }
     }
 
-    for (&i, &j, &k) in activated.iter().tuple_combinations() {
+    for ((i, v1), (j, v2), (k, v3)) in interpolant_vec.iter().enumerate().tuple_windows() {
         if !pair_set.contains(&[i, j]) || !pair_set.contains(&[i, k]) || !pair_set.contains(&[j, k])
         {
             continue;
         }
         let mut points = Vec::with_capacity_in(63, alloc);
         points.extend(
-            interpolant_vec[i]
-                .iter()
-                .zip(&interpolant_vec[j])
-                .zip(&interpolant_vec[k])
+            v1.iter()
+                .zip(v2)
+                .zip(v3)
                 .map(|((a, b), c)| [*a, *b, *c])
                 .flatten(),
         );
