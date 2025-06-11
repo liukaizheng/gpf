@@ -11,18 +11,20 @@ use tinyvec::TinyVec;
 
 use std::{alloc::Allocator, any::TypeId, collections::HashMap};
 
-use adaptive_subdivide::adaptive_subdivide;
+use adaptive_subdivide::{adaptive_subdivide, SurfaceData};
 use ar_in_tet::{Arrangement, IsoVert, extract_iso_surface};
 use extract_cells::extract_cells;
 use itertools::Itertools;
 use tet_set::TetSet;
 
-use crate::{
-    geometry::{BBox, Surf, UniqueSurface}, math::dot, mesh::{
-        square_edge_length, EdgeId, ElementId, FaceId, Mesh, SurfaceMesh
-    }, oriented_index, strip_orientation, Tolerance, INVALID_IND
-};
 use crate::geometry::Plane;
+use crate::{
+    INVALID_IND, Tolerance,
+    geometry::{BBox, Surf, UniqueSurface},
+    math::dot,
+    mesh::{EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, square_edge_length},
+    oriented_index, strip_orientation,
+};
 
 struct IsoSurfMesh {
     arrangements: Vec<Option<Arrangement>>,
@@ -33,21 +35,22 @@ struct IsoSurfMesh {
     face_parents: Vec<usize>,
 }
 
-struct SurfaceBBox {
-    bbox: BBox,
-    sub_bboxes: TinyVec<[BBox; 1]>,
-}
-
 pub fn boolean3d<F>(mut models: Vec<BrepModel>, bool_func: F, eps: f64)
 where
     F: Fn(&[bool]) -> bool,
 {
     let surfaces = merge_same_surfaces(&mut models);
     let surface_bboxes = compute_surface_boxes(&surfaces, &mut models);
-    let bbox = BBox::from_boxes(surface_bboxes.iter().map(|b| &b.bbox));
+    let surface_datum = surface_bboxes.into_iter().zip(&surfaces).map(|(sub_bboxes, surf)| {
+        SurfaceData {
+            surf,
+            bbox: BBox::from_boxes(&sub_bboxes),
+            sub_bboxes,
+        }
+    }).collect_vec();
 
-    let mut tets = init_mesh(bbox);
-    let vals = adaptive_subdivide(&mut tets, &surfaces, eps * eps);
+    let mut tets = init_mesh(BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)));
+    let vals = adaptive_subdivide(&mut tets, surface_datum, eps * eps);
 
     let iso_surf_mesh = extract_iso_surface(&tets, vals);
     // write_obj("123.obj", &iso_surf_mesh.points, &iso_surf_mesh.mesh);
@@ -204,7 +207,10 @@ fn merge_same_surfaces<A: Allocator + Copy>(models: &mut [BrepModel<A>]) -> Vec<
     surfaces
 }
 
-fn compute_surface_boxes<A: Allocator + Copy>(surfaces: &[Surf], models: &mut [BrepModel<A>]) -> Vec<SurfaceBBox> {
+fn compute_surface_boxes<A: Allocator + Copy>(
+    surfaces: &[Surf],
+    models: &mut [BrepModel<A>],
+) -> Vec<TinyVec<[BBox; 1]>> {
     let mut surface_boxes = Vec::with_capacity(surfaces.len());
     surface_boxes.resize(surfaces.len(), TinyVec::<[BBox; 1]>::new());
     for model in models {
@@ -213,10 +219,7 @@ fn compute_surface_boxes<A: Allocator + Copy>(surfaces: &[Surf], models: &mut [B
             surface_boxes[strip_orientation(ori_surf_id)].push(bbox);
         }
     }
-    surface_boxes.into_iter().map(|sub_bboxes| SurfaceBBox{
-        bbox: BBox::from_boxes(&sub_bboxes),
-        sub_bboxes,
-    }).collect_vec()
+    surface_boxes
 }
 
 fn write_obj(name: &str, points: &[f64], mesh: &SurfaceMesh) {

@@ -5,6 +5,7 @@ use hashbrown::HashSet;
 
 use bumpalo::Bump;
 use itertools::Itertools;
+use tinyvec::TinyVec;
 
 use crate::{
     geometry::{BBox, Surf, Surface},
@@ -45,32 +46,32 @@ impl Ord for EdgeAndLen {
     }
 }
 
-struct SurfaceData<'a> {
-    surf: &'a Surf,
-    bbox: BBox,
-    bboxes: Vec<BBox>,
+pub(crate) struct SurfaceData<'a> {
+    pub(crate) surf: &'a Surf,
+    pub(crate) bbox: BBox,
+    pub(crate) sub_bboxes: TinyVec<[BBox; 1]>,
 }
 
 struct SubdivisionData<'a> {
-    surfaces: &'a [Surf],
+    surface_datum: Vec<SurfaceData<'a>>,
     vals_and_grads: Vec<Vec<[f64; 4]>>,
     queue: BinaryHeap<EdgeAndLen>,
 }
 
-pub(super) fn adaptive_subdivide(
+pub(super) fn adaptive_subdivide<'a>(
     tets: &mut TetSet,
-    surfaces: &[Surf],
+    surface_datum: Vec<SurfaceData<'a>>,
     sq_eps: f64,
 ) -> Vec<Vec<f64>> {
-    let mut vals_and_grads = vec![Vec::with_capacity(tets.mesh.n_vertices()); surfaces.len()];
+    let mut vals_and_grads = vec![Vec::with_capacity(tets.mesh.n_vertices()); surface_datum.len()];
     for p in tets.points.chunks(3) {
-        for (i, surf) in surfaces.iter().enumerate() {
+        for (i, surf) in surface_datum.iter().map(|d| &d.surf).enumerate() {
             vals_and_grads[i].push(surf.eval(p));
         }
     }
 
     let mut data = SubdivisionData {
-        surfaces,
+        surface_datum,
         vals_and_grads,
         queue: BinaryHeap::new(),
     };
@@ -101,7 +102,7 @@ fn adaptive_subdivide_impl(tets: &mut TetSet, data: &mut SubdivisionData, sq_eps
         let (new_vert, tet_pairs) = tets.split_edge(eid, &split_bump);
         let p = point_3(&tets.points, new_vert.0);
 
-        for (sid, surf) in data.surfaces.iter().enumerate() {
+        for (sid, surf) in data.surface_datum.iter().map(|d| &d.surf).enumerate() {
             data.vals_and_grads[sid].push(surf.eval(p));
         }
 
@@ -167,11 +168,12 @@ fn subdividable<A: Allocator + Copy>(
     sq_eps: f64,
     alloc: A,
 ) -> bool {
-    let surfs = &data.surfaces;
-    let mut active = Vec::with_capacity_in(surfs.len(), alloc);
-    active.resize(surfs.len(), true);
+    let n_surfaces = data.surface_datum.len();
+    let mut active = Vec::with_capacity_in(n_surfaces, alloc);
+    active.resize(n_surfaces, true);
     let verts = tets.tet_vertices[tid];
     let tet_points = verts.map(|vid| point_3(&tets.points, vid.0));
+    let tet_box = BBox::from_iter(tet_points);
 
     let trans_vmat = [
         sub_short::<3, _>(tet_points[1], tet_points[0]),
@@ -193,11 +195,11 @@ fn subdividable<A: Allocator + Copy>(
         cross(&trans_vmat[0], &trans_vmat[1]),
     ];
 
-    let mut interpolant_vec = Vec::with_capacity_in(surfs.len(), alloc);
-    let mut interpolant_diff_vec = Vec::with_capacity_in(surfs.len(), alloc);
-    let mut val_diff_vec = Vec::with_capacity_in(surfs.len(), alloc);
+    let mut interpolant_vec = Vec::with_capacity_in(n_surfaces, alloc);
+    let mut interpolant_diff_vec = Vec::with_capacity_in(n_surfaces, alloc);
+    let mut val_diff_vec = Vec::with_capacity_in(n_surfaces, alloc);
     let mut n_activated = 0;
-    for sid /*surface id*/ in 0..surfs.len() {
+    for (sid, surf_data) /*surface id*/ in data.surface_datum.iter().enumerate() {
         let tet_vals_grads = verts.map(|vid| &data.vals_and_grads[sid][vid]);
 
         let mut vals = Vec::with_capacity_in(20, alloc);

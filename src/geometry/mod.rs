@@ -2,7 +2,7 @@ mod bbox;
 mod curve;
 mod surface;
 
-pub use bbox::BBox;
+pub use bbox::{BBox, BBoxRelation};
 pub use curve::*;
 pub use surface::*;
 
