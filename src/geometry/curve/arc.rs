@@ -4,6 +4,13 @@ use crate::geometry::Plane;
 
 use super::Curve;
 
+/// Represents a circular arc in 3D space
+///
+/// The arc is defined by:
+/// - `plane`: The plane on which the arc lies (origin = circle center)
+/// - `radius`: Radius of the circle
+/// - `start_angle`: Starting angle in radians (relative to plane's x-axis)
+/// - `end_angle`: Ending angle in radians (relative to plane's x-axis)
 #[derive(Clone, Debug)]
 pub struct Arc {
     plane: Plane,
@@ -13,6 +20,14 @@ pub struct Arc {
 }
 
 impl Arc {
+    /// Creates a new arc
+    ///
+    /// # Arguments
+    ///
+    /// * `plane` - Plane containing the arc (origin is circle center)
+    /// * `radius` - Radius of the circle
+    /// * `start_angle` - Starting angle in radians (relative to plane's x-axis)
+    /// * `end_angle` - Ending angle in radians (relative to plane's x-axis)
     pub fn new(plane: Plane, radius: f64, start_angle: f64, end_angle: f64) -> Self {
         Arc {
             plane,
@@ -24,6 +39,11 @@ impl Arc {
 }
 
 impl Curve for Arc {
+    /// Returns a reversed version of the arc
+    ///
+    /// The reversed arc has:
+    /// - Direction reversed (start↔end swapped)
+    /// - Plane orientation reversed (normal flipped)
     #[inline]
     fn reversed(&self) -> Self {
         Arc {
@@ -34,6 +54,13 @@ impl Curve for Arc {
         }
     }
 
+    /// Discretizes the arc into a series of 3D points
+    ///
+    /// Uses a fixed angular step (π/12 = 15°) adjusted to ensure:
+    /// - At least one segment for small arcs
+    /// - Even distribution of points
+    ///
+    /// Returns a flat vector of coordinates in [x0, y0, z0, x1, y1, z1, ...] format
     fn discrete<A: std::alloc::Allocator>(&self, alloc: A) -> Vec<f64, A> {
         const STEP: f64 = PI / 12.0;
         let n_steps = (((self.end_angle - self.start_angle) / STEP).round() as usize).max(1);

@@ -1,4 +1,5 @@
 #[derive(Clone)]
+/// Axis-aligned bounding box defined by min and max coordinates
 pub struct BBox {
     pub min: [f64; 3],
     pub max: [f64; 3],
@@ -9,12 +10,32 @@ impl AsRef<BBox> for BBox {
     }
 }
 impl BBox {
+    /// Creates a new bounding box with specified min and max coordinates
+    ///
+    /// # Arguments
+    /// * `minx` - Minimum x coordinate
+    /// * `miny` - Minimum y coordinate
+    /// * `minz` - Minimum z coordinate
+    /// * `maxx` - Maximum x coordinate
+    /// * `maxy` - Maximum y coordinate
+    /// * `maxz` - Maximum z coordinate
+    ///
+    /// # Returns
+    /// A new BBox instance
     pub fn new(minx: f64, miny: f64, minz: f64, maxx: f64, maxy: f64, maxz: f64) -> BBox {
         BBox {
             min: [minx, miny, minz],
             max: [maxx, maxy, maxz],
         }
     }
+
+    /// Creates a bounding box that contains all boxes in an iterator
+    ///
+    /// # Arguments
+    /// * `boxes` - Iterator of items that can be converted to BBox references
+    ///
+    /// # Returns
+    /// A new BBox that contains all input boxes
     pub fn from_boxes<A: AsRef<BBox>, T: IntoIterator<Item = A>>(boxes: T) -> BBox {
         let mut res = BBox::default();
         for bbox in boxes {
@@ -22,6 +43,11 @@ impl BBox {
         }
         res
     }
+
+    /// Extends the bounding box to include a point
+    ///
+    /// # Arguments
+    /// * `p` - Point coordinates as [x, y, z]
     #[inline]
     pub fn extend(&mut self, p: &[f64]) {
         for i in 0..3 {
@@ -29,12 +55,24 @@ impl BBox {
             self.max[i] = self.max[i].max(p[i]);
         }
     }
+
+    /// Merges another bounding box into this one
+    ///
+    /// Expands current box to include the other box
+    ///
+    /// # Arguments
+    /// * `other` - Another bounding box to merge
     pub fn merge(&mut self, other: &BBox) {
         for i in 0..3 {
             self.min[i] = self.min[i].min(other.min[i]);
             self.max[i] = self.max[i].max(other.max[i]);
         }
     }
+
+    /// Scales the bounding box around its center
+    ///
+    /// # Arguments
+    /// * `s` - Scale factor (1.0 = no change, >1.0 = expand, <1.0 = shrink)
     pub fn scale(&mut self, s: f64) {
         let center = [
             0.5 * (self.min[0] + self.max[0]),
@@ -46,14 +84,23 @@ impl BBox {
             self.max[i] = center[i] + s * (self.max[i] - center[i]);
         }
     }
+
+    /// Returns a scaled copy of the bounding box
+    ///
+    /// # Arguments
+    /// * `s` - Scale factor
+    ///
+    /// # Returns
+    /// New scaled BBox
     pub fn scaled(mut self, s: f64) -> Self {
         self.scale(s);
         self
     }
-    /// Check if this bounding box completely contains another bounding box.
+
+    /// Check if this bounding box completely contains another bounding box
     ///
     /// A box contains another if all points of the other box are within or on
-    /// the boundary of this box. This includes the case where the boxes are identical.
+    /// the boundary of this box. This includes the case where the boxes are identical
     ///
     /// # Arguments
     /// * `other` - The bounding box to test for containment
@@ -79,10 +126,11 @@ impl BBox {
         }
         true
     }
-    /// Check if this bounding box intersects with another bounding box.
+
+    /// Check if this bounding box intersects with another bounding box
     ///
     /// Two boxes intersect if they overlap in any way, including sharing faces,
-    /// edges, or corners. Containment is also considered intersection.
+    /// edges, or corners. Containment is also considered intersection
     ///
     /// # Arguments
     /// * `other` - The bounding box to test for intersection
@@ -111,6 +159,10 @@ impl BBox {
     }
 }
 impl Default for BBox {
+    /// Creates a default bounding box with invalid min/max values
+    ///
+    /// Min coordinates are set to +∞ and max coordinates to -∞,
+    /// making it ready for extension with actual points
     fn default() -> BBox {
         BBox {
             min: [f64::INFINITY, f64::INFINITY, f64::INFINITY],
@@ -119,6 +171,9 @@ impl Default for BBox {
     }
 }
 impl<A: AsRef<[f64]>> FromIterator<A> for BBox {
+    /// Creates a bounding box from an iterator of points
+    ///
+    /// The resulting box will contain all points in the iterator
     fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
         let mut bbox = BBox::default();
         for p in iter {
