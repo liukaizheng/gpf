@@ -51,9 +51,10 @@ where
         })
         .collect_vec();
 
-    let mut tets = init_mesh(BBox::from_boxes(
-        surface_datum.iter().map(|data| &data.bbox),
-    ));
+    let mut tets = init_mesh(
+        BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)),
+        surfaces.len(),
+    );
     let vals = adaptive_subdivide(&mut tets, surface_datum, eps * eps);
 
     let iso_surf_mesh = extract_iso_surface(&tets, vals);
@@ -64,7 +65,7 @@ where
     model_data.resolve(models, &surfaces, bool_func);
 }
 
-fn init_mesh(bbox: BBox) -> TetSet {
+fn init_mesh(bbox: BBox, n_surfaces: usize) -> TetSet {
     const TETS: [[usize; 4]; 6] = [
         [0, 1, 7, 3],
         [7, 0, 5, 1],
@@ -150,6 +151,7 @@ fn init_mesh(bbox: BBox) -> TetSet {
     ];
     let square_edge_lengths =
         Vec::from_iter(mesh.edges().map(|e| square_edge_length(&points, *e, &mesh)));
+    let surf_indices = vec![TinyVec::from_iter(0..n_surfaces); 4];
     TetSet {
         mesh,
         tet_vertices,
@@ -158,6 +160,7 @@ fn init_mesh(bbox: BBox) -> TetSet {
         face_tets,
         points,
         square_edge_lengths,
+        surf_indices,
     }
 }
 

@@ -1,5 +1,7 @@
 use std::alloc::Allocator;
 
+use tinyvec::TinyVec;
+
 use crate::{
     INVALID_IND,
     mesh::{EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, VertexId, square_edge_length},
@@ -14,6 +16,7 @@ pub(crate) struct TetSet {
     pub(crate) face_tets: Vec<[usize; 2]>,
     pub(crate) points: Vec<f64>,
     pub(crate) square_edge_lengths: Vec<f64>,
+    pub(crate) surf_indices: Vec<TinyVec<[usize; 3]>>,
 }
 
 #[inline]
