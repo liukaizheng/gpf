@@ -11,7 +11,7 @@ use tinyvec::TinyVec;
 
 use std::{alloc::Allocator, any::TypeId, collections::HashMap};
 
-use adaptive_subdivide::{adaptive_subdivide, SurfaceData};
+use adaptive_subdivide::{SurfaceData, adaptive_subdivide};
 use ar_in_tet::{Arrangement, IsoVert, extract_iso_surface};
 use extract_cells::extract_cells;
 use itertools::Itertools;
@@ -41,15 +41,19 @@ where
 {
     let surfaces = merge_same_surfaces(&mut models);
     let surface_bboxes = compute_surface_boxes(&surfaces, &mut models);
-    let surface_datum = surface_bboxes.into_iter().zip(&surfaces).map(|(sub_bboxes, surf)| {
-        SurfaceData {
+    let surface_datum = surface_bboxes
+        .into_iter()
+        .zip(&surfaces)
+        .map(|(sub_bboxes, surf)| SurfaceData {
             surf,
             bbox: BBox::from_boxes(&sub_bboxes),
             sub_bboxes,
-        }
-    }).collect_vec();
+        })
+        .collect_vec();
 
-    let mut tets = init_mesh(BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)));
+    let mut tets = init_mesh(BBox::from_boxes(
+        surface_datum.iter().map(|data| &data.bbox),
+    ));
     let vals = adaptive_subdivide(&mut tets, surface_datum, eps * eps);
 
     let iso_surf_mesh = extract_iso_surface(&tets, vals);
@@ -154,7 +158,6 @@ fn init_mesh(bbox: BBox) -> TetSet {
         face_tets,
         points,
         square_edge_lengths,
-        tet_indices: vec![0; 6],
     }
 }
 

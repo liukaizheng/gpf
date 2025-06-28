@@ -1,8 +1,9 @@
 use std::alloc::Allocator;
 
 use crate::{
-    mesh::{square_edge_length, EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, VertexId},
-    point_3, INVALID_IND,
+    INVALID_IND,
+    mesh::{EdgeId, ElementId, FaceId, Mesh, SurfaceMesh, VertexId, square_edge_length},
+    point_3,
 };
 
 pub(crate) struct TetSet {
@@ -13,7 +14,6 @@ pub(crate) struct TetSet {
     pub(crate) face_tets: Vec<[usize; 2]>,
     pub(crate) points: Vec<f64>,
     pub(crate) square_edge_lengths: Vec<f64>,
-    pub(crate) tet_indices: Vec<usize>,
 }
 
 #[inline]
@@ -178,9 +178,11 @@ impl TetSet {
             }
         }));
 
-        debug_assert!(new_halfedges
-            .iter()
-            .all(|&hid| self.mesh.he_from(hid) == new_vert));
+        debug_assert!(
+            new_halfedges
+                .iter()
+                .all(|&hid| self.mesh.he_from(hid) == new_vert)
+        );
 
         let mut result_tets = Vec::with_capacity_in(tet_faces_map.len() << 1, alloc);
         for ((((tid, face_indices), oppo_hid), bottom_fid), top_fid) in tet_faces
@@ -295,13 +297,6 @@ impl TetSet {
                 }
             }
 
-            let old_idx = self.tet_indices[tid];
-            self.tet_indices[tid] += 1;
-
-            write_tet(tid, old_idx + 1, tid, old_idx);
-            write_tet(new_tid, 0, tid, old_idx);
-            self.tet_indices.push(0);
-
             result_tets.push([tid, new_tid]);
         }
         (new_vert, result_tets)
@@ -401,11 +396,4 @@ impl<'a> Iterator for TetsAroundEdge<'a> {
         self.next_self();
         ret
     }
-}
-
-fn write_tet(tid: usize, index: usize, old_tid: usize, old_index: usize) {
-    // let _ = std::fs::File::create(format!(
-    // "data/t_{}_{}_{}_{}",
-    // tid, index, old_tid, old_index
-    // ));
 }
