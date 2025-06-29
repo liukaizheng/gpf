@@ -288,6 +288,7 @@ impl TetSet {
                 side_faces_and_edges[1].0[1],
                 side_faces_and_edges[0].0[1],
             ]);
+            self.surf_indices.push(self.surf_indices[tid].clone());
             #[cfg(debug_assertions)]
             {
                 for _t in [tid, new_tid] {

@@ -151,7 +151,7 @@ fn init_mesh(bbox: BBox, n_surfaces: usize) -> TetSet {
     ];
     let square_edge_lengths =
         Vec::from_iter(mesh.edges().map(|e| square_edge_length(&points, *e, &mesh)));
-    let surf_indices = vec![TinyVec::from_iter(0..n_surfaces); 4];
+    let surf_indices = vec![TinyVec::from_iter(0..n_surfaces); 6];
     TetSet {
         mesh,
         tet_vertices,

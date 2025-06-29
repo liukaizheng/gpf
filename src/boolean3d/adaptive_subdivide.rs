@@ -164,34 +164,52 @@ const C: [[f64; 4]; 16] = [
 
 fn subdividable<A: Allocator + Copy>(
     tid: usize,
-    tets: &TetSet,
+    tets: &mut TetSet,
     data: &SubdivisionData,
     sq_eps: f64,
     alloc: A,
 ) -> bool {
-    let n_surfaces = data.surface_datum.len();
     let verts = tets.tet_vertices[tid];
     let tet_points = verts.map(|vid| point_3(&tets.points, vid.0));
     let tet_box = BBox::from_iter(tet_points);
-    let mut activated = Vec::new_in(alloc);
 
-    for (sid, surf_data) in data.surface_datum.iter().enumerate() {
-        if tet_box.contains(&surf_data.bbox) {
+    let mut contain_some_srf = false;
+
+    let tet_surfaces = &mut tets.surf_indices[tid];
+    tet_surfaces.retain(|&sid| {
+        let srf_data = &data.surface_datum[sid];
+        if tet_box.contains(&srf_data.bbox) {
+            contain_some_srf = true;
             return true;
         }
-        if !tet_box.intersects(&surf_data.bbox) {
-            continue;
+        if !tet_box.intersects(&srf_data.bbox) {
+            return false;
         }
+        if srf_data.sub_bboxes.len() > 1 {
+            if srf_data
+                .sub_bboxes
+                .iter()
+                .any(|bbox| tet_box.contains(bbox))
+            {
+                contain_some_srf = true;
+                return true;
+            }
+            for bbox in &srf_data.sub_bboxes {
+                if tet_box.intersects(bbox) {
+                    return true;
+                }
+            }
+            false
+        } else {
+            true
+        }
+    });
 
-        activated.push(sid);
-        if surf_data.sub_bboxes.len() > 1
-            && surf_data.sub_bboxes.iter().any(|b| tet_box.contains(b))
-        {
-            return true;
-        }
+    if contain_some_srf {
+        return true;
     }
 
-    if activated.is_empty() {
+    if tet_surfaces.len() < 1 {
         return false;
     }
 
@@ -215,14 +233,12 @@ fn subdividable<A: Allocator + Copy>(
         cross(&trans_vmat[0], &trans_vmat[1]),
     ];
 
+    let n_surfaces = tet_surfaces.len();
+
     let mut interpolant_vec = Vec::with_capacity_in(n_surfaces, alloc);
     let mut interpolant_diff_vec = Vec::with_capacity_in(n_surfaces, alloc);
     let mut val_diff_vec = Vec::with_capacity_in(n_surfaces, alloc);
-    let mut n_activated = 0;
-    for i in 0..activated.len() {
-        let sid = activated[i];
-
-        // for (sid, surf_data) /*surface id*/ in data.surface_datum.iter().enumerate() {
+    for &sid in tet_surfaces.iter() {
         let tet_vals_grads = verts.map(|vid| &data.vals_and_grads[sid][vid]);
 
         let mut vals = Vec::with_capacity_in(20, alloc);
@@ -311,18 +327,13 @@ fn subdividable<A: Allocator + Copy>(
             if test_distance_1(&adj_vmat, val_diff, &diffs, sq_det_vmat, sq_eps) {
                 return true;
             }
-            if n_activated != i {
-                activated[n_activated] = sid;
-            }
             interpolant_vec.push(vals);
             interpolant_diff_vec.push(diffs);
             val_diff_vec.push(val_diff);
-            n_activated += 1;
         }
     }
 
-    activated.resize(n_activated, INVALID_IND);
-    if n_activated < 2 {
+    if interpolant_vec.len() < 2 {
         return false;
     }
 
