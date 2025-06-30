@@ -8,6 +8,7 @@
 #![feature(array_chunks)]
 #![feature(btree_cursors)]
 #![feature(random)]
+#![feature(more_float_constants)]
 
 use itertools::Itertools;
 

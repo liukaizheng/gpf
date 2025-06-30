@@ -406,7 +406,7 @@ fn transpose_adjacent_mat<const N: usize>(mat: &[[f64; N]]) -> [[f64; N]; N] {
     vec
 }
 
-fn det<const N: usize>(mat: &[[f64; N]]) -> f64 {
+pub(crate) fn det<const N: usize>(mat: &[[f64; N]]) -> f64 {
     if N == 2 {
         mat[0][0] * mat[1][1] - mat[0][1] * mat[0][1]
     } else if N == 3 {
@@ -421,7 +421,7 @@ fn det<const N: usize>(mat: &[[f64; N]]) -> f64 {
     }
 }
 
-fn contain_zero_2<A: Allocator + Copy>(mut points: Vec<f64, A>, alloc: A) -> bool {
+pub(crate) fn contain_zero_2<A: Allocator + Copy>(mut points: Vec<f64, A>, alloc: A) -> bool {
     points.extend([0.0, 0.0]);
     let zero_vid = points.len() >> 1;
     let hull = convex_2(&points, alloc);
@@ -434,7 +434,7 @@ fn contain_zero_2<A: Allocator + Copy>(mut points: Vec<f64, A>, alloc: A) -> boo
     true
 }
 
-fn contain_zero_3<A: Allocator + Copy>(mut points: Vec<f64, A>, alloc: A) -> bool {
+pub(crate) fn contain_zero_3<A: Allocator + Copy>(mut points: Vec<f64, A>, alloc: A) -> bool {
     let zero_vid = points.len() / 3;
     points.extend([0.0, 0.0, 0.0]);
     match convex_3(&points, true, alloc) {
@@ -451,7 +451,13 @@ fn contain_zero_3<A: Allocator + Copy>(mut points: Vec<f64, A>, alloc: A) -> boo
     }
 }
 
-fn test_distance_1(adj_v: &[[f64; 3]], h: [f64; 3], b: &[f64], sq_det_v: f64, sq_eps: f64) -> bool {
+pub(crate) fn test_distance_1(
+    adj_v: &[[f64; 3]],
+    h: [f64; 3],
+    b: &[f64],
+    sq_det_v: f64,
+    sq_eps: f64,
+) -> bool {
     // w: (M, 3)
     let mut w = [0.0f64; 3];
     for i in 0..3 {
@@ -467,7 +473,7 @@ fn test_distance_1(adj_v: &[[f64; 3]], h: [f64; 3], b: &[f64], sq_det_v: f64, sq
     return b2 * sq_det_v > w2 * sq_eps;
 }
 
-fn test_distance_2(
+pub(crate) fn test_distance_2(
     adj_v: &[[f64; 3]],
     h: &[[f64; 3]],
     b: [&[f64]; 2],
@@ -520,7 +526,7 @@ fn test_distance_2(
     return r2 * sq_det_v > sq_det_u * sq_eps;
 }
 
-fn test_distance_3(
+pub(crate) fn test_distance_3(
     adj_v: &[[f64; 3]],
     h: &[[f64; 3]],
     b: [&[f64]; 3],

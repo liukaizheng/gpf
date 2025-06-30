@@ -2,11 +2,13 @@ mod adaptive_subdivide;
 mod ar_in_tet;
 mod brep;
 mod extract_cells;
+mod parallel_adaptive_subdivide;
 mod resolve_boolean;
 mod tet_set;
 
 pub use brep::BrepModel;
 use brep::SurfRep;
+use parallel_adaptive_subdivide::build_tet_from_box;
 use tinyvec::TinyVec;
 
 use std::{alloc::Allocator, any::TypeId, collections::HashMap};
@@ -51,18 +53,23 @@ where
         })
         .collect_vec();
 
+    build_tet_from_box(
+        BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)),
+        &surfaces,
+    );
     let mut tets = init_mesh(
         BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)),
         surfaces.len(),
     );
-    let vals = adaptive_subdivide(&mut tets, surface_datum, eps * eps);
+    write_obj("cube.obj", &tets.points, &tets.mesh);
+    /*let vals = adaptive_subdivide(&mut tets, surface_datum, eps * eps);
 
     let iso_surf_mesh = extract_iso_surface(&tets, vals);
     // write_obj("123.obj", &iso_surf_mesh.points, &iso_surf_mesh.mesh);
     println!("mesh n tets: {}", tets.tet_faces.len());
 
     let model_data = extract_cells(iso_surf_mesh, &tets, surfaces.len());
-    model_data.resolve(models, &surfaces, bool_func);
+    model_data.resolve(models, &surfaces, bool_func);*/
 }
 
 fn init_mesh(bbox: BBox, n_surfaces: usize) -> TetSet {
