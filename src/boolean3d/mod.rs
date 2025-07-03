@@ -11,6 +11,7 @@ use brep::SurfRep;
 use parallel_adaptive_subdivide::build_tet_from_box;
 use tinyvec::TinyVec;
 
+use std::time::Instant;
 use std::{alloc::Allocator, any::TypeId, collections::HashMap};
 
 use adaptive_subdivide::{SurfaceData, adaptive_subdivide};
@@ -53,15 +54,18 @@ where
         })
         .collect_vec();
 
-    build_tet_from_box(
+    let mut root_tet =build_tet_from_box(
         BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)),
         &surfaces,
     );
-    let mut tets = init_mesh(
-        BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)),
-        surfaces.len(),
-    );
-    write_obj("cube.obj", &tets.points, &tets.mesh);
+    let start = Instant::now();
+    root_tet.subdivide(&surface_datum, eps * eps);
+    println!("subdivide time: {:?}", start.elapsed());
+    // let mut tets = init_mesh(
+    //     BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)),
+    //     surfaces.len(),
+    // );
+    // write_obj("cube.obj", &tets.points, &tets.mesh);
     /*let vals = adaptive_subdivide(&mut tets, surface_datum, eps * eps);
 
     let iso_surf_mesh = extract_iso_surface(&tets, vals);

@@ -1,7 +1,8 @@
-use std::{default, f64::consts::{SQRT_2, SQRT_3}};
+use std::{f64::consts::{SQRT_2, SQRT_3}, sync::atomic::AtomicU64};
 
 use hashbrown::HashSet;
 use itertools::Itertools;
+use rayon::join;
 use tinyvec::TinyVec;
 
 use crate::{
@@ -20,13 +21,24 @@ struct SurfaceEvaluation {
     evaluation: [[f64; 4]; 4],
 }
 
-#[derive(Default)]
-struct Tet {
+pub(crate) struct Tet {
+    tid: usize,
     points: [[f64; 3]; 4],
     surface_evaluations: TinyVec<[SurfaceEvaluation; 3]>,
-    opposite_faces: [TinyVec<[(Box<Tet>, u8); 2]>; 4],
     edge_square_lengths: [f64; 6],
-    sub_tets: TinyVec<[(Box<Tet>, u8); 2]>,
+    sub_tets: Option<TinyVec<[Box<Tet>; 2]>>,
+}
+
+impl Default for Tet {
+    fn default() -> Self {
+        Self {
+            tid: 0,
+            points: [[0.0; 3]; 4],
+            surface_evaluations: TinyVec::new(),
+            edge_square_lengths: [0.0; 6],
+            sub_tets: None,
+        }
+    }
 }
 
 const C: [[f64; 4]; 16] = [
@@ -47,8 +59,20 @@ const C: [[f64; 4]; 16] = [
     [1.0 / 3.0, 1.0 / 3.0, 0.0, 1.0 / 3.0],
     [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0, 0.0],
 ];
+
+#[inline(always)]
+fn tet_edge_index(pa: usize, pb: usize) -> usize {
+    pa + pb - (pa.min(pb) == 0) as usize
+}
+// static COUNTER: AtomicU64 = AtomicU64::new(0);
+// fn increment() {
+//     COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+// }
+
 impl Tet {
-    fn subdivide(&mut self, srf_datum: &[SurfaceData], sq_eps: f64) {
+    pub(crate) fn subdivide(&mut self, srf_datum: &[SurfaceData], sq_eps: f64) {
+        // println!("the tet size is {:?}", COUNTER);
+        // increment();
         if !self.subdividable(srf_datum, sq_eps) {
             return;
         }
@@ -72,18 +96,104 @@ impl Tet {
         let new_pt = interpolate::<3>(&self.points[table[0]], &self.points[table[1]], 0.5);
         let half_square_length = self.edge_square_lengths[largest_edge_idx] / 4.0;
 
-        let len1 = sub_short::<3, _>(&new_pt, &self.points[table[1]]);
-        let len2 = sub_short::<3, _>(&new_pt, &self.points[table[2]]);
+        let len1 = square_norm(&sub_short::<3, _>(&new_pt, &self.points[table[2]]));
+        let len2 = square_norm(&sub_short::<3, _>(&new_pt, &self.points[table[3]]));
 
-        let create_tet = |is_first| {
-            let points = [[f64; 3]; 4]::default();
+        let mut tet1 = {
+            let points = [
+                self.points[table[0]],
+                self.points[table[2]],
+                self.points[table[3]],
+                new_pt,
+            ];
+            let edge_square_lengths = [
+                self.edge_square_lengths[tet_edge_index(table[0], table[2])],
+                self.edge_square_lengths[tet_edge_index(table[0], table[3])],
+                half_square_length,
+                self.edge_square_lengths[tet_edge_index(table[2], table[3])],
+                len1,
+                len2,
+            ];
+            let surface_evaluations =
+                TinyVec::from_iter(self.surface_evaluations.iter().map(|eval| {
+                    let sid = eval.sid;
+                    let srf = srf_datum[sid].surf;
+                    SurfaceEvaluation {
+                        sid,
+                        evaluation: [
+                            eval.evaluation[table[0]],
+                            eval.evaluation[table[2]],
+                            eval.evaluation[table[3]],
+                            srf.eval(&new_pt),
+                        ],
+                    }
+                }));
+
+            Tet {
+                tid: self.tid + 1,
+                points,
+                edge_square_lengths,
+                surface_evaluations,
+                sub_tets: None,
+            }
         };
+
+        let mut tet2 = {
+            let points = [
+                self.points[table[1]],
+                self.points[table[3]],
+                self.points[table[2]],
+                new_pt,
+            ];
+            let edge_square_lengths = [
+                self.edge_square_lengths[tet_edge_index(table[1], table[3])],
+                self.edge_square_lengths[tet_edge_index(table[1], table[2])],
+                half_square_length,
+                self.edge_square_lengths[tet_edge_index(table[3], table[2])],
+                len2,
+                len1,
+            ];
+            let surface_evaluations = TinyVec::from_iter(
+                self.surface_evaluations
+                    .iter()
+                    .zip(&tet1.surface_evaluations)
+                    .map(|(eval, tet1_eval)| SurfaceEvaluation {
+                        sid: eval.sid,
+                        evaluation: [
+                            eval.evaluation[table[0]],
+                            eval.evaluation[table[3]],
+                            eval.evaluation[table[2]],
+                            tet1_eval.evaluation[3],
+                        ],
+                    }),
+            );
+            Tet {
+                tid: self.tid + 1,
+                points,
+                edge_square_lengths,
+                surface_evaluations,
+                sub_tets: None,
+            }
+        };
+
+        // if self.tid < 24 {
+            // join(
+            //     || tet1.subdivide(srf_datum, sq_eps),
+            //     || tet2.subdivide(srf_datum, sq_eps),
+            // );
+        // } else {
+            tet1.subdivide(srf_datum, sq_eps);
+            tet2.subdivide(srf_datum, sq_eps);
+        // }
+        // // println!("Tet ID: {}", self.tid);
+
+        self.sub_tets = Some(TinyVec::from_iter([Box::new(tet1), Box::new(tet2)]));
     }
     fn subdividable(&mut self, srf_datum: &[SurfaceData], sq_eps: f64) -> bool {
         let tet_box = BBox::from_iter(&self.points);
 
         let mut contain_some_srf = false;
-        self.surface_evaluations.retain(|&eval| {
+        self.surface_evaluations.retain(|eval| {
             let srf_data = &srf_datum[eval.sid];
             if tet_box.contains(&srf_data.bbox) {
                 contain_some_srf = true;
@@ -348,16 +458,11 @@ pub(super) fn build_tet_from_box(bbox: BBox, surfaces: &[Surf]) -> Tet {
                 }),
         );
     Tet {
+        tid: 0,
         points: tet_points,
         surface_evaluations,
         edge_square_lengths,
-        opposite_faces: [
-            TinyVec::new(),
-            TinyVec::new(),
-            TinyVec::new(),
-            TinyVec::new(),
-        ],
-        sub_tets: TinyVec::new(),
+        sub_tets: None,
     }
 }
 
