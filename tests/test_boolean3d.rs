@@ -120,7 +120,6 @@ fn get_polyline_from_file(name: &str) -> Vec<f64> {
 
 #[test]
 fn test_boolean1() {
-
     let model1 = {
         let face_surfaces = vec![
             (
@@ -251,6 +250,6 @@ fn test_boolean1() {
     boolean3d(
         vec![model1, model2],
         |is_kept_arr| is_kept_arr[0] && !is_kept_arr[1],
-        0.001,
+        0.004,
     );
 }

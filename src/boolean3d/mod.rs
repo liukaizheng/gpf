@@ -8,7 +8,7 @@ mod tet_set;
 
 pub use brep::BrepModel;
 use brep::SurfRep;
-use parallel_adaptive_subdivide::build_tet_from_box;
+use parallel_adaptive_subdivide::{build_info, build_tet_from_box};
 use tinyvec::TinyVec;
 
 use std::time::Instant;
@@ -54,12 +54,13 @@ where
         })
         .collect_vec();
 
-    let mut root_tet =build_tet_from_box(
+    let mut root_tet = build_tet_from_box(
         BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)),
         &surfaces,
     );
     let start = Instant::now();
     root_tet.subdivide(&surface_datum, eps * eps);
+    build_info(&root_tet);
     println!("subdivide time: {:?}", start.elapsed());
     // let mut tets = init_mesh(
     //     BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)),

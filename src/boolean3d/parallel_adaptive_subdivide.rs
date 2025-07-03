@@ -1,11 +1,16 @@
-use std::{f64::consts::{SQRT_2, SQRT_3}, sync::atomic::AtomicU64};
+use std::{
+    collections::VecDeque,
+    f64::consts::{SQRT_2, SQRT_3},
+    time::Instant,
+};
 
 use hashbrown::HashSet;
 use itertools::Itertools;
-use rayon::join;
+use rayon::{current_thread_index, join, max_num_threads};
 use tinyvec::TinyVec;
 
 use crate::{
+    INVALID_IND,
     boolean3d::adaptive_subdivide::test_distance_1,
     geometry::{BBox, Surf, Surface},
     math::{cross, dot, interpolate, square_norm, sub_short},
@@ -21,8 +26,25 @@ struct SurfaceEvaluation {
     evaluation: [[f64; 4]; 4],
 }
 
+struct ParallelInfo {
+    start: Instant,
+    end: Instant,
+    thread_idx: usize,
+}
+
+impl Default for ParallelInfo {
+    fn default() -> Self {
+        Self {
+            start: Instant::now(),
+            end: Instant::now(),
+            thread_idx: current_thread_index().unwrap_or(INVALID_IND),
+        }
+    }
+}
+
 pub(crate) struct Tet {
     tid: usize,
+    info: ParallelInfo,
     points: [[f64; 3]; 4],
     surface_evaluations: TinyVec<[SurfaceEvaluation; 3]>,
     edge_square_lengths: [f64; 6],
@@ -33,6 +55,7 @@ impl Default for Tet {
     fn default() -> Self {
         Self {
             tid: 0,
+            info: ParallelInfo::default(),
             points: [[0.0; 3]; 4],
             surface_evaluations: TinyVec::new(),
             edge_square_lengths: [0.0; 6],
@@ -73,7 +96,13 @@ impl Tet {
     pub(crate) fn subdivide(&mut self, srf_datum: &[SurfaceData], sq_eps: f64) {
         // println!("the tet size is {:?}", COUNTER);
         // increment();
+        self.info.start = Instant::now();
+        let thread_idx = current_thread_index();
+        if let Some(thread_idx) = thread_idx {
+            self.info.thread_idx = thread_idx;
+        }
         if !self.subdividable(srf_datum, sq_eps) {
+            self.info.end = Instant::now();
             return;
         }
 
@@ -135,6 +164,7 @@ impl Tet {
                 edge_square_lengths,
                 surface_evaluations,
                 sub_tets: None,
+                info: ParallelInfo::default(),
             }
         };
 
@@ -169,21 +199,23 @@ impl Tet {
             );
             Tet {
                 tid: self.tid + 1,
+                info: ParallelInfo::default(),
                 points,
                 edge_square_lengths,
                 surface_evaluations,
                 sub_tets: None,
             }
         };
+        self.info.end = Instant::now();
 
         // if self.tid < 24 {
-            // join(
-            //     || tet1.subdivide(srf_datum, sq_eps),
-            //     || tet2.subdivide(srf_datum, sq_eps),
-            // );
+        join(
+            || tet1.subdivide(srf_datum, sq_eps),
+            || tet2.subdivide(srf_datum, sq_eps),
+        );
         // } else {
-            tet1.subdivide(srf_datum, sq_eps);
-            tet2.subdivide(srf_datum, sq_eps);
+        // tet1.subdivide(srf_datum, sq_eps);
+        // tet2.subdivide(srf_datum, sq_eps);
         // }
         // // println!("Tet ID: {}", self.tid);
 
@@ -459,6 +491,7 @@ pub(super) fn build_tet_from_box(bbox: BBox, surfaces: &[Surf]) -> Tet {
         );
     Tet {
         tid: 0,
+        info: ParallelInfo::default(),
         points: tet_points,
         surface_evaluations,
         edge_square_lengths,
@@ -477,4 +510,57 @@ fn write_tet(points_arr: &[[f64; 3]; 4]) {
     writeln!(&mut file, "f 1 3 4").unwrap();
     writeln!(&mut file, "f 3 2 4").unwrap();
     writeln!(&mut file, "f 2 1 4").unwrap();
+}
+
+pub fn build_info(tet: &Tet) {
+    let mut set = HashSet::new();
+    let mut queue = VecDeque::new();
+    queue.push_back(tet);
+    let mut min_instant: Option<Instant> = None;
+    loop {
+        if queue.is_empty() {
+            break;
+        }
+        let tet = queue.pop_front().unwrap();
+        if tet.info.thread_idx != INVALID_IND {
+            set.insert(tet.info.thread_idx);
+            if let Some(instant) = min_instant {
+                if instant.cmp(&tet.info.start).is_gt() {
+                    min_instant = Some(tet.info.start);
+                }
+            } else {
+                min_instant = Some(tet.info.start);
+            }
+        }
+
+        if let Some(sub_tets) = &tet.sub_tets {
+            for t in sub_tets {
+                queue.push_back(t);
+            }
+        }
+    }
+
+    queue.push_back(tet);
+    let mut records = vec![Vec::new(); 8];
+    loop {
+        if queue.is_empty() {
+            break;
+        }
+        let tet = queue.pop_front().unwrap();
+        if tet.info.thread_idx != INVALID_IND {
+            set.insert(tet.info.thread_idx);
+            let start = (tet.info.start - min_instant.unwrap()).as_secs_f64();
+            let end = (tet.info.end - min_instant.unwrap()).as_secs_f64();
+            records[tet.info.thread_idx].push([start, end]);
+        }
+
+        if let Some(sub_tets) = &tet.sub_tets {
+            for t in sub_tets {
+                queue.push_back(t);
+            }
+        }
+    }
+    let w = 1024.0;
+    let h = 1024.0;
+    let image = image::ImageBuffer::new(w as u32, h as u32);
 }
