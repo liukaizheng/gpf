@@ -7,17 +7,22 @@ mod tet_set;
 
 pub use brep::BrepModel;
 use brep::SurfRep;
+use hashbrown::HashMap;
 use tinyvec::TinyVec;
 
-use std::{alloc::Allocator, any::TypeId, collections::HashMap};
+use std::{alloc::Allocator, any::TypeId};
 
-use adaptive_subdivide::{SurfaceData, adaptive_subdivide};
+use adaptive_subdivide::{
+    SurfaceData, SurfaceEvaluation, Tet, TetComplex, TetHandle, adaptive_subdivide,
+};
 use ar_in_tet::{Arrangement, IsoVert, extract_iso_surface};
 use extract_cells::extract_cells;
 use itertools::Itertools;
 use tet_set::TetSet;
 
-use crate::geometry::Plane;
+use crate::geometry::{Plane, Surface};
+use crate::math::{square_norm, sub_short};
+use crate::point;
 use crate::{
     INVALID_IND, Tolerance,
     geometry::{BBox, Surf, UniqueSurface},
@@ -51,6 +56,11 @@ where
         })
         .collect_vec();
 
+    let mut tet_complex = init_tet_complex(
+        BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)),
+        &surfaces,
+    );
+
     let mut tets = init_mesh(
         BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)),
         surfaces.len(),
@@ -63,6 +73,154 @@ where
 
     let model_data = extract_cells(iso_surf_mesh, &tets, surfaces.len());
     model_data.resolve(models, &surfaces, bool_func);
+}
+
+fn init_tet_complex(bbox: BBox, surfaces: &[Surf]) -> TetComplex {
+    const TETS: [[usize; 4]; 6] = [
+        [0, 1, 7, 3],
+        [7, 0, 5, 1],
+        [4, 0, 5, 7],
+        [4, 6, 0, 7],
+        [0, 7, 6, 2],
+        [7, 2, 0, 3],
+    ];
+    const TET_FACES: [[usize; 3]; 4] = [[1, 3, 2], [0, 2, 3], [0, 3, 1], [0, 1, 2]];
+    let points = vec![
+        bbox.min[0],
+        bbox.min[1],
+        bbox.min[2],
+        bbox.min[0],
+        bbox.min[1],
+        bbox.max[2],
+        bbox.min[0],
+        bbox.max[1],
+        bbox.min[2],
+        bbox.min[0],
+        bbox.max[1],
+        bbox.max[2],
+        bbox.max[0],
+        bbox.min[1],
+        bbox.min[2],
+        bbox.max[0],
+        bbox.min[1],
+        bbox.max[2],
+        bbox.max[0],
+        bbox.max[1],
+        bbox.min[2],
+        bbox.max[0],
+        bbox.max[1],
+        bbox.max[2],
+    ];
+
+    let hash_seg = |va, vb| {
+        if va < vb { va << 3 | vb } else { vb << 3 | va }
+    };
+    let hash_tri = |mut verts: [usize; 3]| {
+        verts.sort();
+        if verts[2] == INVALID_IND {
+            verts[2] = 8;
+        }
+        (verts[0] << 6) | (verts[1] << 3) | verts[2]
+    };
+
+    let mut edge_square_len_map = HashMap::<usize, f64>::with_capacity(19);
+    let mut face_tet_map = HashMap::<usize, [TetHandle; 2]>::with_capacity(18);
+
+    let mut tets = Vec::from_iter(TETS.into_iter().enumerate().map(|(tid, tet_verts)| {
+        let mut edge_square_lengths = [0.0; 6];
+        for ((va, vb), edge_len) in tet_verts
+            .into_iter()
+            .tuple_combinations()
+            .zip(&mut edge_square_lengths)
+        {
+            *edge_len = *edge_square_len_map
+                .entry(hash_seg(va, vb))
+                .or_insert(square_norm(&sub_short::<3, _>(
+                    point::<3>(&points, va),
+                    point::<3>(&points, vb),
+                )));
+        }
+        let tet_points = tet_verts.map(|idx| point::<3>(&points, idx));
+        let surface_evaluations = TinyVec::from_iter(surfaces.iter().enumerate().map(
+            |(sid, srf)| SurfaceEvaluation {
+                sid,
+                evaluation: tet_points.map(|p| srf.eval(p)),
+            },
+        ));
+        for (i, face_verts) in TET_FACES
+            .map(|face_verts| face_verts.map(|idx| tet_verts[idx]))
+            .into_iter()
+            .enumerate()
+        {
+            match face_tet_map.entry(hash_tri(face_verts)) {
+                hashbrown::hash_map::Entry::Occupied(mut entry) => {
+                    let handle = &mut entry.get_mut()[1];
+                    handle.ver = i;
+                    handle.tid = tid;
+                }
+                hashbrown::hash_map::Entry::Vacant(entry) => {
+                    entry.insert([TetHandle { tid, ver: i }, TetHandle::default()]);
+                }
+            }
+        }
+
+        Tet {
+            vertices: tet_verts,
+            neighbors: Default::default(),
+            edge_square_lengths,
+            surface_evaluations,
+        }
+    }));
+
+    let mut bdy_face_tet_map = HashMap::<usize, [TetHandle; 2]>::new();
+
+    for [h1, h2] in face_tet_map.values_mut() {
+        if h2.tid != INVALID_IND {
+            continue;
+        }
+        let new_tid = tets.len();
+        h2.tid = new_tid;
+        h2.ver = 3;
+        let vertices = {
+            let tet = &tets[h1.tid];
+            let vs = TET_FACES[h1.ver].map(|v| tet.vertices[v]);
+            [vs[0], vs[2], vs[1], INVALID_IND]
+        };
+
+        for (ver, face_verts) in TET_FACES[..3].iter().enumerate() {
+            let face_verts = face_verts.map(|v| vertices[v]);
+            match bdy_face_tet_map.entry(hash_tri(face_verts)) {
+                hashbrown::hash_map::Entry::Occupied(mut entry) => {
+                    let handle = &mut entry.get_mut()[1];
+                    handle.ver = ver;
+                    handle.tid = new_tid;
+                }
+                hashbrown::hash_map::Entry::Vacant(entry) => {
+                    entry.insert([TetHandle { tid: new_tid, ver }, TetHandle::default()]);
+                }
+            }
+        }
+        tets.push(Tet {
+            vertices,
+            neighbors: Default::default(),
+            edge_square_lengths: [0.0; 6],
+            surface_evaluations: TinyVec::new(),
+        });
+    }
+
+    face_tet_map.extend(bdy_face_tet_map);
+
+    for [h1, h2] in face_tet_map.into_values() {
+        unsafe {
+            let start = tets.as_mut_ptr();
+            let n1 = &mut (*start.add(h1.tid)).neighbors[h1.ver];
+            let n2 = &mut (*start.add(h2.tid)).neighbors[h2.ver];
+            *n1 = h2;
+            *n2 = h1;
+        }
+    }
+
+    TetComplex { points, tets }
 }
 
 fn init_mesh(bbox: BBox, n_surfaces: usize) -> TetSet {

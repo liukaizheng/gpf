@@ -41,13 +41,10 @@ pub struct RBTree<V, A: Allocator + Copy> {
 }
 
 impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
-
     pub fn into_iter(self) -> impl Iterator<Item = V> {
-        self.nodes.into_iter().filter_map(|node| {
-            match node.color {
-                Color::Gray => None,
-                _ => Some(node.value)
-            }
+        self.nodes.into_iter().filter_map(|node| match node.color {
+            Color::Gray => None,
+            _ => Some(node.value),
         })
     }
     /// Returns an iterator over the values in the tree
@@ -242,6 +239,14 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
         let new_node_id = self.new_node(val);
         self.bst_insert(new_node_id);
         self.insert_case1(new_node_id);
+        println!("the root is {}", self.root);
+        for (i, node) in self.nodes.iter().enumerate() {
+            println!(
+                "node: {}, parent: {}, left: {}, right: {}",
+                i, node.parent, node.left, node.right
+            );
+        }
+        println!("");
     }
 
     pub fn bst_insert(&mut self, new_node_id: usize) {

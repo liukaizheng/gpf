@@ -1,7 +1,7 @@
 use core::panic;
 use std::{alloc::Allocator, collections::BinaryHeap};
 
-use hashbrown::HashSet;
+use hashbrown::{HashMap, HashSet};
 
 use bumpalo::Bump;
 use itertools::Itertools;
@@ -12,9 +12,409 @@ use crate::{
     geometry::{BBox, Surf, Surface},
     math::{cross, cross_in, dot, square_norm, sub_short},
     mesh::{EdgeId, Mesh},
-    point_2, point_3,
+    point, point_2, point_3,
     triangle::{convex_2, convex_3},
 };
+
+#[derive(Default)]
+pub(crate) struct SurfaceEvaluation {
+    pub(crate) sid: usize,
+    pub(crate) evaluation: [[f64; 4]; 4],
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct TetHandle {
+    pub(crate) tid: usize,
+    pub(crate) ver: usize,
+}
+
+impl Default for TetHandle {
+    fn default() -> Self {
+        Self {
+            tid: INVALID_IND,
+            ver: 12,
+        }
+    }
+}
+
+#[inline]
+fn next(ver: usize) -> usize {
+    (ver + 4) % 12
+}
+
+#[inline]
+fn prev(ver: usize) -> usize {
+    (ver + 8) % 12
+}
+
+#[inline]
+fn sym(ver: usize) -> usize {
+    const SYM_TBL: [usize; 12] = [9, 6, 11, 4, 3, 7, 1, 5, 10, 0, 8, 2];
+    SYM_TBL[ver]
+}
+
+#[inline]
+fn org(ver: usize) -> usize {
+    const ORG_PIVOT: [usize; 12] = [3, 3, 1, 1, 2, 0, 0, 2, 1, 2, 3, 0];
+    ORG_PIVOT[ver]
+}
+#[inline]
+fn dest(ver: usize) -> usize {
+    const DEST_PIVOT: [usize; 12] = [2, 0, 0, 2, 1, 2, 3, 0, 3, 3, 1, 1];
+    DEST_PIVOT[ver]
+}
+#[inline]
+fn apex(ver: usize) -> usize {
+    const APEX_PIVOT: [usize; 12] = [1, 2, 3, 0, 3, 3, 1, 1, 2, 0, 0, 2];
+    APEX_PIVOT[ver]
+}
+#[inline]
+fn oppo(ver: usize) -> usize {
+    const OPPO_PIVOT: [usize; 12] = [0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3];
+    OPPO_PIVOT[ver]
+}
+
+pub(crate) struct Tet {
+    pub(crate) vertices: [usize; 4],
+    pub(crate) neighbors: [TetHandle; 4],
+    pub(crate) surface_evaluations: TinyVec<[SurfaceEvaluation; 3]>,
+    pub(crate) edge_square_lengths: [f64; 6],
+}
+
+impl Default for Tet {
+    fn default() -> Self {
+        Self {
+            vertices: [INVALID_IND; 4],
+            neighbors: [
+                TetHandle::default(),
+                TetHandle::default(),
+                TetHandle::default(),
+                TetHandle::default(),
+            ],
+            surface_evaluations: TinyVec::new(),
+            edge_square_lengths: [0.0; 6],
+        }
+    }
+}
+
+impl Tet {
+    #[inline]
+    fn org(&self, hv: usize) -> usize {
+        self.vertices[org(hv)]
+    }
+    #[inline]
+    fn dest(&self, hv: usize) -> usize {
+        self.vertices[dest(hv)]
+    }
+    #[inline]
+    fn apex(&self, hv: usize) -> usize {
+        self.vertices[apex(hv)]
+    }
+    #[inline]
+    fn oppo(&self, hv: usize) -> usize {
+        self.vertices[oppo(hv)]
+    }
+
+    #[inline]
+    fn largest_edge(&self) -> usize {
+        let idx = self
+            .edge_square_lengths
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .map(|(i, _)| i)
+            .unwrap();
+        [11, 5, 6, 3, 8, 9][idx]
+    }
+
+    fn subdividable(&mut self, points: &[f64], srf_datum: &[SurfaceData], sq_eps: f64) -> bool {
+        if self.vertices[3] == INVALID_IND {
+            return false;
+        }
+
+        let tet_points = self.vertices.map(|vid| point::<3>(points, vid));
+        let tet_box = BBox::from_iter(tet_points);
+
+        let mut contain_some_srf = false;
+        self.surface_evaluations.retain(|eval| {
+            let srf_data = &srf_datum[eval.sid];
+            if tet_box.contains(&srf_data.bbox) {
+                contain_some_srf = true;
+                return true;
+            }
+            if !tet_box.intersects(&srf_data.bbox) {
+                return false;
+            }
+            if srf_data.sub_bboxes.len() > 1 {
+                if srf_data
+                    .sub_bboxes
+                    .iter()
+                    .any(|bbox| tet_box.contains(bbox))
+                {
+                    contain_some_srf = true;
+                    return true;
+                }
+                for bbox in &srf_data.sub_bboxes {
+                    if tet_box.intersects(bbox) {
+                        return true;
+                    }
+                }
+                false
+            } else {
+                true
+            }
+        });
+        if contain_some_srf {
+            return true;
+        }
+
+        if self.surface_evaluations.len() < 1 {
+            return false;
+        }
+
+        let trans_vmat = [
+            sub_short::<3, _>(&tet_points[1], &tet_points[0]),
+            sub_short::<3, _>(&tet_points[2], &tet_points[0]),
+            sub_short::<3, _>(&tet_points[3], &tet_points[0]),
+            sub_short::<3, _>(&tet_points[2], &tet_points[1]),
+            sub_short::<3, _>(&tet_points[3], &tet_points[1]),
+            sub_short::<3, _>(&tet_points[3], &tet_points[2]),
+        ];
+
+        let sq_det_vmat = {
+            let d = det(&trans_vmat);
+            d * d
+        };
+        let adj_vmat = [
+            cross(&trans_vmat[1], &trans_vmat[2]),
+            cross(&trans_vmat[2], &trans_vmat[0]),
+            cross(&trans_vmat[0], &trans_vmat[1]),
+        ];
+
+        let n_surfaces = self.surface_evaluations.len();
+
+        let mut interpolant_vec = Vec::with_capacity(n_surfaces);
+        let mut interpolant_diff_vec = Vec::with_capacity(n_surfaces);
+        let mut val_diff_vec = Vec::with_capacity(n_surfaces);
+        for eval in self.surface_evaluations.iter() {
+            let tet_vals_grads = &eval.evaluation;
+
+            let mut vals = Vec::with_capacity(20);
+            vals.extend(tet_vals_grads.iter().map(|vals_grads| vals_grads[0]));
+
+            let v0 = tet_vals_grads[0][0];
+            let g = &tet_vals_grads[0][1..];
+            const S: f64 = 1.0 / 3.0;
+            vals.extend([
+                v0 + S * dot(g, &trans_vmat[0]),
+                v0 + S * dot(g, &trans_vmat[1]),
+                v0 + S * dot(g, &trans_vmat[2]),
+            ]);
+
+            let v1 = tet_vals_grads[1][0];
+            let g = &tet_vals_grads[1][1..];
+            vals.extend([
+                v1 + S * dot(g, &trans_vmat[3]),
+                v1 + S * dot(g, &trans_vmat[4]),
+                v1 - S * dot(g, &trans_vmat[0]),
+            ]);
+
+            let v2 = tet_vals_grads[2][0];
+            let g = &tet_vals_grads[2][1..];
+            vals.extend([
+                v2 + S * dot(g, &trans_vmat[5]),
+                v2 - S * dot(g, &trans_vmat[1]),
+                v2 - S * dot(g, &trans_vmat[3]),
+            ]);
+
+            let v3 = tet_vals_grads[3][0];
+            let g = &tet_vals_grads[3][1..];
+            vals.extend([
+                v3 - S * dot(g, &trans_vmat[2]),
+                v3 - S * dot(g, &trans_vmat[4]),
+                v3 - S * dot(g, &trans_vmat[5]),
+            ]);
+
+            vals.push(
+                ((vals[7] + vals[8] + vals[10] + vals[12] + vals[14] + vals[15]) * 1.5
+                    - vals[1]
+                    - vals[2]
+                    - vals[3])
+                    / 6.0,
+            );
+            vals.push(
+                ((vals[5] + vals[6] + vals[10] + vals[11] + vals[13] + vals[15]) * 1.5
+                    - vals[0]
+                    - vals[2]
+                    - vals[3])
+                    / 6.0,
+            );
+            vals.push(
+                ((vals[4] + vals[6] + vals[8] + vals[9] + vals[13] + vals[14]) * 1.5
+                    - vals[0]
+                    - vals[1]
+                    - vals[3])
+                    / 6.0,
+            );
+            vals.push(
+                ((vals[4] + vals[5] + vals[7] + vals[9] + vals[11] + vals[12]) * 1.5
+                    - vals[0]
+                    - vals[1]
+                    - vals[2])
+                    / 6.0,
+            );
+
+            let mut diffs = Vec::with_capacity(16);
+            for i in 0..16 {
+                let c = &C[i];
+                diffs.push(v0 * c[0] + v1 * c[1] + v2 * c[2] + v3 * c[3] - vals[i + 4]);
+            }
+
+            let val_diff = [v1 - v0, v2 - v0, v3 - v0];
+            let is_active = *vals
+                .iter()
+                .max_by(|x, y| x.partial_cmp(y).unwrap())
+                .unwrap()
+                > 0.0
+                && *vals
+                    .iter()
+                    .min_by(|x, y| x.partial_cmp(y).unwrap())
+                    .unwrap()
+                    < 0.0;
+            if is_active {
+                if test_distance_1(&adj_vmat, val_diff, &diffs, sq_det_vmat, sq_eps) {
+                    return true;
+                }
+                interpolant_vec.push(vals);
+                interpolant_diff_vec.push(diffs);
+                val_diff_vec.push(val_diff);
+            }
+        }
+
+        if interpolant_vec.len() < 2 {
+            return false;
+        }
+
+        let mut pair_set = HashSet::new();
+        for ((i, v1), (j, v2)) in interpolant_vec.iter().enumerate().tuple_windows() {
+            let mut points = Vec::with_capacity(42);
+            points.extend(v1.iter().interleave(v2).map(|v| *v));
+
+            if !contain_zero_2(points, std::alloc::Global) {
+                continue;
+            }
+
+            pair_set.insert([i, j]);
+
+            let h = [val_diff_vec[i], val_diff_vec[j]];
+            let b = [
+                interpolant_diff_vec[i].as_slice(),
+                interpolant_diff_vec[j].as_slice(),
+            ];
+            if test_distance_2(&adj_vmat, &h, b, sq_det_vmat, sq_eps) {
+                return true;
+            }
+        }
+
+        for ((i, v1), (j, v2), (k, v3)) in interpolant_vec.iter().enumerate().tuple_windows() {
+            if !pair_set.contains(&[i, j])
+                || !pair_set.contains(&[i, k])
+                || !pair_set.contains(&[j, k])
+            {
+                continue;
+            }
+            let mut points = Vec::with_capacity(63);
+            points.extend(
+                v1.iter()
+                    .zip(v2)
+                    .zip(v3)
+                    .map(|((a, b), c)| [*a, *b, *c])
+                    .flatten(),
+            );
+
+            if !contain_zero_3(points, std::alloc::Global) {
+                continue;
+            }
+
+            let h = [val_diff_vec[i], val_diff_vec[j], val_diff_vec[k]];
+            let b = [
+                interpolant_diff_vec[i].as_slice(),
+                interpolant_diff_vec[j].as_slice(),
+                interpolant_diff_vec[k].as_slice(),
+            ];
+            if test_distance_3(&adj_vmat, &h, b, sq_det_vmat, sq_eps) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn subdivide(
+        &mut self,
+        hv1: usize,
+        points: &[f64],
+        srf_datum: &[SurfaceData],
+        length_map: &mut HashMap<usize, f64>,
+        evaluation_map: &mut HashMap<usize, [f64; 4]>,
+    ) {
+        const VER_TO_EDGE: [usize; 12] = [5, 2, 0, 3, 3, 1, 2, 1, 4, 5, 4, 0];
+        // const T: [[usize; 4]; 6] = [
+        //     [0, 1, 2, 3],
+        //     [0, 2, 3, 1],
+        //     [0, 3, 1, 2],
+        //     [1, 2, 0, 3],
+        //     [1, 3, 2, 0],
+        //     [2, 3, 0, 1],
+        // ];
+
+        let hv2 = sym(hv1);
+        let indices = [org(hv1), dest(hv1), apex(hv1), oppo(hv1)];
+        let vs: [usize; 5] = [
+            self.vertices[indices[0]],
+            self.vertices[indices[1]],
+            self.vertices[indices[2]],
+            self.vertices[indices[3]],
+            points.len() / 3 - 1,
+        ];
+
+        let half_len = *length_map
+            .entry(vs[0])
+            .or_insert(self.edge_square_lengths[VER_TO_EDGE[hv1]] * 0.25);
+        let v2_v4_len = *length_map
+            .entry(vs[2])
+            .or_insert(square_norm(&sub_short::<3, _>(
+                point::<3>(points, vs[2]),
+                &points[(points.len() - 3)..],
+            )));
+        let v3_v4_len = *length_map
+            .entry(vs[3])
+            .or_insert(square_norm(&sub_short::<3, _>(
+                point::<3>(points, vs[3]),
+                &points[(points.len() - 3)..],
+            )));
+
+        let get_srf_eval = |indices: [usize; 4]| {
+            self.surface_evaluations.iter().map();
+        };
+
+        if vs[2] == INVALID_IND {
+            let vertices = [1, 4, 3, 2].map(|i| vs[i]);
+            let edge_square_lengths = [
+                half_len,
+                self.edge_square_lengths[4],
+                self.edge_square_lengths[3],
+                v3_v4_len,
+                v2_v4_len,
+                self.edge_square_lengths[5],
+            ];
+        }
+    }
+}
+
+pub(crate) struct TetComplex {
+    pub(crate) points: Vec<f64>,
+    pub(crate) tets: Vec<Tet>,
+}
 
 use super::TetSet;
 
@@ -57,6 +457,41 @@ struct SubdivisionData<'a> {
     surface_datum: Vec<SurfaceData<'a>>,
     vals_and_grads: Vec<Vec<[f64; 4]>>,
     queue: BinaryHeap<EdgeAndLen>,
+}
+
+struct TetEdgeAndLen {
+    handle: TetHandle,
+    len: f64,
+}
+
+impl PartialEq for TetEdgeAndLen {
+    #[inline(always)]
+    fn eq(&self, other: &Self) -> bool {
+        self.handle == other.handle && self.len == other.len
+    }
+}
+
+impl Eq for TetEdgeAndLen {}
+
+impl PartialOrd for TetEdgeAndLen {
+    #[inline(always)]
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.len.partial_cmp(&other.len)
+    }
+}
+
+impl Ord for TetEdgeAndLen {
+    #[inline(always)]
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(&other).unwrap()
+    }
+}
+
+pub(super) fn adaptive_subdivide1<'a>(
+    tets: &mut TetComplex,
+    surface_datum: Vec<SurfaceData<'a>>,
+    sq_eps: f64,
+) {
 }
 
 pub(super) fn adaptive_subdivide<'a>(
