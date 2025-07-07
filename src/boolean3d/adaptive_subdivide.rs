@@ -81,6 +81,7 @@ pub(crate) struct Tet {
     pub(crate) edge_square_lengths: [f64; 6],
 }
 
+const VER_TO_EDGE: [usize; 12] = [5, 2, 0, 3, 3, 1, 2, 1, 4, 5, 4, 0];
 impl Default for Tet {
     fn default() -> Self {
         Self {
@@ -116,7 +117,7 @@ impl Tet {
     }
 
     #[inline]
-    fn largest_edge(&self) -> usize {
+    fn largest_edge(&self) -> (usize, f64) {
         let idx = self
             .edge_square_lengths
             .iter()
@@ -124,7 +125,12 @@ impl Tet {
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
             .map(|(i, _)| i)
             .unwrap();
-        [11, 5, 6, 3, 8, 9][idx]
+        ([11, 5, 6, 3, 8, 9][idx], self.edge_square_lengths[idx])
+    }
+
+    #[inline]
+    fn edge_square_len(&self, ver: usize) -> f64 {
+        self.edge_square_lengths[VER_TO_EDGE[ver]]
     }
 
     fn subdividable(&mut self, points: &[f64], srf_datum: &[SurfaceData], sq_eps: f64) -> bool {
@@ -356,18 +362,8 @@ impl Tet {
         srf_datum: &[SurfaceData],
         length_map: &mut HashMap<usize, f64>,
         evaluation_map: &mut HashMap<usize, [f64; 4]>,
-    ) {
-        const VER_TO_EDGE: [usize; 12] = [5, 2, 0, 3, 3, 1, 2, 1, 4, 5, 4, 0];
-        // const T: [[usize; 4]; 6] = [
-        //     [0, 1, 2, 3],
-        //     [0, 2, 3, 1],
-        //     [0, 3, 1, 2],
-        //     [1, 2, 0, 3],
-        //     [1, 3, 2, 0],
-        //     [2, 3, 0, 1],
-        // ];
+    ) -> Tet {
 
-        let hv2 = sym(hv1);
         let indices = [org(hv1), dest(hv1), apex(hv1), oppo(hv1)];
         let vs: [usize; 5] = [
             self.vertices[indices[0]],
@@ -393,20 +389,89 @@ impl Tet {
                 &points[(points.len() - 3)..],
             )));
 
-        let get_srf_eval = |indices: [usize; 4]| {
-            self.surface_evaluations.iter().map();
+        let mut get_srf_eval = |indices: [usize; 4]| {
+            TinyVec::from_iter(self.surface_evaluations.iter().map(|tet_eval| {
+                let sid = tet_eval.sid;
+                let evaluation = indices.map(|idx| {
+                    if idx < 4 {
+                        tet_eval.evaluation[idx]
+                    } else {
+                        let sid = tet_eval.sid;
+                        *evaluation_map
+                            .entry(sid)
+                            .or_insert(srf_datum[sid].surf.eval(&points[(points.len() - 3)..]))
+                    }
+                });
+                SurfaceEvaluation { sid, evaluation }
+            }))
         };
 
         if vs[2] == INVALID_IND {
-            let vertices = [1, 4, 3, 2].map(|i| vs[i]);
-            let edge_square_lengths = [
-                half_len,
-                self.edge_square_lengths[4],
-                self.edge_square_lengths[3],
-                v3_v4_len,
-                v2_v4_len,
-                self.edge_square_lengths[5],
-            ];
+            let new_tet = {
+                const VERT_INDICES: [usize; 4] = [1, 4, 3, 2];
+                let vertices = VERT_INDICES.map(|i| vs[i]);
+                let edge_square_lengths = [
+                    half_len,
+                    self.edge_square_lengths[4],
+                    self.edge_square_lengths[3],
+                    v3_v4_len,
+                    v2_v4_len,
+                    self.edge_square_lengths[5],
+                ];
+                Tet {
+                    vertices,
+                    edge_square_lengths,
+                    surface_evaluations: get_srf_eval(VERT_INDICES),
+                    neighbors: Default::default(),
+                }
+            };
+            {
+                const VERT_INDICES: [usize; 4] = [4, 0, 3, 2];
+                self.vertices = VERT_INDICES.map(|i| vs[i]);
+                self.edge_square_lengths = [
+                    half_len,
+                    v3_v4_len,
+                    v2_v4_len,
+                    self.edge_square_lengths[2],
+                    self.edge_square_lengths[1],
+                    self.edge_square_lengths[5],
+                ];
+                self.surface_evaluations = get_srf_eval(VERT_INDICES);
+            }
+            new_tet
+        } else {
+            let new_tet = {
+                const VERT_INDICES: [usize; 4] = [4, 1, 2, 3];
+                let vertices = VERT_INDICES.map(|i| vs[i]);
+                let edge_square_lengths = [
+                    half_len,
+                    v2_v4_len,
+                    v3_v4_len,
+                    self.edge_square_lengths[3],
+                    self.edge_square_lengths[4],
+                    self.edge_square_lengths[5],
+                ];
+                Tet {
+                    vertices,
+                    edge_square_lengths,
+                    surface_evaluations: get_srf_eval(VERT_INDICES),
+                    neighbors: Default::default(),
+                }
+            };
+            {
+                const VERT_INDICES: [usize; 4] = [0, 4, 2, 3];
+                self.vertices = VERT_INDICES.map(|i| vs[i]);
+                self.edge_square_lengths = [
+                    half_len,
+                    self.edge_square_lengths[1],
+                    self.edge_square_lengths[2],
+                    v2_v4_len,
+                    v3_v4_len,
+                    self.edge_square_lengths[5],
+
+                ];
+            }
+            new_tet
         }
     }
 }
@@ -492,6 +557,30 @@ pub(super) fn adaptive_subdivide1<'a>(
     surface_datum: Vec<SurfaceData<'a>>,
     sq_eps: f64,
 ) {
+    let mut pq = BinaryHeap::new();
+    for (tid, tet) in &mut tets.tets[..6].iter_mut().enumerate() {
+        if tet.subdividable(&tets.points, &surface_datum, sq_eps) {
+            let (ver, len) = tet.largest_edge();
+            pq.push(TetEdgeAndLen { handle: TetHandle{tid, ver}, len });
+        }
+    }
+
+    loop {
+        if pq.is_empty() {
+            break;
+        }
+
+        let TetEdgeAndLen { handle: curr, len } = pq.pop().unwrap();
+        let tet = &mut tets.tets[curr.tid];
+        if len != tet.edge_square_len(curr.ver) {
+            continue;
+        }
+
+        let va = tet.org(curr.ver);
+        let vb = tet.dest(curr.ver);
+
+        tet.subdivide(curr, &tets.points, surface_datum, );
+    }
 }
 
 pub(super) fn adaptive_subdivide<'a>(
