@@ -10,7 +10,7 @@ use tinyvec::TinyVec;
 use crate::{
     INVALID_IND,
     geometry::{BBox, Surf, Surface},
-    math::{cross, cross_in, dot, square_norm, sub_short},
+    math::{cross, cross_in, dot, interpolate, square_norm, sub_short},
     mesh::{EdgeId, Mesh},
     point, point_2, point_3,
     triangle::{convex_2, convex_3},
@@ -34,6 +34,19 @@ impl Default for TetHandle {
             tid: INVALID_IND,
             ver: 12,
         }
+    }
+}
+
+impl TetHandle {
+    #[inline]
+    pub fn new(tid: usize, ver: usize) -> Self {
+        Self { tid, ver }
+    }
+
+    #[inline]
+    pub(crate) fn sym_in_place(&mut self) -> &mut Self {
+        self.ver = sym(self.ver);
+        self
     }
 }
 
@@ -74,6 +87,10 @@ fn oppo(ver: usize) -> usize {
     OPPO_PIVOT[ver]
 }
 
+#[inline(always)]
+fn tet_edge_index(pa: usize, pb: usize) -> usize {
+    pa + pb - (pa.min(pb) == 0) as usize
+}
 pub(crate) struct Tet {
     pub(crate) vertices: [usize; 4],
     pub(crate) neighbors: [TetHandle; 4],
@@ -357,14 +374,23 @@ impl Tet {
 
     fn subdivide(
         &mut self,
-        hv1: usize,
+        edge: &TetHandle,
+        new_tid: usize,
         points: &[f64],
         srf_datum: &[SurfaceData],
         length_map: &mut HashMap<usize, f64>,
         evaluation_map: &mut HashMap<usize, [f64; 4]>,
     ) -> Tet {
-
-        let indices = [org(hv1), dest(hv1), apex(hv1), oppo(hv1)];
+        let &TetHandle {tid, ver} = edge;
+        let indices = [org(ver), dest(ver), apex(ver), oppo(ver)];
+        let edge_map = [
+            tet_edge_index(indices[0], indices[1]),
+            tet_edge_index(indices[0], indices[2]),
+            tet_edge_index(indices[0], indices[3]),
+            tet_edge_index(indices[1], indices[2]),
+            tet_edge_index(indices[1], indices[3]),
+            tet_edge_index(indices[2], indices[3]),
+        ];
         let vs: [usize; 5] = [
             self.vertices[indices[0]],
             self.vertices[indices[1]],
@@ -375,7 +401,7 @@ impl Tet {
 
         let half_len = *length_map
             .entry(vs[0])
-            .or_insert(self.edge_square_lengths[VER_TO_EDGE[hv1]] * 0.25);
+            .or_insert(self.edge_square_lengths[VER_TO_EDGE[ver]] * 0.25);
         let v2_v4_len = *length_map
             .entry(vs[2])
             .or_insert(square_norm(&sub_short::<3, _>(
@@ -422,7 +448,12 @@ impl Tet {
                     vertices,
                     edge_square_lengths,
                     surface_evaluations: get_srf_eval(VERT_INDICES),
-                    neighbors: Default::default(),
+                    neighbors: [
+                        TetHandle::new(tid, 9),
+                        self.neighbors[indices[0]].clone(),
+                        TetHandle::default(),
+                        TetHandle::default(),
+                    ],
                 }
             };
             {
@@ -437,6 +468,12 @@ impl Tet {
                     self.edge_square_lengths[5],
                 ];
                 self.surface_evaluations = get_srf_eval(VERT_INDICES);
+                self.neighbors = [
+                    self.neighbors[indices[1]].clone(),
+                    TetHandle::new(new_tid, 8),
+                    TetHandle::default(),
+                    TetHandle::default(),
+                ];
             }
             new_tet
         } else {
@@ -455,7 +492,12 @@ impl Tet {
                     vertices,
                     edge_square_lengths,
                     surface_evaluations: get_srf_eval(VERT_INDICES),
-                    neighbors: Default::default(),
+                    neighbors: [
+                        self.neighbors[indices[0]].clone(),
+                        TetHandle::new(tid, 8),
+                        Default::default(),
+                        Default::default(),
+                    ]
                 }
             };
             {
@@ -468,7 +510,12 @@ impl Tet {
                     v2_v4_len,
                     v3_v4_len,
                     self.edge_square_lengths[5],
-
+                ];
+                self.neighbors = [
+                    TetHandle::new(new_tid, 9),
+                    self.neighbors[indices[1]].clone(),
+                    TetHandle::default(),
+                    TetHandle::default(),
                 ];
             }
             new_tet
@@ -479,6 +526,43 @@ impl Tet {
 pub(crate) struct TetComplex {
     pub(crate) points: Vec<f64>,
     pub(crate) tets: Vec<Tet>,
+}
+
+impl TetComplex {
+    pub(crate) fn spin_edges(&self, first_handle: TetHandle) -> impl Iterator<Item = TetHandle> {
+        let mut next_handle = first_handle.clone();
+        let mut is_first = true;
+        std::iter::from_fn(move || {
+            if !is_first && next_handle == first_handle {
+                None
+            } else {
+                is_first = false;
+                let curr_handle = next_handle.clone();
+                self.sym_face_in_place(next_handle.sym_in_place());
+                Some(curr_handle)
+            }
+        })
+    }
+
+    pub(crate) fn sym_face_in_place(&self, handle: &mut TetHandle) {
+        const FSYM_TBL: [[usize; 12]; 12] = [
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            [8, 9, 10, 11, 0, 1, 2, 3, 4, 5, 6, 7],
+            [8, 9, 10, 11, 0, 1, 2, 3, 4, 5, 6, 7],
+            [8, 9, 10, 11, 0, 1, 2, 3, 4, 5, 6, 7],
+            [8, 9, 10, 11, 0, 1, 2, 3, 4, 5, 6, 7],
+            [4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2, 3],
+            [4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2, 3],
+            [4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2, 3],
+            [4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2, 3],
+        ];
+        let nei = &self.tets[handle.tid].neighbors[handle.tid & 3];
+        handle.tid = nei.tid;
+        handle.ver = FSYM_TBL[handle.ver][nei.ver];
+    }
 }
 
 use super::TetSet;
@@ -554,16 +638,24 @@ impl Ord for TetEdgeAndLen {
 
 pub(super) fn adaptive_subdivide1<'a>(
     tets: &mut TetComplex,
-    surface_datum: Vec<SurfaceData<'a>>,
+    srf_datum: Vec<SurfaceData<'a>>,
     sq_eps: f64,
 ) {
     let mut pq = BinaryHeap::new();
     for (tid, tet) in &mut tets.tets[..6].iter_mut().enumerate() {
-        if tet.subdividable(&tets.points, &surface_datum, sq_eps) {
+        if tet.subdividable(&tets.points, &srf_datum, sq_eps) {
             let (ver, len) = tet.largest_edge();
-            pq.push(TetEdgeAndLen { handle: TetHandle{tid, ver}, len });
+            pq.push(TetEdgeAndLen {
+                handle: TetHandle { tid, ver },
+                len,
+            });
         }
     }
+
+    let mut spin_edges: Vec<TetHandle> = Vec::new();
+    let mut split_tets: Vec<[TetHandle; 2]> = Vec::new();
+    let mut length_map = HashMap::new();
+    let mut evaluation_map = HashMap::with_capacity(srf_datum.len());
 
     loop {
         if pq.is_empty() {
@@ -578,8 +670,28 @@ pub(super) fn adaptive_subdivide1<'a>(
 
         let va = tet.org(curr.ver);
         let vb = tet.dest(curr.ver);
-
-        tet.subdivide(curr, &tets.points, surface_datum, );
+        tets.points.extend_from_slice(&interpolate::<3>(
+            point::<3>(&tets.points, va),
+            point::<3>(&tets.points, vb),
+            0.5,
+        ));
+        spin_edges.extend(tets.spin_edges(curr));
+        split_tets.extend(spin_edges.iter().map(|handle| {
+            let new_tid = tets.tets.len();
+            let new_tet = tets.tets[handle.tid].subdivide(
+                handle,
+                new_tid,
+                &tets.points,
+                &srf_datum,
+                &mut length_map,
+                &mut evaluation_map,
+            );
+            tets.tets.push(new_tet);
+            [TetHandle::default(), TetHandle::default()]
+        }));
+        spin_edges.clear();
+        length_map.clear();
+        evaluation_map.clear();
     }
 }
 
