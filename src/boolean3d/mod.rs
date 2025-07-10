@@ -13,7 +13,7 @@ use tinyvec::TinyVec;
 use std::{alloc::Allocator, any::TypeId};
 
 use adaptive_subdivide::{
-    SurfaceData, SurfaceEvaluation, Tet, TetComplex, TetHandle, adaptive_subdivide,
+    adaptive_subdivide, adaptive_subdivide1, bond_face, SurfaceData, SurfaceEvaluation, Tet, TetComplex, TetHandle
 };
 use ar_in_tet::{Arrangement, IsoVert, extract_iso_surface};
 use extract_cells::extract_cells;
@@ -60,6 +60,7 @@ where
         BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)),
         &surfaces,
     );
+    adaptive_subdivide1(&mut tet_complex, &surface_datum, eps * eps);
 
     let mut tets = init_mesh(
         BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)),
@@ -70,7 +71,6 @@ where
     let iso_surf_mesh = extract_iso_surface(&tets, vals);
     // write_obj("123.obj", &iso_surf_mesh.points, &iso_surf_mesh.mesh);
     println!("mesh n tets: {}", tets.tet_faces.len());
-
     let model_data = extract_cells(iso_surf_mesh, &tets, surfaces.len());
     model_data.resolve(models, &surfaces, bool_func);
 }
@@ -120,7 +120,7 @@ fn init_tet_complex(bbox: BBox, surfaces: &[Surf]) -> TetComplex {
         if verts[2] == INVALID_IND {
             verts[2] = 8;
         }
-        (verts[0] << 6) | (verts[1] << 3) | verts[2]
+        (verts[2] << 6) | (verts[1] << 3) | verts[0]
     };
 
     let mut edge_square_len_map = HashMap::<usize, f64>::with_capacity(19);
@@ -211,13 +211,7 @@ fn init_tet_complex(bbox: BBox, surfaces: &[Surf]) -> TetComplex {
     face_tet_map.extend(bdy_face_tet_map);
 
     for [h1, h2] in face_tet_map.into_values() {
-        unsafe {
-            let start = tets.as_mut_ptr();
-            let n1 = &mut (*start.add(h1.tid)).neighbors[h1.ver];
-            let n2 = &mut (*start.add(h2.tid)).neighbors[h2.ver];
-            *n1 = h2;
-            *n2 = h1;
-        }
+        bond_face(&mut tets, h1, h2);
     }
 
     TetComplex { points, tets }
@@ -333,6 +327,7 @@ fn merge_same_surfaces<A: Allocator + Copy>(models: &mut [BrepModel<A>]) -> Vec<
                 .entry(surf.real_type_id())
                 .or_insert(UniqueSurface::new())
                 .add_surf(surf, surf_positions.len(), tol);
+
             surf_positions.push((i, j));
         }
     }
