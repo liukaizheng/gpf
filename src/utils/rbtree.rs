@@ -246,7 +246,6 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
                 i, node.parent, node.left, node.right
             );
         }
-        println!("");
     }
 
     pub fn bst_insert(&mut self, new_node_id: usize) {
@@ -286,6 +285,9 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
         if self.nodes[node_id].parent == INVALID_IND {
             self.nodes[node_id].color = Color::Black;
             self.root = node_id;
+            if self.root == 1 {
+                println!("bug here");
+            }
         } else {
             self.insert_case2(node_id);
         }
@@ -357,7 +359,6 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
             let parent_id = node.parent;
             let parent = &mut *nodes_ptr.add(parent_id);
             let grandparent_id = parent.parent;
-            let grandparent = &mut *nodes_ptr.add(grandparent_id);
 
             parent.right = node.left;
             if node.left != INVALID_IND {
@@ -365,10 +366,15 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
                 left_child.parent = parent_id;
             }
             node.parent = grandparent_id;
-            if parent_id == grandparent.left {
-                grandparent.left = node_id;
+            if grandparent_id != INVALID_IND {
+                let grandparent = &mut *nodes_ptr.add(grandparent_id);
+                if parent_id == grandparent.left {
+                    grandparent.left = node_id;
+                } else {
+                    grandparent.right = node_id;
+                }
             } else {
-                grandparent.right = node_id;
+                self.root = node_id;
             }
 
             node.left = parent_id;
@@ -383,7 +389,6 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
             let parent_id = node.parent;
             let parent = &mut *nodes_ptr.add(parent_id);
             let grandparent_id = parent.parent;
-            let grandparent = &mut *nodes_ptr.add(grandparent_id);
 
             parent.left = node.right;
             if node.right != INVALID_IND {
@@ -391,10 +396,15 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
                 right_child.parent = parent_id;
             }
             node.parent = grandparent_id;
-            if parent_id == grandparent.left {
-                grandparent.left = node_id;
+            if grandparent_id != INVALID_IND {
+                let grandparent = &mut *nodes_ptr.add(grandparent_id);
+                if parent_id == grandparent.left {
+                    grandparent.left = node_id;
+                } else {
+                    grandparent.right = node_id;
+                }
             } else {
-                grandparent.right = node_id;
+                self.root = node_id;
             }
 
             node.right = parent_id;
