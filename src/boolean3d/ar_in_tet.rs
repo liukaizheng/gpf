@@ -1,6 +1,7 @@
 use std::alloc::{Allocator, Global};
 
 use std::collections::{HashMap, HashSet};
+use itertools::Itertools;
 use tinyvec::TinyVec;
 
 use crate::is_positive;
@@ -14,6 +15,7 @@ use crate::{
     strip_orientation, INVALID_IND,
 };
 
+use super::adaptive_subdivide::{Tet, TetComplex};
 use super::tet_set::TetSet;
 use super::IsoSurfMesh;
 
@@ -493,7 +495,7 @@ impl<A: Allocator + Copy> Arrangement<A> {
         }
     }
 
-    fn extract_mesh(&mut self, tets: &TetSet, tid: usize, data: &mut ExtractMesh) {
+    fn extract_mesh(&mut self, tets: &Tet, data: &mut ExtractMesh) {
         let alloc = self.edges.allocator();
         let mut vertex_pts = Vec::with_capacity_in(self.mesh.n_vertices_capacity(), alloc);
         vertex_pts.resize(self.mesh.n_vertices_capacity(), IsoVert::INVALID);
@@ -649,48 +651,41 @@ impl ExtractMesh {
     }
 }
 
-pub(super) fn extract_iso_surface(tets: &TetSet, vals: Vec<Vec<f64>>) -> IsoSurfMesh {
+pub(super) fn extract_iso_surface(tets: &TetComplex, n_surfaces: usize) -> IsoSurfMesh {
     let base_tet = Arrangement::new_tet(Global);
 
-    let mut get_active_surfs = GetActiveSurf::new(vals);
+    let mut get_active_surfs = GetActiveSurf::new();
 
-    let mut arrangements = Vec::with_capacity(tets.tet_vertices.len());
-    let mut active_surfaces = Vec::with_capacity(tets.tet_vertices.len());
-
-    for verts in &tets.tet_vertices {
-        get_active_surfs.execute(&verts);
-        if get_active_surfs.is_empty() {
-            arrangements.push(None);
-            active_surfaces.push(Vec::new());
-        } else {
-            let mut ar = base_tet.clone_in(Global);
-            ar.planes
-                .reserve(ar.planes.len() + get_active_surfs.active_surfs.len());
-            ar.planes.extend(&get_active_surfs.active_planes);
-            ar.plane_surfaces.resize(
-                ar.plane_surfaces.len() + get_active_surfs.active_surfs.len(),
-                Vec::new_in(Global),
-            );
-
-            for (i, coplanars) in get_active_surfs.coplanar_surfs.iter().enumerate() {
-                ar.plane_surfaces[i].extend_from_slice(&coplanars);
-            }
-            let mut tet_active_surfs = Vec::with_capacity(get_active_surfs.active_surfs.len());
-            tet_active_surfs.clone_from(&get_active_surfs.active_surfs);
-
-            arrangements.push(Some(ar));
-            active_surfaces.push(tet_active_surfs);
+    let mut active_surfaces = Vec::with_capacity(tets.tets.len());
+    let mut data = ExtractMesh::new(tets.points.len() / 3);
+    for tet in &tets.tets {
+        if !tet.valid() {
+            continue;
         }
+        let active_surfaces = get_active_surfs.execute(tet);
+        if active_surfaces.is_empty() {
+            continue;
+        }
+
+        let mut ar = base_tet.clone_in(Global);
+        ar.planes
+            .reserve(ar.planes.len() + active_surfaces.len());
+        ar.planes.extend(&get_active_surfs.active_planes);
+        ar.plane_surfaces.resize(
+            ar.plane_surfaces.len() + active_surfaces.len(),
+            Vec::new_in(Global),
+        );
+
+        for (i, coplanars) in get_active_surfs.coplanar_surfs.iter().enumerate() {
+            ar.plane_surfaces[i].extend_from_slice(&coplanars);
+        }
+        for (i, sid) in active_surfaces.into_iter().enumerate() {
+            ar.add_plane(i + 4, sid, Global);
+        }
+
+        ar.extract_mesh(tet, data);
     }
 
-    for (ar, tet_active_surfs) in arrangements.iter_mut().zip(active_surfaces) {
-        if let Some(ar) = ar {
-            for (i, sid) in tet_active_surfs.into_iter().enumerate() {
-                ar.add_plane(i + 4, sid, Global);
-            }
-        }
-    }
-    let mut data = ExtractMesh::new(tets.mesh.n_vertices_capacity());
     for (tid, ar) in arrangements.iter_mut().enumerate() {
         if let Some(ar) = ar {
             ar.extract_mesh(tets, tid, &mut data)
@@ -707,8 +702,6 @@ pub(super) fn extract_iso_surface(tets: &TetSet, vals: Vec<Vec<f64>>) -> IsoSurf
 }
 
 struct GetActiveSurf {
-    surf_vals: Vec<Vec<f64>>,
-    active_surfs: Vec<usize>,
     active_planes: Vec<[f64; 4]>,
     pos_verts: Vec<usize>,
     neg_verts: Vec<usize>,
@@ -717,10 +710,8 @@ struct GetActiveSurf {
 }
 
 impl GetActiveSurf {
-    fn new(surf_vals: Vec<Vec<f64>>) -> Self {
+    fn new() -> Self {
         Self {
-            surf_vals,
-            active_surfs: Vec::new(),
             active_planes: Vec::new(),
             pos_verts: Vec::new(),
             neg_verts: Vec::new(),
@@ -729,8 +720,8 @@ impl GetActiveSurf {
         }
     }
 
-    fn execute(&mut self, verts: &[VertexId; 4]) {
-        self.active_surfs.clear();
+    fn execute(&mut self, tet: &Tet) -> Vec<usize> {
+        let mut active_surfs = Vec::new();
         self.active_planes.clear();
 
         self.coplanar_surfs[0].clear();
@@ -738,12 +729,10 @@ impl GetActiveSurf {
         self.coplanar_surfs[2].clear();
         self.coplanar_surfs[3].clear();
 
-        for (sid, vals) in self.surf_vals.iter().enumerate() {
-            self.pos_verts.clear();
-            self.neg_verts.clear();
-            self.zero_verts.clear();
-            let plane = verts.map(|vid| vals[vid]);
-            for (i, &val) in plane.iter().enumerate() {
+        for evaluation in &tet.surface_evaluations {
+            let sid = evaluation.sid;
+            let plane = evaluation.evaluation.map(|eval| eval[0]);
+            for (i, val) in plane.into_iter().enumerate() {
                 if val > 0.0 {
                     self.pos_verts.push(i);
                 } else if val < 0.0 {
@@ -752,9 +741,8 @@ impl GetActiveSurf {
                     self.zero_verts.push(i);
                 }
             }
-
             if !self.pos_verts.is_empty() && !self.neg_verts.is_empty() {
-                self.active_surfs.push(sid);
+                active_surfs.push(sid);
                 self.active_planes.push(plane);
             } else if self.zero_verts.len() == 3 {
                 if !self.pos_verts.is_empty() {
@@ -764,6 +752,7 @@ impl GetActiveSurf {
                 }
             }
         }
+        active_surfs
     }
 
     #[inline]

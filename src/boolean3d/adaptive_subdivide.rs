@@ -216,6 +216,11 @@ impl Tet {
         self.edge_square_lengths[VER_TO_EDGE[ver]]
     }
 
+    #[inline]
+    pub(crate) fn valid(&self) -> bool {
+        self.vertices[3] != INVALID_IND
+    }
+
     fn subdividable(&mut self, points: &[f64], srf_datum: &[SurfaceData], sq_eps: f64) -> bool {
         if self.vertices[3] == INVALID_IND || self.edge_square_lengths.iter().all(|&l| l < sq_eps) {
             return false;
