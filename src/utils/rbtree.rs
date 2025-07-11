@@ -239,13 +239,6 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
         let new_node_id = self.new_node(val);
         self.bst_insert(new_node_id);
         self.insert_case1(new_node_id);
-        println!("the root is {}", self.root);
-        for (i, node) in self.nodes.iter().enumerate() {
-            println!(
-                "node: {}, parent: {}, left: {}, right: {}",
-                i, node.parent, node.left, node.right
-            );
-        }
     }
 
     pub fn bst_insert(&mut self, new_node_id: usize) {
@@ -285,9 +278,6 @@ impl<V: PartialOrd, A: Allocator + Copy> RBTree<V, A> {
         if self.nodes[node_id].parent == INVALID_IND {
             self.nodes[node_id].color = Color::Black;
             self.root = node_id;
-            if self.root == 1 {
-                println!("bug here");
-            }
         } else {
             self.insert_case2(node_id);
         }

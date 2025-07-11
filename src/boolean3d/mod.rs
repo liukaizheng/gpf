@@ -10,6 +10,7 @@ use brep::SurfRep;
 use hashbrown::HashMap;
 use tinyvec::TinyVec;
 
+use std::time::Instant;
 use std::{alloc::Allocator, any::TypeId};
 
 use adaptive_subdivide::{
@@ -60,19 +61,27 @@ where
         BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)),
         &surfaces,
     );
+    let mut start_time = Instant::now();
     adaptive_subdivide1(&mut tet_complex, &surface_datum, eps * eps);
+    println!("new subdivide time: {:?}", start_time.elapsed());
 
     let mut tets = init_mesh(
         BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)),
         surfaces.len(),
     );
+    start_time = Instant::now();
     let vals = adaptive_subdivide(&mut tets, surface_datum, eps * eps);
+    println!("old adaptive_subdivide time: {:?}", start_time.elapsed());
+
+    println!("new mesh n tets: {}", tet_complex.tets.iter().filter(|tet| tet.vertices[3] != INVALID_IND).count());
+    println!("old mesh n tets: {}", tets.tet_faces.len());
 
     let iso_surf_mesh = extract_iso_surface(&tets, vals);
+
     // write_obj("123.obj", &iso_surf_mesh.points, &iso_surf_mesh.mesh);
-    println!("mesh n tets: {}", tets.tet_faces.len());
-    let model_data = extract_cells(iso_surf_mesh, &tets, surfaces.len());
-    model_data.resolve(models, &surfaces, bool_func);
+
+    // let model_data = extract_cells(iso_surf_mesh, &tets, surfaces.len());
+    // model_data.resolve(models, &surfaces, bool_func);
 }
 
 fn init_tet_complex(bbox: BBox, surfaces: &[Surf]) -> TetComplex {
