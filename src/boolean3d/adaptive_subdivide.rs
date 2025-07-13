@@ -87,7 +87,7 @@ pub(super) fn adaptive_subdivide<'a>(
 
 fn adaptive_subdivide_impl(tets: &mut TetSet, data: &mut SubdivisionData, sq_eps: f64) {
     let mut check_bump = Bump::new();
-    for tid in 0..tets.tet_faces.len() {
+    for tid in 0..tets.tets.len() {
         check_bump.reset();
         push_longest_edge(tid, tets, data, sq_eps, &check_bump);
     }
@@ -121,24 +121,27 @@ fn push_longest_edge(
     sq_eps: f64,
     bump: &Bump,
 ) {
-    if tets.tet_edges[tid]
+    if tets.tets[tid]
+        .edges
         .iter()
-        .all(|&eid| tets.square_edge_lengths[eid] < sq_eps)
+        .all(|&hid| tets.square_edge_lengths[tets.mesh.he_edge(hid)] < sq_eps)
     {
         return;
     }
     if subdividable(tid, tets, data, sq_eps, bump) {
-        let longest_eid = *tets.tet_edges[tid]
+        let longest_hid = *tets.tets[tid]
+            .edges
             .iter()
-            .max_by(|&&ea, &&eb| {
-                tets.square_edge_lengths[ea]
-                    .partial_cmp(&tets.square_edge_lengths[eb])
+            .max_by(|&&ha, &&hb| {
+                tets.square_edge_lengths[tets.mesh.he_edge(ha)]
+                    .partial_cmp(&tets.square_edge_lengths[tets.mesh.he_edge(hb)])
                     .unwrap()
             })
             .unwrap();
+        let long_eid = tets.mesh.he_edge(longest_hid);
         data.queue.push(EdgeAndLen {
-            eid: longest_eid,
-            len: tets.square_edge_lengths[longest_eid],
+            eid: long_eid,
+            len: tets.square_edge_lengths[long_eid],
         });
     }
 }
@@ -169,7 +172,7 @@ fn subdividable<A: Allocator + Copy>(
     sq_eps: f64,
     alloc: A,
 ) -> bool {
-    let verts = tets.tet_vertices[tid];
+    let verts = tets.tets[tid].vertices;
     let tet_points = verts.map(|vid| point_3(&tets.points, vid.0));
     let tet_box = BBox::from_iter(tet_points);
 

@@ -42,8 +42,10 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
             let mut prev_vid = VertexId::default();
 
             for (i, &b) in polygon.as_ref().iter().enumerate() {
-                let vid = b.into();
-                mesh.core_data.v_min_reserve(vid);
+                let vid = VertexId::from(b);
+                if vid.valid() {
+                    mesh.core_data.v_min_reserve(vid);
+                }
                 let hid = mesh.new_halfedges(1);
 
                 mesh.core_data.he_vertex_arr[hid] = vid;
@@ -53,13 +55,13 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
                     mesh.core_data.f_halfedge_arr.push(hid);
                     first_hid = hid;
                 } else {
-                    mesh.core_data.v_halfedge_arr[prev_vid] = hid;
+                    mesh.core_data.set_v_halfedge(prev_vid, hid);
                     mesh.core_data.connect_halfedges(prev_hid, hid);
                 }
                 prev_vid = vid;
                 prev_hid = hid;
             }
-            mesh.core_data.v_halfedge_arr[prev_vid] = first_hid;
+            mesh.core_data.set_v_halfedge(prev_vid, first_hid);
             mesh.core_data.connect_halfedges(prev_hid, first_hid);
         }
         mesh.core_data.n_faces = mesh.core_data.f_halfedge_arr.len();
@@ -110,9 +112,6 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
         let n_vertices = mesh.n_vertices();
         for idx in 0..n_vertices {
             let vid = VertexId::from(idx);
-            if !mesh.v_is_valid(vid) {
-                continue;
-            }
             let (start, end) = (v_in_separators[vid], v_in_separators[*vid + 1]);
             let len = end - start;
             for i in start..end {
@@ -141,8 +140,10 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
     fn vertex_cycle(&self) -> (Vec<HalfedgeId>, Vec<usize>) {
         let mut v_degree = vec![0usize; self.n_vertices_capacity()];
         self.halfedges().for_each(|he| {
-            let vertex = he.to();
-            v_degree[*vertex] += 1;
+            let vid = *he.to();
+            if vid.valid() {
+                v_degree[vid] += 1;
+            }
         });
         let mut vertex_separators = vec![0];
         vertex_separators.extend(v_degree.iter().scan(0, |sum, &count| {
@@ -153,9 +154,11 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
         let mut vertex_halfedges = vec![HalfedgeId::from(0); self.n_halfedges_capacity()];
         self.halfedges().for_each(|he| {
             let vid = *he.to();
-            let pos = he_positions[vid];
-            vertex_halfedges[pos] = *he;
-            he_positions[vid] += 1;
+            if vid.valid() {
+                let pos = he_positions[vid];
+                vertex_halfedges[pos] = *he;
+                he_positions[vid] += 1;
+            }
         });
         (vertex_halfedges, vertex_separators)
     }

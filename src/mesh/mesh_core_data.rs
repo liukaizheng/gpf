@@ -1,9 +1,8 @@
 use std::alloc::Allocator;
 
 use super::{
-    clone_vec_in,
+    ElementId, FaceId, clone_vec_in,
     element::{HalfedgeId, VertexId},
-    ElementId, FaceId,
 };
 
 pub struct MeshCoreData<A: Allocator + Copy> {
@@ -79,7 +78,9 @@ impl<A: Allocator + Copy> MeshCoreData<A> {
 
     #[inline]
     pub(crate) fn set_v_halfedge(&mut self, vid: VertexId, hid: HalfedgeId) {
-        self.v_halfedge_arr[vid] = hid;
+        if vid.valid() {
+            self.v_halfedge_arr[vid] = hid;
+        }
     }
 
     #[inline]
