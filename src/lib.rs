@@ -99,6 +99,11 @@ pub fn is_negative(idx: usize) -> bool {
 }
 
 #[inline(always)]
+pub fn decode_index(idx: usize) -> (usize, bool) {
+    (strip_orientation(idx), is_negative(idx))
+}
+
+#[inline(always)]
 pub fn face_area_2d(points: &[f64]) -> f64 {
     points
         .chunks(2)

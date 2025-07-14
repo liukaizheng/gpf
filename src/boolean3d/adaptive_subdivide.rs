@@ -124,24 +124,23 @@ fn push_longest_edge(
     if tets.tets[tid]
         .edges
         .iter()
-        .all(|&hid| tets.square_edge_lengths[tets.mesh.he_edge(hid)] < sq_eps)
+        .all(|&eid| tets.square_edge_lengths[eid] < sq_eps)
     {
         return;
     }
     if subdividable(tid, tets, data, sq_eps, bump) {
-        let longest_hid = *tets.tets[tid]
+        let longest_eid = *tets.tets[tid]
             .edges
             .iter()
-            .max_by(|&&ha, &&hb| {
-                tets.square_edge_lengths[tets.mesh.he_edge(ha)]
-                    .partial_cmp(&tets.square_edge_lengths[tets.mesh.he_edge(hb)])
+            .max_by(|&&ea, &&eb| {
+                tets.square_edge_lengths[ea]
+                    .partial_cmp(&tets.square_edge_lengths[eb])
                     .unwrap()
             })
             .unwrap();
-        let long_eid = tets.mesh.he_edge(longest_hid);
         data.queue.push(EdgeAndLen {
-            eid: long_eid,
-            len: tets.square_edge_lengths[long_eid],
+            eid: longest_eid,
+            len: tets.square_edge_lengths[longest_eid],
         });
     }
 }
@@ -178,7 +177,7 @@ fn subdividable<A: Allocator + Copy>(
 
     let mut contain_some_srf = false;
 
-    let tet_surfaces = &mut tets.surf_indices[tid];
+    let mut tet_surfaces = Vec::<usize>::new();
     tet_surfaces.retain(|&sid| {
         let srf_data = &data.surface_datum[sid];
         if tet_box.contains(&srf_data.bbox) {

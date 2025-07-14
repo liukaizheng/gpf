@@ -50,10 +50,12 @@ where
             sub_bboxes,
         })
         .collect_vec();
-    TetSet::form_bbox(
+    let tet_set = TetSet::form_bbox(
         BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)),
-        surfaces.len(),
+        &surfaces,
     );
+
+    println!("tet_set: {:?}", tet_set.tets.len());
 
     // let mut tets = init_mesh(
     //     BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)),
