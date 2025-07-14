@@ -1,5 +1,6 @@
-use std::{alloc::Allocator, collections::BinaryHeap};
+use std::{alloc::Allocator, collections::BinaryHeap, ops::Deref};
 
+use bumpalo::Bump;
 use hashbrown::{HashMap, HashSet};
 use itertools::Itertools;
 use tinyvec::TinyVec;
@@ -8,7 +9,7 @@ use crate::{
     INVALID_IND, decode_index,
     geometry::{BBox, Surf, Surface},
     math::{cross, cross_in, dot, square_norm, sub_short},
-    mesh::{EdgeId, ElementId, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
+    mesh::{EdgeId, ElementId, FaceId, Halfedge, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     point, point_3,
     triangle::{convex_2, convex_3},
     twin_index,
@@ -63,6 +64,24 @@ pub(crate) struct Tet {
 }
 
 impl Tet {
+    #[inline]
+    fn face_from_vertex(&self, vid: VertexId) -> FaceId {
+        let idx = self.vertices.iter().position(|&v| v == vid).unwrap();
+        self.faces[idx]
+    }
+
+    #[inline]
+    fn face_from_edge(&self, eid: EdgeId, va: VertexId) -> [FaceId; 2] {
+        const EDGE_VERTICES: [[usize; 2]; 6] = [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]];
+        let idx = self.edges.iter().position(|&e| e == eid).unwrap();
+        let [i1, i2] = EDGE_VERTICES[idx];
+        if self.vertices[i1] == va {
+            [self.faces[i2], self.faces[i1]]
+        } else {
+            [self.faces[i1], self.faces[i2]]
+        }
+    }
+
     fn subdividable(
         &mut self,
         points: &[f64],
@@ -407,7 +426,7 @@ impl TetSet {
             }
         }
 
-        let tet_mesh = SurfaceMesh::new(tet_face_vertices, std::alloc::Global);
+        let mut tet_mesh = SurfaceMesh::new(tet_face_vertices, std::alloc::Global);
         let mut face_tets = vec![[INVALID_IND; 2]; tet_mesh.n_faces()];
         let mut infinite_edges = [EdgeId::default(); 8];
         let square_edge_lengths = Vec::from_iter(tet_mesh.edges().map(|edge| {
@@ -470,6 +489,55 @@ impl TetSet {
                 }
             })
             .collect_vec();
+
+        let mesh_ptr = unsafe { std::mem::transmute::<_, *mut SurfaceMesh>(&mut tet_mesh) };
+        for edge in tet_mesh.edges() {
+            let mut tet_halfedges_map = HashMap::<usize, [HalfedgeId; 2]>::new();
+            for he in edge.halfedges() {
+                let hid = *he;
+                let fid = *he.face();
+                for tid in face_tets[fid] {
+                    match tet_halfedges_map.entry(tid) {
+                        hashbrown::hash_map::Entry::Occupied(mut entry) => {
+                            entry.get_mut()[1] = hid;
+                        }
+                        hashbrown::hash_map::Entry::Vacant(entry) => {
+                            entry.insert([hid, HalfedgeId::default()]);
+                        }
+                    }
+                }
+            }
+
+            let first_hid = *edge.halfedge();
+            let mut sorted_halfedges = vec![first_hid];
+            let mut curr_hid = first_hid;
+            let mut curr_tid = face_tets[tet_mesh.he_face(first_hid)][0];
+            loop {
+                curr_hid = {
+                    let halfedges = tet_halfedges_map.get(&curr_tid).unwrap();
+                    if halfedges[0] == curr_hid {
+                        halfedges[1]
+                    } else {
+                        halfedges[0]
+                    }
+                };
+                if curr_hid == first_hid {
+                    break;
+                }
+                sorted_halfedges.push(curr_hid);
+
+                let candidates = face_tets[tet_mesh.he_face(first_hid)];
+                curr_tid = if candidates[0] == curr_tid {
+                    candidates[1]
+                } else {
+                    candidates[0]
+                };
+            }
+            for (h1, h2) in sorted_halfedges.into_iter().circular_tuple_windows() {
+                unsafe { (*mesh_ptr).set_he_sibling(h1, h2) };
+            }
+        }
+
         TetSet {
             points,
             mesh: tet_mesh,
@@ -485,6 +553,8 @@ impl TetSet {
             push_longest_edge(tid, self, srf_datum, &mut pq, sq_eps);
         }
 
+        let split_bump = Bump::new();
+
         while !pq.is_empty() {
             let EdgeAndLen { eid, len } = pq.pop().unwrap();
             if self.square_edge_lengths[eid] != len {
@@ -499,15 +569,9 @@ impl TetSet {
             }
 
             for tid in tet_pairs.into_iter().flatten() {
-                check_bump.reset();
-                push_longest_edge(tid, tets, data, sq_eps, &check_bump);
+                push_longest_edge(tid, tets, data, sq_eps);
             }
         }
-    }
-
-    pub(crate) fn tet_edge_index(pa: usize, pb: usize) -> usize {
-        let min_idx = if pa < pb { pa } else { pb };
-        (if min_idx != 0 { 0 } else { 1 }) + 5 - pa - pb
     }
 
     /// return tet and its start face index
@@ -546,9 +610,161 @@ impl TetSet {
 
     pub(crate) fn split_edge<A: Allocator + Copy>(
         &mut self,
-        eid: EdgeId,
+        split_eid: EdgeId,
         alloc: A,
     ) -> (VertexId, Vec<[usize; 2], A>) {
+        let [va, vb] = self.mesh.e_vertices(split_eid);
+        let new_vid = self.mesh.split_edge(split_eid, alloc);
+        let new_eid = self.mesh.he_prev(self.mesh.e_halfedge(split_eid));
+        {
+            // update points
+            let pa = point_3(&self.points, va.0);
+            let pb = point_3(&self.points, vb.0);
+            self.points.extend_from_slice(&[
+                (pa[0] + pb[0]) * 0.5,
+                (pa[1] + pb[1]) * 0.5,
+                (pa[2] + pb[2]) * 0.5,
+            ]);
+        }
+        {
+            // update edge lengths
+            let new_edge_square_len = self.square_edge_lengths[split_eid] * 0.25;
+            self.square_edge_lengths.push(new_edge_square_len);
+            self.square_edge_lengths[split_eid] = new_edge_square_len;
+        }
+
+        let mut side_halfedges = Vec::with_capacity_in(4, alloc);
+        unsafe {
+            let mesh_ptr = std::mem::transmute::<_, *mut SurfaceMesh>(&mut self.mesh);
+            side_halfedges.extend(self.mesh.edge(split_eid).halfedges().map(|he| {
+                let vc = *he.next().to();
+                let fid = *he.face();
+                let hid = (*mesh_ptr).split_face(fid, new_vid, vc);
+                if self.mesh.he_to(hid) == vc {
+                    [hid, self.mesh.he_twin(hid)]
+                } else {
+                    [self.mesh.he_sibling(hid), hid]
+                }
+            }));
+        };
+
+        let mut prev_tid = INVALID_IND;
+        for (left_halfedges, right_halfedges) in side_halfedges.iter().circular_tuple_windows() {
+            let [fa, fb] = [left_halfedges, right_halfedges].map(|halfedges| {
+                let [f1, f2] = [self.mesh.he_face(halfedges[0]), self.mesh.he_face(halfedges[1])];
+                if *f1 < *f2 {
+                    f1
+                } else {
+                    f2
+                }
+            });
+
+            let old_tid = if prev_tid == INVALID_IND {
+                (|| {
+                    for tid in self.face_tets[fa] {
+                        if self.face_tets[fb].contains(&tid) {
+                        return tid;
+                        }
+                    }
+                    INVALID_IND
+                })()
+            } else {
+                let face_tets = self.face_tets[fa];
+                if face_tets[0] == prev_tid {
+                    face_tets[1]
+                } else {
+                    face_tets[0]
+                }
+            };
+            debug_assert!(old_tid != INVALID_IND);
+            prev_tid = old_tid;
+
+            let tet = &self.tets[old_tid];
+            let [bottom_fid, top_fid] = tet.face_from_edge(split_eid, va);
+            let bottom_hid = self.mesh.face(bottom_fid).halfedges().find_map(|he| {
+                if *he.next().to() == va {
+                    Some(*he)
+                } else {
+                    None
+                }
+            }).unwrap();
+            let ori_bottom_hid = if self.mesh.he_to(bottom_hid) != self.mesh.he_to(right_halfedges[0]) {
+                self.mesh.he_twin(bottom_hid)
+            } else {
+                bottom_hid
+            };
+
+            debug_assert!(self.mesh.he_to(left_halfedges[0]) == self.mesh.he_from(bottom_hid));
+            debug_assert!(self.mesh.he_to(bottom_hid) == self.mesh.he_to(right_halfedges[0]));
+
+            let new_fid = self.mesh.add_face_by_halfedges(&[left_halfedges[0], ori_bottom_hid, right_halfedges[1]], false);
+            self.face_tets.push([self.tets.len(), old_tid]);
+            // set sibling halfedges
+            {
+                let mut new_hid = self.mesh.f_halfedge(new_fid);
+                debug_assert!(self.mesh.he_edge(new_hid) == self.mesh.he_edge(left_halfedges[0]));
+                if self.mesh.he_sibling(left_halfedges[0]) == left_halfedges[1] {
+                    self.mesh.insert_he_sibling(left_halfedges[0], new_hid);
+                } else {
+                    debug_assert!(self.mesh.he_sibling(left_halfedges[1]) == left_halfedges[0]);
+                    self.mesh.insert_he_sibling(left_halfedges[1], new_hid);
+                }
+
+                new_hid = self.mesh.he_next(new_hid);
+                debug_assert!(self.mesh.he_edge(new_hid) == self.mesh.he_edge(bottom_hid));
+                let oppo_bottom_hid = self.mesh.face(top_fid).halfedges().find_map(|he| {
+                    if *he.next().to() == vb {
+                        Some(*he)
+                    } else {
+                        None
+                    }
+                }).unwrap();
+                if self.mesh.he_sibling(bottom_hid) == oppo_bottom_hid {
+                    self.mesh.insert_he_sibling(bottom_hid, new_hid);
+                } else {
+                    debug_assert!(self.mesh.he_sibling(oppo_bottom_hid) == bottom_hid);
+                    self.mesh.insert_he_sibling(oppo_bottom_hid, new_hid);
+                }
+
+                new_hid = self.mesh.he_next(new_hid);
+                debug_assert!(self.mesh.he_edge(new_hid) == self.mesh.he_edge(right_halfedges[0]));
+                if self.mesh.he_sibling(right_halfedges[0]) == right_halfedges[1] {
+                    self.mesh.insert_he_sibling(right_halfedges[0], new_hid);
+                } else {
+                    debug_assert!(self.mesh.he_sibling(right_halfedges[1]) == right_halfedges[0]);
+                    self.mesh.insert_he_sibling(right_halfedges[1], new_hid);
+                }
+            }
+
+            let [vc, vd] = [self.mesh.he_to(left_halfedges[0]), self.mesh.he_to(right_halfedges[0])];
+            let [left_bottom_fid, left_top_fid] = if *self.mesh.halfedge(left_halfedges[0]).next().to() == va {
+                debug_assert!(*self.mesh.halfedge(left_halfedges[1]).next().to() == vb);
+                [self.mesh.he_face(left_halfedges[0]), self.mesh.he_face(left_halfedges[1])]
+            } else {
+                debug_assert!(*self.mesh.halfedge(left_halfedges[0]).next().to() == vb);
+                debug_assert!(*self.mesh.halfedge(left_halfedges[1]).next().to() == va);
+                [self.mesh.he_face(left_halfedges[1]), self.mesh.he_face(left_halfedges[0])]
+            };
+
+            let [right_bottom_fid, right_top_fid] = if *self.mesh.halfedge(right_halfedges[0]).next().to() == va {
+                debug_assert!(*self.mesh.halfedge(right_halfedges[1]).next().to() == vb);
+                [self.mesh.he_face(right_halfedges[0]), self.mesh.he_face(right_halfedges[1])]
+            } else {
+                debug_assert!(*self.mesh.halfedge(right_halfedges[0]).next().to() == vb);
+                debug_assert!(*self.mesh.halfedge(right_halfedges[1]).next().to() == va);
+                [self.mesh.he_face(right_halfedges[1]), self.mesh.he_face(right_halfedges[0])]
+            };
+
+            if !vc.valid() {
+                let new_tet = {
+                    Tet {
+                        vertices: [vb, new_vid, vd, vc],
+                        edges: [new_eid, self.mesh.he_edge(right_halfedges[0]), ]
+                    }
+                };
+            }
+        }
+
         /*let [va, vb] = self.mesh.e_vertices(eid);
         let mut tet_faces_map: hashbrown::HashMap<usize, [usize; 2], _, _> =
             hashbrown::HashMap::<usize, [usize; 2], _, _>::new_in(alloc);

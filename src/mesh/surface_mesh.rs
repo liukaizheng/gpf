@@ -201,6 +201,16 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
         eid
     }
 
+    #[inline(always)]
+    pub fn set_he_sibling(&mut self, h1: HalfedgeId, h2: HalfedgeId) {
+        self.he_sibling_arr[h1] = h2;
+    }
+
+    #[inline(always)]
+    pub fn insert_he_sibling(&mut self, prev_hid: HalfedgeId, new_hid: HalfedgeId) {
+        insert_halfedge(&mut self.he_sibling_arr, prev_hid, new_hid);
+    }
+
     #[inline]
     pub fn new_faces(&mut self, n: usize) -> FaceId {
         let fid = FaceId::from(self.core_data.f_halfedge_arr.len());
@@ -346,7 +356,11 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
         second_he
     }
 
-    pub fn add_face_by_halfedges(&mut self, halfedges: &[HalfedgeId]) -> FaceId {
+    pub fn add_face_by_halfedges(
+        &mut self,
+        halfedges: &[HalfedgeId],
+        build_sibling: bool,
+    ) -> FaceId {
         let first_new_hid = self.new_halfedges(halfedges.len());
         let new_f = self.new_faces(1);
 
@@ -360,7 +374,9 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
 
             // h-h
             // sibling
-            insert_halfedge(&mut self.he_sibling_arr, old_hid, new_hid);
+            if build_sibling {
+                insert_halfedge(&mut self.he_sibling_arr, old_hid, new_hid);
+            }
             // incoming
             insert_halfedge(&mut self.he_vert_in_next_arr, old_hid, new_hid);
 
@@ -384,7 +400,7 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
 
 #[inline(always)]
 fn insert_halfedge(next_arr: &mut [HalfedgeId], start: HalfedgeId, new_he: HalfedgeId) {
-    let nnext = next_arr[start.0];
+    let nnext = next_arr[start];
     next_arr[start] = new_he;
     next_arr[new_he] = nnext;
 }
