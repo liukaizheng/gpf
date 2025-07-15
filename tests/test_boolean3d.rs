@@ -251,6 +251,6 @@ fn test_boolean1() {
     boolean3d(
         vec![model1, model2],
         |is_kept_arr| is_kept_arr[0] && !is_kept_arr[1],
-        0.001,
+        1e-5,
     );
 }

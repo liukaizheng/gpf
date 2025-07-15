@@ -106,7 +106,7 @@ impl Tet {
             [1.0 / 3.0, 1.0 / 3.0, 0.0, 1.0 / 3.0],
             [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0, 0.0],
         ];
-        if !self.vertices[3].valid()
+        if !self.valid()
             || self
                 .edges
                 .into_iter()
@@ -555,7 +555,7 @@ impl TetSet {
             push_longest_edge(tid, self, srf_datum, &mut pq, sq_eps);
         }
 
-        let split_bump = Bump::new();
+        let mut split_bump = Bump::new();
 
         while !pq.is_empty() {
             let EdgeAndLen { eid, len } = pq.pop().unwrap();
@@ -563,6 +563,7 @@ impl TetSet {
                 // edge changed
                 continue;
             }
+            split_bump.reset();
 
             let start_face_idx = self.split_edge(eid, srf_datum, &split_bump);
             for fid in start_face_idx..self.face_tets.len() {
@@ -629,7 +630,7 @@ impl TetSet {
             self.square_edge_lengths.push(new_edge_square_len);
             self.square_edge_lengths[split_eid] = new_edge_square_len;
         }
-        let mut side_halfedges = Vec::with_capacity_in(4, alloc);
+        let mut side_halfedges = Vec::with_capacity_in(self.mesh.edge(split_eid).halfedges().count(), alloc);
         let mesh_ptr = unsafe { std::mem::transmute::<_, *mut SurfaceMesh>(&mut self.mesh) };
         side_halfedges.extend(self.mesh.edge(split_eid).halfedges().map(|he| {
             let ([h_ac, h_bc], vc) = if *he.to() == vb {
@@ -667,7 +668,7 @@ impl TetSet {
                 .len(),
             alloc,
         );
-        for (&left_part, &right_part) in side_halfedges.iter().circular_tuple_windows() {
+        for (left_part, right_part) in side_halfedges.into_iter().circular_tuple_windows() {
             let [h_ec, h_ce, h_ac, h_bc] = left_part;
             let [h_ed, h_de, h_ad, h_bd] = right_part;
 
