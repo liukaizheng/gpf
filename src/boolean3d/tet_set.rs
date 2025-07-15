@@ -65,9 +65,8 @@ pub(crate) struct Tet {
 
 impl Tet {
     #[inline]
-    fn face_from_vertex(&self, vid: VertexId) -> FaceId {
-        let idx = self.vertices.iter().position(|&v| v == vid).unwrap();
-        self.faces[idx]
+    pub(crate) fn valid(&self) -> bool {
+        self.vertices[3].valid()
     }
 
     #[inline]
@@ -633,17 +632,18 @@ impl TetSet {
         let mut side_halfedges = Vec::with_capacity_in(4, alloc);
         let mesh_ptr = unsafe { std::mem::transmute::<_, *mut SurfaceMesh>(&mut self.mesh) };
         side_halfedges.extend(self.mesh.edge(split_eid).halfedges().map(|he| {
-            let he_next = he.next();
-            let [h_ac, h_bc] = if *he.to() == va {
-                [*he_next, *he.prev().prev()]
+            let ([h_ac, h_bc], vc) = if *he.to() == vb {
+                let he_next = he.next();
+                ([*he.prev().prev(), *he_next], *he_next.to())
             } else {
-                [*he.prev().prev(), *he_next]
+                let he_prev = he.prev();
+                ([*he.next().next(), *he.prev()], *he_prev.from())
             };
-            let vc = *he_next.to();
+
             let fid = *he.face();
             let new_hid = unsafe { (*mesh_ptr).split_face(fid, ve, vc) };
             self.face_tets.push(self.face_tets[fid]);
-            if va.valid() {
+            if vc.valid() {
                 self.square_edge_lengths
                     .push(square_norm(&sub_short::<3, _>(
                         point::<3>(&self.points, *vc),
@@ -671,18 +671,19 @@ impl TetSet {
             let [h_ec, h_ce, h_ac, h_bc] = left_part;
             let [h_ed, h_de, h_ad, h_bd] = right_part;
 
-            let [fa, fb] = [[h_ec, h_ce], [h_ed, h_de]].map(|halfedges| {
-                let [f1, f2] = [
-                    self.mesh.he_face(halfedges[0]),
-                    self.mesh.he_face(halfedges[1]),
-                ];
-                if *f1 < *f2 { f1 } else { f2 }
-            });
+            let [left_bottom_fid, left_top_fid] = [
+                *self.mesh.halfedge(h_ac).face(),
+                *self.mesh.halfedge(h_bc).face(),
+            ];
+            let [right_bottom_fid, right_top_fid] = [
+                *self.mesh.halfedge(h_ad).face(),
+                *self.mesh.halfedge(h_bd).face(),
+            ];
 
             let old_tid = if prev_tid == INVALID_IND {
                 let ret = (|| {
-                    for tid in self.face_tets[fa] {
-                        if self.face_tets[fb].contains(&tid) {
+                    for tid in self.face_tets[left_bottom_fid] {
+                        if self.face_tets[right_bottom_fid].contains(&tid) {
                             return tid;
                         }
                     }
@@ -690,7 +691,7 @@ impl TetSet {
                 })();
                 ret
             } else {
-                let face_tets = self.face_tets[fa];
+                let face_tets = self.face_tets[left_bottom_fid];
                 if face_tets[0] == prev_tid {
                     face_tets[1]
                 } else {
@@ -701,9 +702,6 @@ impl TetSet {
             prev_tid = old_tid;
             let new_tid = self.tets.len();
 
-            // let tet = unsafe {
-            //     self.tets.as_mut_ptr().add(old_tid)
-            // };
             let tet = &mut self.tets[old_tid];
             let [bottom_fid, top_fid] = tet.face_from_edge(split_eid, va);
             let bottom_hid = self
@@ -769,14 +767,6 @@ impl TetSet {
             }
 
             let [vc, vd] = [self.mesh.he_to(h_ec), self.mesh.he_to(h_ed)];
-            let [left_bottom_fid, left_top_fid] = [
-                *self.mesh.halfedge(h_ac).face(),
-                *self.mesh.halfedge(h_bc).face(),
-            ];
-            let [right_bottom_fid, right_top_fid] = [
-                *self.mesh.halfedge(h_ad).face(),
-                *self.mesh.halfedge(h_bd).face(),
-            ];
 
             let tet_indices = {
                 let mut vertex_indices_map = HashMap::with_capacity_in(4, alloc);
@@ -846,7 +836,7 @@ impl TetSet {
                 tet.vertices = [va, ve, vc, vd];
                 tet.edges = [new_eid, e_ac, e_ad, e_ec, e_ed, e_cd];
                 tet.faces = [new_fid, bottom_fid, right_bottom_fid, left_bottom_fid];
-                tet.surface_evaluations = get_srf_eval([4, 1, 2, 3]);
+                tet.surface_evaluations = get_srf_eval([0, 4, 2, 3]);
                 new_tet
             };
             self.tets.push(new_tet);
@@ -877,13 +867,15 @@ impl TetSet {
                         }
                     }
 
-                    let points = tet.vertices.map(|vid| point::<3>(&self.points, *vid));
-                    for eval in &tet.surface_evaluations {
-                        for i in 0..4 {
-                            let e1 = eval.evaluation[i];
-                            let e2 = srf_datum[eval.sid].surf.eval(points[i]);
-                            let length = square_norm(&sub_short::<4, _>(&e1, &e2));
-                            debug_assert!(length < 1e-12);
+                    if tet.vertices[3].valid() {
+                        let points = tet.vertices.map(|vid| point::<3>(&self.points, *vid));
+                        for eval in &tet.surface_evaluations {
+                            for i in 0..4 {
+                                let e1 = eval.evaluation[i];
+                                let e2 = srf_datum[eval.sid].surf.eval(points[i]);
+                                let length = square_norm(&sub_short::<4, _>(&e1, &e2));
+                                debug_assert!(length < 1e-12);
+                            }
                         }
                     }
 

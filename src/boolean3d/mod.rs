@@ -9,6 +9,7 @@ pub use brep::BrepModel;
 use brep::SurfRep;
 use tinyvec::TinyVec;
 
+use std::time::Instant;
 use std::{alloc::Allocator, any::TypeId, collections::HashMap};
 
 // use adaptive_subdivide::{SurfaceData, adaptive_subdivide};
@@ -55,9 +56,11 @@ where
         &surfaces,
     );
 
+    let instant = Instant::now();
     tet_set.adaptive_subdivide(&surface_datum, eps * eps);
+    println!("subdivide spent {:?}", instant.elapsed());
 
-    println!("tet_set: {:?}", tet_set.tets.len());
+    println!("tet_set: {:?}", tet_set.tets.iter().filter(|tet| tet.valid()).count());
 
     // let mut tets = init_mesh(
     //     BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)),
