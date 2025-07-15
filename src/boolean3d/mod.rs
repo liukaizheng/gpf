@@ -1,4 +1,4 @@
-mod adaptive_subdivide;
+// mod adaptive_subdivide;
 // mod ar_in_tet;
 mod brep;
 // mod extract_cells;
@@ -11,11 +11,11 @@ use tinyvec::TinyVec;
 
 use std::{alloc::Allocator, any::TypeId, collections::HashMap};
 
-use adaptive_subdivide::{SurfaceData, adaptive_subdivide};
+// use adaptive_subdivide::{SurfaceData, adaptive_subdivide};
 // use ar_in_tet::{Arrangement, IsoVert, extract_iso_surface};
 // use extract_cells::extract_cells;
 use itertools::Itertools;
-use tet_set::TetSet;
+use tet_set::{SurfaceData, TetSet};
 
 use crate::geometry::Plane;
 use crate::{
@@ -50,10 +50,12 @@ where
             sub_bboxes,
         })
         .collect_vec();
-    let tet_set = TetSet::form_bbox(
+    let mut tet_set = TetSet::form_bbox(
         BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)),
         &surfaces,
     );
+
+    tet_set.adaptive_subdivide(&surface_datum, eps * eps);
 
     println!("tet_set: {:?}", tet_set.tets.len());
 

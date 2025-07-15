@@ -495,7 +495,7 @@ impl BSPComplex {
 
         // add separating face
         {
-            let new_fid = self.mesh.add_face_by_halfedges(&zero_ori_halfedges);
+            let new_fid = self.mesh.add_face_by_halfedges(&zero_ori_halfedges, true);
             for vid in self
                 .mesh
                 .face(new_fid)

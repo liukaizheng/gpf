@@ -278,12 +278,12 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
         new_v
     }
 
-    pub fn split_face(&mut self, fid: FaceId, va: VertexId, vb: VertexId) -> HalfedgeId {
+    pub fn split_face(&mut self, fid: FaceId, v1: VertexId, v2: VertexId) -> HalfedgeId {
         let mut right_first_hid = HalfedgeId::default();
         let mut left_first_hid = HalfedgeId::default();
         for he in self.face(fid).halfedges() {
             let v = *he.to();
-            if v == va || v == vb {
+            if v == v1 || v == v2 {
                 if !right_first_hid.valid() {
                     right_first_hid = *he.next();
                 } else {
@@ -294,10 +294,10 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
         }
         debug_assert!(right_first_hid.valid());
         debug_assert!(left_first_hid.valid());
-        let (va, vb) = if self.he_from(right_first_hid) == va {
-            (va, vb)
+        let (va, vb) = if self.he_from(right_first_hid) == v1 {
+            (v1, v2)
         } else {
-            (vb, va)
+            (v2, v1)
         };
 
         //  --------------vb------------
@@ -347,13 +347,18 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
             }
         }
 
-        // e-h
-        self.e_halfedge_arr[new_e] = first_he;
-
         // f-h
         self.core_data.f_halfedge_arr[fid] = first_he;
         self.core_data.f_halfedge_arr[new_f] = second_he;
-        second_he
+
+        if v2 == vb {
+            self.e_halfedge_arr[new_e] = second_he;
+            second_he
+        } else {
+            self.e_halfedge_arr[new_e] = first_he;
+            first_he
+        }
+
     }
 
     pub fn add_face_by_halfedges(

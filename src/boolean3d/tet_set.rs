@@ -1,4 +1,4 @@
-use std::{alloc::Allocator, collections::BinaryHeap, ops::Deref};
+use std::{alloc::Allocator, collections::BinaryHeap};
 
 use bumpalo::Bump;
 use hashbrown::{HashMap, HashSet};
@@ -9,7 +9,7 @@ use crate::{
     INVALID_IND, decode_index,
     geometry::{BBox, Surf, Surface},
     math::{cross, cross_in, dot, square_norm, sub_short},
-    mesh::{EdgeId, ElementId, FaceId, Halfedge, HalfedgeId, Mesh, SurfaceMesh, VertexId},
+    mesh::{EdgeId, ElementId, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
     point, point_3,
     triangle::{convex_2, convex_3},
     twin_index,
@@ -509,7 +509,8 @@ impl TetSet {
             }
 
             let first_hid = *edge.halfedge();
-            let mut sorted_halfedges = vec![first_hid];
+            let mut sorted_halfedges = Vec::with_capacity(tet_halfedges_map.len());
+            sorted_halfedges.push(first_hid);
             let mut curr_hid = first_hid;
             let mut curr_tid = face_tets[tet_mesh.he_face(first_hid)][0];
             loop {
@@ -526,13 +527,15 @@ impl TetSet {
                 }
                 sorted_halfedges.push(curr_hid);
 
-                let candidates = face_tets[tet_mesh.he_face(first_hid)];
+                let candidates = face_tets[tet_mesh.he_face(curr_hid)];
                 curr_tid = if candidates[0] == curr_tid {
                     candidates[1]
                 } else {
                     candidates[0]
                 };
             }
+
+            debug_assert!(sorted_halfedges.len() == tet_halfedges_map.len());
             for (h1, h2) in sorted_halfedges.into_iter().circular_tuple_windows() {
                 unsafe { (*mesh_ptr).set_he_sibling(h1, h2) };
             }
@@ -561,15 +564,12 @@ impl TetSet {
                 // edge changed
                 continue;
             }
-            let (new_vert, tet_pairs) = self.split_edge(eid, &split_bump);
-            let p = point_3(&tets.points, new_vert.0);
 
-            for (sid, surf) in data.surface_datum.iter().map(|d| &d.surf).enumerate() {
-                data.vals_and_grads[sid].push(surf.eval(p));
-            }
-
-            for tid in tet_pairs.into_iter().flatten() {
-                push_longest_edge(tid, tets, data, sq_eps);
+            let start_face_idx = self.split_edge(eid, srf_datum, &split_bump);
+            for fid in start_face_idx..self.face_tets.len() {
+                for tid in self.face_tets[fid] {
+                    push_longest_edge(tid, self, srf_datum, &mut pq, sq_eps);
+                }
             }
         }
     }
@@ -577,10 +577,6 @@ impl TetSet {
     /// return tet and its start face index
     pub(crate) fn tets_around_edge(&self, eid: EdgeId) -> TetsAroundEdge<'_> {
         TetsAroundEdge::new(self, eid)
-    }
-
-    fn edge_tets(&self, eid: EdgeId) -> impl Iterator<Item = (usize, FaceId)> {
-        let first_hid = self.mesh.e_halfedge(eid);
     }
 
     pub(crate) fn build_descending_vertex_links(&self) -> Vec<VertexId> {
@@ -611,12 +607,13 @@ impl TetSet {
     pub(crate) fn split_edge<A: Allocator + Copy>(
         &mut self,
         split_eid: EdgeId,
+        srf_datum: &[SurfaceData],
         alloc: A,
-    ) -> (VertexId, Vec<[usize; 2], A>) {
+    ) -> usize {
         let [va, vb] = self.mesh.e_vertices(split_eid);
-        let new_vid = self.mesh.split_edge(split_eid, alloc);
-        let new_eid = self.mesh.he_prev(self.mesh.e_halfedge(split_eid));
-        {
+        let new_eid = self.mesh.n_edges_capacity().into();
+        let ve = self.mesh.split_edge(split_eid, alloc);
+        let new_pt = {
             // update points
             let pa = point_3(&self.points, va.0);
             let pb = point_3(&self.points, vb.0);
@@ -625,49 +622,73 @@ impl TetSet {
                 (pa[1] + pb[1]) * 0.5,
                 (pa[2] + pb[2]) * 0.5,
             ]);
-        }
+            point::<3>(&self.points, ve.0)
+        };
         {
             // update edge lengths
             let new_edge_square_len = self.square_edge_lengths[split_eid] * 0.25;
             self.square_edge_lengths.push(new_edge_square_len);
             self.square_edge_lengths[split_eid] = new_edge_square_len;
         }
-
         let mut side_halfedges = Vec::with_capacity_in(4, alloc);
-        unsafe {
-            let mesh_ptr = std::mem::transmute::<_, *mut SurfaceMesh>(&mut self.mesh);
-            side_halfedges.extend(self.mesh.edge(split_eid).halfedges().map(|he| {
-                let vc = *he.next().to();
-                let fid = *he.face();
-                let hid = (*mesh_ptr).split_face(fid, new_vid, vc);
-                if self.mesh.he_to(hid) == vc {
-                    [hid, self.mesh.he_twin(hid)]
-                } else {
-                    [self.mesh.he_sibling(hid), hid]
-                }
-            }));
-        };
+        let mesh_ptr = unsafe { std::mem::transmute::<_, *mut SurfaceMesh>(&mut self.mesh) };
+        side_halfedges.extend(self.mesh.edge(split_eid).halfedges().map(|he| {
+            let he_next = he.next();
+            let [h_ac, h_bc] = if *he.to() == va {
+                [*he_next, *he.prev().prev()]
+            } else {
+                [*he.prev().prev(), *he_next]
+            };
+            let vc = *he_next.to();
+            let fid = *he.face();
+            let new_hid = unsafe { (*mesh_ptr).split_face(fid, ve, vc) };
+            self.face_tets.push(self.face_tets[fid]);
+            if va.valid() {
+                self.square_edge_lengths
+                    .push(square_norm(&sub_short::<3, _>(
+                        point::<3>(&self.points, *vc),
+                        new_pt,
+                    )));
+            } else {
+                self.square_edge_lengths.push(0.0);
+            }
+
+            debug_assert!(self.mesh.he_to(new_hid) == vc);
+            debug_assert!(self.mesh.he_from(new_hid) == ve);
+            [new_hid, self.mesh.he_sibling(new_hid), h_ac, h_bc]
+        }));
+
+        let ret = self.face_tets.len();
 
         let mut prev_tid = INVALID_IND;
-        for (left_halfedges, right_halfedges) in side_halfedges.iter().circular_tuple_windows() {
-            let [fa, fb] = [left_halfedges, right_halfedges].map(|halfedges| {
-                let [f1, f2] = [self.mesh.he_face(halfedges[0]), self.mesh.he_face(halfedges[1])];
-                if *f1 < *f2 {
-                    f1
-                } else {
-                    f2
-                }
+        let mut evaluation_map = HashMap::with_capacity_in(
+            self.tets[self.face_tets[*self.mesh.edge(split_eid).halfedge().face()][0]]
+                .surface_evaluations
+                .len(),
+            alloc,
+        );
+        for (&left_part, &right_part) in side_halfedges.iter().circular_tuple_windows() {
+            let [h_ec, h_ce, h_ac, h_bc] = left_part;
+            let [h_ed, h_de, h_ad, h_bd] = right_part;
+
+            let [fa, fb] = [[h_ec, h_ce], [h_ed, h_de]].map(|halfedges| {
+                let [f1, f2] = [
+                    self.mesh.he_face(halfedges[0]),
+                    self.mesh.he_face(halfedges[1]),
+                ];
+                if *f1 < *f2 { f1 } else { f2 }
             });
 
             let old_tid = if prev_tid == INVALID_IND {
-                (|| {
+                let ret = (|| {
                     for tid in self.face_tets[fa] {
                         if self.face_tets[fb].contains(&tid) {
-                        return tid;
+                            return tid;
                         }
                     }
                     INVALID_IND
-                })()
+                })();
+                ret
             } else {
                 let face_tets = self.face_tets[fa];
                 if face_tets[0] == prev_tid {
@@ -678,321 +699,210 @@ impl TetSet {
             };
             debug_assert!(old_tid != INVALID_IND);
             prev_tid = old_tid;
+            let new_tid = self.tets.len();
 
-            let tet = &self.tets[old_tid];
+            // let tet = unsafe {
+            //     self.tets.as_mut_ptr().add(old_tid)
+            // };
+            let tet = &mut self.tets[old_tid];
             let [bottom_fid, top_fid] = tet.face_from_edge(split_eid, va);
-            let bottom_hid = self.mesh.face(bottom_fid).halfedges().find_map(|he| {
-                if *he.next().to() == va {
-                    Some(*he)
-                } else {
-                    None
-                }
-            }).unwrap();
-            let ori_bottom_hid = if self.mesh.he_to(bottom_hid) != self.mesh.he_to(right_halfedges[0]) {
+            let bottom_hid = self
+                .mesh
+                .face(bottom_fid)
+                .halfedges()
+                .find_map(|he| {
+                    if *he.next().to() == va {
+                        Some(*he)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
+            let h_cd = if self.mesh.he_to(bottom_hid) != self.mesh.he_to(h_ed) {
                 self.mesh.he_twin(bottom_hid)
             } else {
                 bottom_hid
             };
 
-            debug_assert!(self.mesh.he_to(left_halfedges[0]) == self.mesh.he_from(bottom_hid));
-            debug_assert!(self.mesh.he_to(bottom_hid) == self.mesh.he_to(right_halfedges[0]));
+            debug_assert!(self.mesh.he_from(h_cd) == self.mesh.he_to(h_ec));
+            debug_assert!(self.mesh.he_to(h_cd) == self.mesh.he_to(h_ed));
 
-            let new_fid = self.mesh.add_face_by_halfedges(&[left_halfedges[0], ori_bottom_hid, right_halfedges[1]], false);
-            self.face_tets.push([self.tets.len(), old_tid]);
+            let new_fid = self.mesh.add_face_by_halfedges(&[h_ec, h_cd, h_de], false);
+            self.face_tets.push([new_tid, old_tid]);
             // set sibling halfedges
             {
-                let mut new_hid = self.mesh.f_halfedge(new_fid);
-                debug_assert!(self.mesh.he_edge(new_hid) == self.mesh.he_edge(left_halfedges[0]));
-                if self.mesh.he_sibling(left_halfedges[0]) == left_halfedges[1] {
-                    self.mesh.insert_he_sibling(left_halfedges[0], new_hid);
-                } else {
-                    debug_assert!(self.mesh.he_sibling(left_halfedges[1]) == left_halfedges[0]);
-                    self.mesh.insert_he_sibling(left_halfedges[1], new_hid);
-                }
-
-                new_hid = self.mesh.he_next(new_hid);
-                debug_assert!(self.mesh.he_edge(new_hid) == self.mesh.he_edge(bottom_hid));
-                let oppo_bottom_hid = self.mesh.face(top_fid).halfedges().find_map(|he| {
-                    if *he.next().to() == vb {
-                        Some(*he)
+                let set_sibling = |prev_hid, next_hid, curr_hid| {
+                    debug_assert!(self.mesh.he_edge(curr_hid) == self.mesh.he_edge(prev_hid));
+                    debug_assert!(self.mesh.he_edge(curr_hid) == self.mesh.he_edge(next_hid));
+                    if self.mesh.he_sibling(prev_hid) == next_hid {
+                        unsafe {
+                            (*mesh_ptr).insert_he_sibling(prev_hid, curr_hid);
+                        }
                     } else {
-                        None
-                    }
-                }).unwrap();
-                if self.mesh.he_sibling(bottom_hid) == oppo_bottom_hid {
-                    self.mesh.insert_he_sibling(bottom_hid, new_hid);
-                } else {
-                    debug_assert!(self.mesh.he_sibling(oppo_bottom_hid) == bottom_hid);
-                    self.mesh.insert_he_sibling(oppo_bottom_hid, new_hid);
-                }
-
-                new_hid = self.mesh.he_next(new_hid);
-                debug_assert!(self.mesh.he_edge(new_hid) == self.mesh.he_edge(right_halfedges[0]));
-                if self.mesh.he_sibling(right_halfedges[0]) == right_halfedges[1] {
-                    self.mesh.insert_he_sibling(right_halfedges[0], new_hid);
-                } else {
-                    debug_assert!(self.mesh.he_sibling(right_halfedges[1]) == right_halfedges[0]);
-                    self.mesh.insert_he_sibling(right_halfedges[1], new_hid);
-                }
-            }
-
-            let [vc, vd] = [self.mesh.he_to(left_halfedges[0]), self.mesh.he_to(right_halfedges[0])];
-            let [left_bottom_fid, left_top_fid] = if *self.mesh.halfedge(left_halfedges[0]).next().to() == va {
-                debug_assert!(*self.mesh.halfedge(left_halfedges[1]).next().to() == vb);
-                [self.mesh.he_face(left_halfedges[0]), self.mesh.he_face(left_halfedges[1])]
-            } else {
-                debug_assert!(*self.mesh.halfedge(left_halfedges[0]).next().to() == vb);
-                debug_assert!(*self.mesh.halfedge(left_halfedges[1]).next().to() == va);
-                [self.mesh.he_face(left_halfedges[1]), self.mesh.he_face(left_halfedges[0])]
-            };
-
-            let [right_bottom_fid, right_top_fid] = if *self.mesh.halfedge(right_halfedges[0]).next().to() == va {
-                debug_assert!(*self.mesh.halfedge(right_halfedges[1]).next().to() == vb);
-                [self.mesh.he_face(right_halfedges[0]), self.mesh.he_face(right_halfedges[1])]
-            } else {
-                debug_assert!(*self.mesh.halfedge(right_halfedges[0]).next().to() == vb);
-                debug_assert!(*self.mesh.halfedge(right_halfedges[1]).next().to() == va);
-                [self.mesh.he_face(right_halfedges[1]), self.mesh.he_face(right_halfedges[0])]
-            };
-
-            if !vc.valid() {
-                let new_tet = {
-                    Tet {
-                        vertices: [vb, new_vid, vd, vc],
-                        edges: [new_eid, self.mesh.he_edge(right_halfedges[0]), ]
+                        debug_assert!(self.mesh.he_sibling(next_hid) == prev_hid);
+                        unsafe {
+                            (*mesh_ptr).insert_he_sibling(next_hid, curr_hid);
+                        }
                     }
                 };
-            }
-        }
 
-        /*let [va, vb] = self.mesh.e_vertices(eid);
-        let mut tet_faces_map: hashbrown::HashMap<usize, [usize; 2], _, _> =
-            hashbrown::HashMap::<usize, [usize; 2], _, _>::new_in(alloc);
-        let mut faces = Vec::new_in(alloc);
-        let mut oppo_verts = Vec::new_in(alloc);
-        for (i, he) in self.mesh.edge(eid).halfedges().enumerate() {
-            let fid = self.mesh.he_face(*he);
-            faces.push(fid);
-            for tid in self.face_tets[fid.0].iter() {
-                if tid == &INVALID_IND {
-                    continue;
-                }
-                if let Some(tet_faces) = tet_faces_map.get_mut(tid) {
-                    tet_faces[1] = i;
-                } else {
-                    tet_faces_map.insert(*tid, [i, INVALID_IND]);
-                }
+                let mut new_hid = self.mesh.f_halfedge(new_fid);
+                set_sibling(h_ec, h_ce, new_hid);
+
+                new_hid = self.mesh.he_next(new_hid);
+                let oppo_bottom_hid = self
+                    .mesh
+                    .face(top_fid)
+                    .halfedges()
+                    .find_map(|he| {
+                        if *he.next().to() == vb {
+                            Some(*he)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap();
+                set_sibling(bottom_hid, oppo_bottom_hid, new_hid);
+
+                new_hid = self.mesh.he_next(new_hid);
+                set_sibling(h_ed, h_de, new_hid);
             }
-            oppo_verts.push(*he.next().to());
-        }
-        let mut tet_faces = Vec::from_iter(tet_faces_map.clone());
-        tet_faces.sort_unstable();
-        let mut oppo_halfedges = Vec::with_capacity_in(tet_faces_map.len(), alloc);
-        let mut bottom_faces = Vec::with_capacity_in(tet_faces_map.len(), alloc);
-        let mut top_faces = Vec::with_capacity_in(tet_faces_map.len(), alloc);
-        for &(tid, [fa, fb]) in &tet_faces {
-            let bottom_top_faces = || {
-                let mut fc = FaceId::default();
-                let mut fd = FaceId::default();
-                for fid in self.tets[tid].faces {
-                    if fid == faces[fa] || fid == faces[fb] {
-                        continue;
-                    }
-                    if fc.0 == INVALID_IND {
-                        fc = fid;
-                    } else {
-                        fd = fid;
-                    }
-                }
-                let h = self.mesh.fv_halfedge(fc, va);
-                if h.0 != INVALID_IND {
-                    [fc, fd]
-                } else {
-                    [fd, fc]
-                }
+
+            let [vc, vd] = [self.mesh.he_to(h_ec), self.mesh.he_to(h_ed)];
+            let [left_bottom_fid, left_top_fid] = [
+                *self.mesh.halfedge(h_ac).face(),
+                *self.mesh.halfedge(h_bc).face(),
+            ];
+            let [right_bottom_fid, right_top_fid] = [
+                *self.mesh.halfedge(h_ad).face(),
+                *self.mesh.halfedge(h_bd).face(),
+            ];
+
+            let tet_indices = {
+                let mut vertex_indices_map = HashMap::with_capacity_in(4, alloc);
+                vertex_indices_map
+                    .extend(tet.vertices.into_iter().enumerate().map(|(i, v)| (v, i)));
+                [va, vb, vc, vd].map(|vid| vertex_indices_map[&vid])
             };
-            let [bottom_fid, top_fid] = bottom_top_faces();
-            debug_assert!(self.mesh.fv_halfedge(bottom_fid, va).0 != INVALID_IND);
-            debug_assert!(self.mesh.fv_halfedge(top_fid, vb).0 != INVALID_IND);
+            let mut get_srf_eval = |indices: [usize; 4]| {
+                TinyVec::from_iter(tet.surface_evaluations.iter().map(|tet_eval| {
+                    let sid = tet_eval.sid;
+                    let evaluation = indices.map(|idx| {
+                        if idx < 4 {
+                            tet_eval.evaluation[tet_indices[idx]]
+                        } else {
+                            let sid = tet_eval.sid;
+                            *evaluation_map
+                                .entry(sid)
+                                .or_insert(srf_datum[sid].surf.eval(new_pt))
+                        }
+                    });
+                    SurfaceEvaluation { sid, evaluation }
+                }))
+            };
 
-            bottom_faces.push(bottom_fid);
-            top_faces.push(top_fid);
-            let hid = self.mesh.fv_halfedge(bottom_fid, va);
+            let e_ec = self.mesh.he_edge(h_ec);
+            let e_ed = self.mesh.he_edge(h_ed);
+            let e_cd = self.mesh.he_edge(h_cd);
+            let e_ac = self.mesh.he_edge(h_ac);
+            let e_bc = self.mesh.he_edge(h_bc);
+            let e_ad = self.mesh.he_edge(h_ad);
+            let e_bd = self.mesh.he_edge(h_bd);
 
-            if tet_face_reversed(&self.face_tets[bottom_fid], tid) {
-                oppo_halfedges.push(self.mesh.he_twin(self.mesh.he_next(hid)));
-            } else {
-                oppo_halfedges.push(self.mesh.he_next(hid));
-            }
-        }
-        let new_vert = self.mesh.split_edge(eid, alloc);
-        let [bottom_eid, top_eid] = {
-            let hid = self.mesh.e_halfedge(eid);
-            if self.mesh.he_from(hid) == va || self.mesh.he_to(hid) == va {
-                [eid, self.square_edge_lengths.len().into()]
-            } else {
-                [self.square_edge_lengths.len().into(), eid]
-            }
-        };
-        {
-            // update points
-            let pa = point_3(&self.points, va.0);
-            let pb = point_3(&self.points, vb.0);
-            self.points.extend_from_slice(&[
-                (pa[0] + pb[0]) * 0.5,
-                (pa[1] + pb[1]) * 0.5,
-                (pa[2] + pb[2]) * 0.5,
-            ]);
-        }
-        {
-            // update edge lengths
-            let new_edge_square_len = self.square_edge_lengths[eid] * 0.25;
-            self.square_edge_lengths.push(new_edge_square_len);
-            self.square_edge_lengths[eid] = new_edge_square_len;
-        }
-
-        let faces_capacity = self.mesh.n_faces() + faces.len() + tet_faces_map.len();
-        self.face_tets.reserve(faces_capacity);
-        let mut new_halfedges = Vec::with_capacity_in(oppo_verts.len(), alloc);
-        new_halfedges.extend(oppo_verts.into_iter().zip(&faces).map(|(v, &fid)| {
-            let hid = self.mesh.split_face(fid, new_vert, v);
-            self.square_edge_lengths.push(square_edge_length(
-                &self.points,
-                self.mesh.he_edge(hid),
-                &self.mesh,
-            ));
-            self.face_tets.push(self.face_tets[fid]);
-            if self.mesh.he_to(hid) != new_vert {
-                hid
-            } else {
-                self.mesh.he_twin(hid)
-            }
-        }));
-
-        debug_assert!(
-            new_halfedges
-                .iter()
-                .all(|&hid| self.mesh.he_from(hid) == new_vert)
-        );
-
-        let mut result_tets = Vec::with_capacity_in(tet_faces_map.len() << 1, alloc);
-        for ((((tid, face_indices), oppo_hid), bottom_fid), top_fid) in tet_faces
-            .into_iter()
-            .zip(oppo_halfedges)
-            .zip(bottom_faces)
-            .zip(top_faces)
-        {
-            let mut ha = new_halfedges[face_indices[0]];
-            let mut hb = new_halfedges[face_indices[1]];
-            if self.mesh.he_to(ha) != self.mesh.he_from(oppo_hid) {
-                std::mem::swap(&mut ha, &mut hb);
-            }
-            hb = self.mesh.he_twin(hb);
-
-            debug_assert!(self.mesh.he_to(ha) == self.mesh.he_from(oppo_hid));
-            debug_assert!(self.mesh.he_from(hb) == self.mesh.he_to(oppo_hid));
-            debug_assert!(self.mesh.he_to(hb) == self.mesh.he_from(ha));
-
-            let new_fid = self.mesh.add_face_by_halfedges(&[ha, oppo_hid, hb]);
-            let new_tid = self.tets.len();
-
-            // We have chose `oppo_hid` corresponding to bottom face with positive orientation
-            self.face_tets.push([tid, new_tid]);
-
-            let replace = |tets: &mut [usize; 2]| {
-                for t in tets {
-                    if *t == tid {
-                        *t = new_tid;
-                        break;
+            let mut reset_tet_face = |fid: FaceId| {
+                for tid in self.face_tets[fid].iter_mut() {
+                    if *tid == old_tid {
+                        *tid = new_tid;
                     }
                 }
             };
+            reset_tet_face(left_top_fid);
+            reset_tet_face(right_top_fid);
+            reset_tet_face(top_fid);
 
-            replace(&mut self.face_tets[bottom_fid]);
+            let new_tet = if !vc.valid() {
+                let new_tet = {
+                    Tet {
+                        vertices: [vb, ve, vd, vc],
+                        edges: [split_eid, e_bd, e_bc, e_ed, e_ec, e_cd],
+                        faces: [new_fid, top_fid, left_top_fid, right_top_fid],
+                        surface_evaluations: get_srf_eval([1, 4, 3, 2]),
+                    }
+                };
 
-            let side_faces_and_edges = [ha, self.mesh.he_twin(hb)].map(|hid| {
-                // when the face is split, the f_halfedge of the face is the split halfedge
-                let he = self.mesh.halfedge(hid);
-                let next_he = he.next();
-                if *next_he.to() == va {
-                    let fid = self.mesh.he_face(*he);
-                    replace(&mut self.face_tets[fid]);
+                tet.vertices = [ve, va, vd, vc];
+                tet.edges = [new_eid, e_ed, e_ec, e_ad, e_ac, e_cd];
+                tet.faces = [bottom_fid, new_fid, left_bottom_fid, right_bottom_fid];
+                tet.surface_evaluations = get_srf_eval([4, 0, 3, 2]);
+                new_tet
+            } else {
+                let new_tet = Tet {
+                    vertices: [ve, vb, vc, vd],
+                    edges: [split_eid, e_ec, e_ed, e_bc, e_bd, e_cd],
+                    faces: [top_fid, new_fid, right_top_fid, left_top_fid],
+                    surface_evaluations: get_srf_eval([4, 1, 2, 3]),
+                };
 
-                    let prev_twin = he.twin().prev();
+                tet.vertices = [va, ve, vc, vd];
+                tet.edges = [new_eid, e_ac, e_ad, e_ec, e_ed, e_cd];
+                tet.faces = [new_fid, bottom_fid, right_bottom_fid, left_bottom_fid];
+                tet.surface_evaluations = get_srf_eval([4, 1, 2, 3]);
+                new_tet
+            };
+            self.tets.push(new_tet);
 
-                    debug_assert!(*prev_twin.from() == vb);
-                    debug_assert!(*prev_twin.to() == *he.to());
-
-                    (
-                        [self.mesh.he_face(*prev_twin), fid],
-                        [*prev_twin.edge(), *next_he.edge()],
-                    )
-                } else {
-                    debug_assert!(*next_he.to() == vb);
-                    let prev_twin = he.twin().prev();
-                    debug_assert!(*prev_twin.from() == va);
-                    debug_assert!(*prev_twin.to() == *he.to());
-                    let twin_fid = self.mesh.he_face(*prev_twin);
-                    replace(&mut self.face_tets[twin_fid]);
-                    (
-                        [self.mesh.he_face(*he), twin_fid],
-                        [*next_he.edge(), *prev_twin.edge()],
-                    )
-                }
-            });
-
-            let [vc, vd] = self.mesh.he_vertices(oppo_hid);
-            let [ea, eb, oppo_eid] = [ha, hb, oppo_hid].map(|hid| self.mesh.he_edge(hid));
-
-            self.tet_vertices[tid] = [new_vert, vb, vd, vc];
-            self.tet_edges[tid] = [
-                top_eid,
-                eb,
-                ea,
-                side_faces_and_edges[1].1[0],
-                side_faces_and_edges[0].1[0],
-                oppo_eid,
-            ];
-            self.tet_faces[tid] = [
-                top_fid,
-                new_fid,
-                side_faces_and_edges[0].0[0],
-                side_faces_and_edges[1].0[0],
-            ];
-
-            self.tet_vertices.push([new_vert, va, vc, vd]);
-            self.tet_edges.push([
-                bottom_eid,
-                ea,
-                eb,
-                side_faces_and_edges[0].1[1],
-                side_faces_and_edges[1].1[1],
-                oppo_eid,
-            ]);
-
-            self.tet_faces.push([
-                bottom_fid,
-                new_fid,
-                side_faces_and_edges[1].0[1],
-                side_faces_and_edges[0].0[1],
-            ]);
-            self.surf_indices.push(self.surf_indices[tid].clone());
             #[cfg(debug_assertions)]
             {
-                for _t in [tid, new_tid] {
-                    let _verts = &self.tet_vertices[_t];
-                    let _pts = _verts.map(|vid| point_3(&self.points, vid.0));
-                    let _ori = crate::predicates::orient3d::orient3d_eeee(
-                        &_pts[0], &_pts[1], &_pts[2], &_pts[3], alloc,
-                    );
-                    debug_assert!(_ori.is_pos());
-                }
-            }
+                let check_tet = |tid: usize| {
+                    let tet = &self.tets[tid];
+                    for ((va, vb), eid) in
+                        tet.vertices.into_iter().tuple_combinations().zip(tet.edges)
+                    {
+                        let [vc, vd] = self.mesh.e_vertices(eid);
+                        debug_assert!((va == vc && vb == vd) || (va == vd && vb == vc));
+                        if va.valid() && vb.valid() {
+                            let pa = point::<3>(&self.points, *va);
+                            let pb = point::<3>(&self.points, *vb);
+                            let sq_len = square_norm(&sub_short::<3, _>(pa, pb));
+                            debug_assert!((sq_len - self.square_edge_lengths[eid]).abs() < 1e-12);
+                        }
 
-            result_tets.push([tid, new_tid]);
+                        let halfedges = Vec::from_iter(self.mesh.edge(eid).halfedges());
+                        for (he1, he2) in halfedges.iter().circular_tuple_windows() {
+                            let f1 = *he1.face();
+                            let f2 = *he2.face();
+                            let [t1, t2] = self.face_tets[f1];
+                            let [t3, t4] = self.face_tets[f2];
+                            assert!(t1 == t3 || t1 == t4 || t2 == t3 || t2 == t4);
+                        }
+                    }
+
+                    let points = tet.vertices.map(|vid| point::<3>(&self.points, *vid));
+                    for eval in &tet.surface_evaluations {
+                        for i in 0..4 {
+                            let e1 = eval.evaluation[i];
+                            let e2 = srf_datum[eval.sid].surf.eval(points[i]);
+                            let length = square_norm(&sub_short::<4, _>(&e1, &e2));
+                            debug_assert!(length < 1e-12);
+                        }
+                    }
+
+                    let mut tet_vertices = tet.vertices.map(|vid| *vid);
+                    tet_vertices.sort();
+                    for (fid, vd) in tet.faces.into_iter().zip(tet.vertices) {
+                        let he = self.mesh.face(fid).halfedge();
+                        let mut vs0 = [**he.from(), **he.to(), **he.next().to(), *vd];
+                        vs0.sort();
+                        debug_assert!(vs0 == tet_vertices);
+                    }
+                };
+
+                check_tet(old_tid);
+                check_tet(new_tid);
+            }
         }
-        (new_vert, result_tets)*/
-        (VertexId::default(), Vec::new_in(alloc))
+
+        ret
     }
 }
 
