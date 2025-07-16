@@ -1,39 +1,256 @@
 use std::alloc::Allocator;
 
-use super::element::{EdgeId, HalfedgeId};
+use hashbrown::HashMap;
+use itertools::Itertools;
 
-use super::mesh::{BaseMesh, ElementContainer, Face, Halfedge, HasBaseMesh, Mesh, Vertex};
+use super::element::{EdgeId, ElementId, FaceId, HalfedgeId, VertexId};
 
-struct HEdge<P> {
+use super::mesh::{BaseMesh, ElementContainer, Face, Halfedge, HasBaseMesh, Mesh, MeshCore, Vertex};
+
+#[derive(Default, Clone)]
+pub struct HEdge<P> {
     edge: EdgeId,
+    sibling: HalfedgeId,
+    v_in_next: HalfedgeId,
     property: P,
 }
 
-struct Edge<P> {
+impl<P> HEdge<P> {
+    pub fn new(edge: EdgeId, sibling: HalfedgeId, v_in_next: HalfedgeId, property: P) -> Self {
+        Self { edge, sibling, v_in_next, property }
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct Edge<P> {
     halfedge: HalfedgeId,
     property: P,
 }
 
+impl<P> Edge<P> {
+    pub fn new(halfedge: HalfedgeId, property: P) -> Self {
+        Self { halfedge, property }
+    }
+}
+
 pub struct SurfaceMesh<VP, HP, EP, FP, A: Allocator> {
-    base_mesh: BaseMesh<Vertex<VP>, Halfedge<HEdge<HP>>, Face<FP>, A>,
+    base: BaseMesh<Vertex<VP>, Halfedge<HEdge<HP>>, Face<FP>, A>,
     edges: ElementContainer<Edge<EP>, EdgeId, A>,
     n_edges: usize,
 }
 
-impl<VP, HP, EP, FP, A: Allocator> HasBaseMesh
-    for SurfaceMesh<VP, HP, EP, FP, A>
-{
+impl <VP: Default + Clone, HP: Default + Clone, EP: Default + Clone, FP: Default + Clone, A: Allocator + Copy> SurfaceMesh<VP, HP, EP, FP, A> {
+    pub fn new_in<U, T>(polygons: T, alloc: A) -> Self
+    where
+        U: AsRef<[usize]>,
+        T: IntoIterator<Item = U>,
+    {
+        let base = BaseMesh::new_in(alloc);
+
+        let mut mesh = Self {
+            base,
+            edges: ElementContainer::new_in(alloc),
+            n_edges: 0,
+        };
+
+        for (fid, polygon) in polygons.into_iter().enumerate() {
+            let fid = fid.into();
+            let mut first_hid = HalfedgeId::default();
+            let mut prev_hid = first_hid;
+            let mut prev_vid = VertexId::default();
+
+            for (i, &b) in polygon.as_ref().iter().enumerate() {
+                let vid = VertexId::from(b);
+                if vid.valid() {
+                    mesh.base.v_min_reserve(vid);
+                }
+                let hid = mesh.new_halfedges(1);
+
+                let he = mesh.halfedge_mut(hid);
+                he.vertex = vid;
+                he.face = fid;
+
+                if i == 0 {
+                    mesh.new_faces(1);
+                    mesh.face_mut(fid).halfedge = hid;
+                    first_hid = hid;
+                } else {
+                    mesh.set_v_halfedge(prev_vid, hid);
+                    mesh.connect_halfedges(prev_hid, hid);
+                }
+                prev_vid = vid;
+                prev_hid = hid;
+            }
+            mesh.set_v_halfedge(prev_vid, first_hid);
+            mesh.connect_halfedges(prev_hid, first_hid);
+        }
+        mesh.base_mut().recount_n_vertices();
+
+        let mut edge_history = HashMap::<(VertexId, VertexId), HalfedgeId>::new();
+        // build edge
+        for hid in 0..mesh.n_halfedges_capacity() {
+            let hid = hid.into();
+            let [va, vb] = mesh.he_vertices(hid);
+            let key = if *va < *vb {
+                (va, vb)
+            } else {
+                (vb, va)
+            };
+            if let Some(prev_hid) = edge_history.get_mut(&key) {
+                // We're already seen this edge, connect to the previous halfedge incident on the edge
+                let eid = mesh.he_edge(*prev_hid);
+                let he = mesh.halfedge_mut(hid);
+                he.property.sibling = *prev_hid;
+                he.property.edge = eid;
+                *prev_hid = hid;
+            } else {
+                // This is the first time we've ever seen this edge, create a new edge object
+                let new_eid = mesh.new_edges(1);
+                let he = mesh.halfedge_mut(hid);
+                he.property.edge = new_eid;
+                he.property.sibling = HalfedgeId::default();
+                mesh.edge_mut(new_eid).halfedge = hid;
+                edge_history.insert(key, hid);
+            }
+        }
+        // Complete the sibling cycle by following backwards each edge until we reach the first sibling-less entry
+        for last_hid in edge_history.into_values() {
+
+            let mut curr_hid = last_hid;
+            while mesh.halfedge(curr_hid).property.sibling.valid() {
+                curr_hid = mesh.halfedge(curr_hid).property.sibling;
+            }
+            mesh.halfedge_mut(curr_hid).property.sibling = last_hid;
+        }
+
+        let (v_in_halfedges, v_in_separators) = mesh.vertex_cycle();
+        let n_vertices = mesh.n_vertices();
+        for idx in 0..n_vertices {
+            let (start, end) = (v_in_separators[idx], v_in_separators[idx + 1]);
+            for (&ha, &hb) in v_in_halfedges[start..end].iter().circular_tuple_windows() {
+                mesh.halfedge_mut(ha).property.v_in_next = hb;
+            }
+        }
+
+        mesh
+    }
+
+    #[inline]
+    pub fn edge(&self, eid: EdgeId) -> &Edge<EP> {
+        &self.edges[eid]
+    }
+
+    #[inline]
+    pub fn edge_mut(&mut self, eid: EdgeId) -> &mut Edge<EP> {
+        &mut self.edges[eid]
+    }
+
+    #[inline]
+    pub fn new_halfedges(&mut self, n: usize) -> HalfedgeId {
+        self.base_mut().new_halfedges(n)
+    }
+
+    #[inline]
+    pub fn new_edges(&mut self, n: usize) -> EdgeId {
+        let ret = EdgeId(self.n_edges_capacity());
+        let cap = *ret + n;
+        self.edges.data.resize(cap, Edge::default());
+        self.n_edges += n;
+        ret
+    }
+
+    #[inline]
+    pub fn new_faces(&mut self, n: usize) -> FaceId {
+        self.base.new_faces(n)
+    }
+
+    fn vertex_cycle(&self) -> (Vec<HalfedgeId>, Vec<usize>) {
+        let mut v_degree = vec![0usize; self.n_vertices_capacity()];
+        for he in self.base.halfedges.iter() {
+            let vid = he.vertex;
+            if vid.valid() {
+                v_degree[*vid] += 1;
+            }
+        }
+        let mut vertex_separators = vec![0];
+        vertex_separators.extend(v_degree.iter().scan(0, |sum, &count| {
+            *sum += count;
+            Some(*sum)
+        }));
+        let mut he_positions = vertex_separators.clone();
+        let mut vertex_halfedges = vec![HalfedgeId::from(0); self.n_halfedges_capacity()];
+        self.base.halfedges.iter().enumerate().for_each(|(hid, he)| {
+            let vid = he.vertex;
+            if vid.valid() {
+                let pos = he_positions[*vid];
+                vertex_halfedges[pos] = hid.into();
+                he_positions[*vid] += 1;
+            }
+        });
+        (vertex_halfedges, vertex_separators)
+    }
+}
+
+impl<VP, HP, EP, FP, A: Allocator> HasBaseMesh for SurfaceMesh<VP, HP, EP, FP, A> {
     type A = A;
     type VP = VP;
     type HP = HEdge<HP>;
     type FP = FP;
 
     fn base(&self) -> &BaseMesh<Vertex<Self::VP>, Halfedge<Self::HP>, Face<Self::FP>, Self::A> {
-        &self.base_mesh
+        &self.base
     }
 
-    fn base_mut(&mut self) -> &mut BaseMesh<Vertex<Self::VP>, Halfedge<Self::HP>, Face<Self::FP>, Self::A> {
-        todo!()
+    fn base_mut(
+        &mut self,
+    ) -> &mut BaseMesh<Vertex<Self::VP>, Halfedge<Self::HP>, Face<Self::FP>, Self::A> {
+        &mut self.base
+    }
+}
+
+impl<VP, HP, EP, FP, A: Allocator> Mesh for SurfaceMesh<VP, HP, EP, FP, A> {
+    type Edge = Edge<EP>;
+
+    #[inline]
+    fn n_edges(&self) -> usize {
+        self.n_edges
     }
 
+    #[inline]
+    fn n_edges_capacity(&self) -> usize {
+        self.edges.len()
+    }
+
+    #[inline]
+    fn he_sibling(&self, hid: HalfedgeId) -> HalfedgeId {
+        self.halfedge(hid).property.sibling
+    }
+
+    #[inline]
+    fn he_edge(&self, hid: HalfedgeId) -> EdgeId {
+        self.halfedge(hid).property.edge
+    }
+}
+
+mod tests {
+    #[test]
+    fn test_surface_mesh() {
+        use crate::mesh1::mesh::MeshCore;
+        use super::SurfaceMesh;
+
+        let mesh = SurfaceMesh::<(), (), (), (), _>::new_in(
+            vec![
+                vec![0, 1, 2],
+                vec![0, 2, 3],
+                vec![0, 3, 1],
+                vec![0, 4, 5],
+                vec![0, 5, 6],
+                vec![0, 6, 4],
+            ],
+            std::alloc::Global,
+        );
+        println!("the size of mesh is {:?}", std::mem::size_of_val(&mesh));
+
+        debug_assert!(mesh.n_vertices() == 7);
+    }
 }
