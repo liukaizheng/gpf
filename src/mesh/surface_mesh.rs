@@ -358,7 +358,6 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
             self.e_halfedge_arr[new_e] = first_he;
             first_he
         }
-
     }
 
     pub fn add_face_by_halfedges(
@@ -400,6 +399,19 @@ impl<A: Allocator + Copy> SurfaceMesh<A> {
         // f-h
         self.core_data.f_halfedge_arr[new_f] = first_new_hid;
         new_f
+    }
+
+    pub fn get_he_from_oppo_vertex(&self, fid: FaceId, vertex: VertexId) -> HalfedgeId {
+        let mut curr = self.f_halfedge(fid);
+        let mut next = self.he_next(curr);
+        loop {
+            if self.he_to(next) == vertex {
+                return curr;
+            }
+
+            curr = next;
+            next = self.he_next(next);
+        }
     }
 }
 

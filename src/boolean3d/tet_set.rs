@@ -1,4 +1,7 @@
-use std::{alloc::Allocator, collections::BinaryHeap};
+use std::{
+    alloc::Allocator,
+    collections::BinaryHeap,
+};
 
 use bumpalo::Bump;
 use hashbrown::{HashMap, HashSet};
@@ -565,7 +568,9 @@ impl TetSet {
             }
             split_bump.reset();
 
-            let start_face_idx = self.split_edge(eid, srf_datum, &split_bump);
+            let start_face_idx =
+                self.split_edge(eid, srf_datum, &split_bump);
+
             for fid in start_face_idx..self.face_tets.len() {
                 for tid in self.face_tets[fid] {
                     push_longest_edge(tid, self, srf_datum, &mut pq, sq_eps);
@@ -630,7 +635,8 @@ impl TetSet {
             self.square_edge_lengths.push(new_edge_square_len);
             self.square_edge_lengths[split_eid] = new_edge_square_len;
         }
-        let mut side_halfedges = Vec::with_capacity_in(self.mesh.edge(split_eid).halfedges().count(), alloc);
+        let mut side_halfedges =
+            Vec::with_capacity_in(self.mesh.edge(split_eid).halfedges().count(), alloc);
         let mesh_ptr = unsafe { std::mem::transmute::<_, *mut SurfaceMesh>(&mut self.mesh) };
         let mesh_ref = &self.mesh; // Cache mesh reference to reduce dereferencing
         side_halfedges.extend(mesh_ref.edge(split_eid).halfedges().map(|he| {
@@ -661,7 +667,6 @@ impl TetSet {
         }));
 
         let ret = self.face_tets.len();
-
         let mut prev_tid = INVALID_IND;
         let mut evaluation_map = HashMap::with_capacity_in(
             self.tets[self.face_tets[*mesh_ref.edge(split_eid).halfedge().face()][0]]
@@ -669,19 +674,22 @@ impl TetSet {
                 .len(),
             alloc,
         );
-        
-        // Pre-allocate vectors outside the loop to reduce allocations
-        let mut cached_evaluations: Vec<(usize, SurfaceEvaluation, [f64; 4]), _> = Vec::with_capacity_in(8, alloc);
-        
-        for (left_part, right_part) in side_halfedges.into_iter().circular_tuple_windows() {
-            let [h_ec, h_ce, h_ac, h_bc] = left_part;
-            let [h_ed, h_de, h_ad, h_bd] = right_part;
 
-            // Cache face lookups and mesh queries
-            let left_bottom_fid = *mesh_ref.halfedge(h_ac).face();
-            let left_top_fid = *mesh_ref.halfedge(h_bc).face();
-            let right_bottom_fid = *mesh_ref.halfedge(h_ad).face();
-            let right_top_fid = *mesh_ref.halfedge(h_bd).face();
+        for ([h_ec, h_ce, h_ac, h_bc], [h_ed, h_de, h_ad, h_bd]) in
+            side_halfedges.into_iter().circular_tuple_windows()
+        {
+            let [
+                left_bottom_fid,
+                left_top_fid,
+                right_bottom_fid,
+                right_top_fid,
+            ] = [
+                *mesh_ref.halfedge(h_ac).face(),
+                *mesh_ref.halfedge(h_bc).face(),
+                *mesh_ref.halfedge(h_ad).face(),
+                *mesh_ref.halfedge(h_bd).face(),
+            ];
+            let [vc, vd] = [mesh_ref.he_to(h_ec), mesh_ref.he_to(h_ed)];
 
             // Optimized tetrahedron finding
             let old_tid = if prev_tid == INVALID_IND {
@@ -703,32 +711,14 @@ impl TetSet {
             debug_assert!(old_tid != INVALID_IND);
             prev_tid = old_tid;
             let new_tid = self.tets.len();
+            let tet = &mut self.tets[old_tid];
 
             // Get immutable reference first to avoid borrowing conflicts
-            let [bottom_fid, top_fid] = self.tets[old_tid].face_from_edge(split_eid, va);
-            
-            // Pre-compute surface evaluations before getting mutable reference
-            cached_evaluations.clear();
-            cached_evaluations.reserve(self.tets[old_tid].surface_evaluations.len());
-            for tet_eval in &self.tets[old_tid].surface_evaluations {
-                let sid = tet_eval.sid;
-                let new_pt_eval = *evaluation_map
-                    .entry(sid)
-                    .or_insert_with(|| srf_datum[sid].surf.eval(new_pt));
-                // Copy the evaluation data to avoid borrowing issues
-                cached_evaluations.push((sid, tet_eval.clone(), new_pt_eval));
-            }
-            
-            // Optimized halfedge finding using direct vertex lookup
-            let bottom_hid = mesh_ref.face(bottom_fid).halfedges().find_map(|he| {
-                if *he.next().to() == va {
-                    Some(*he)
-                } else {
-                    None
-                }
-            }).unwrap();
-            
-            let h_cd = if mesh_ref.he_to(bottom_hid) != mesh_ref.he_to(h_ed) {
+            let [bottom_fid, top_fid] = tet.face_from_edge(split_eid, va);
+
+            let bottom_hid = mesh_ref.get_he_from_oppo_vertex(bottom_fid, va);
+
+            let h_cd = if mesh_ref.he_to(bottom_hid) != vd {
                 mesh_ref.he_twin(bottom_hid)
             } else {
                 bottom_hid
@@ -739,7 +729,7 @@ impl TetSet {
 
             let new_fid = unsafe { (*mesh_ptr).add_face_by_halfedges(&[h_ec, h_cd, h_de], false) };
             self.face_tets.push([new_tid, old_tid]);
-            
+
             // set sibling halfedges - optimized by caching halfedge lookups
             {
                 let set_sibling = |prev_hid, next_hid, curr_hid| {
@@ -762,26 +752,26 @@ impl TetSet {
 
                 new_hid = mesh_ref.he_next(new_hid);
                 // Optimized opposite halfedge finding
-                let oppo_bottom_hid = mesh_ref.face(top_fid).halfedges().find_map(|he| {
-                    if *he.next().to() == vb {
-                        Some(*he)
-                    } else {
-                        None
-                    }
-                }).unwrap();
+                let oppo_bottom_hid = mesh_ref
+                    .face(top_fid)
+                    .halfedges()
+                    .find_map(|he| {
+                        if *he.next().to() == vb {
+                            Some(*he)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap();
                 set_sibling(bottom_hid, oppo_bottom_hid, new_hid);
 
                 new_hid = mesh_ref.he_next(new_hid);
                 set_sibling(h_ed, h_de, new_hid);
             }
 
-            // Cache vertex lookups to avoid repeated he_to() calls
-            let vc = mesh_ref.he_to(h_ec);
-            let vd = mesh_ref.he_to(h_ed);
-
             // Optimized vertex index mapping using lookup table instead of loop
             let mut tet_indices = [usize::MAX; 4]; // Use MAX as sentinel
-            for (i, &v) in self.tets[old_tid].vertices.iter().enumerate() {
+            for (i, &v) in tet.vertices.iter().enumerate() {
                 match v {
                     v if v == va => tet_indices[0] = i,
                     v if v == vb => tet_indices[1] = i,
@@ -790,83 +780,70 @@ impl TetSet {
                     _ => {} // Should not happen for valid tetrahedron
                 }
             }
-            
-            let get_srf_eval = |indices: [usize; 4]| {
-                TinyVec::from_iter(cached_evaluations.iter().map(|(sid, tet_eval, new_pt_eval)| {
+            let mut get_srf_eval = |indices: [usize; 4]| {
+                TinyVec::from_iter(tet.surface_evaluations.iter().map(|tet_eval| {
+                    let sid = tet_eval.sid;
                     let evaluation = indices.map(|idx| {
                         if idx < 4 {
                             tet_eval.evaluation[tet_indices[idx]]
                         } else {
-                            *new_pt_eval
+                            *evaluation_map
+                                .entry(sid)
+                                .or_insert_with(|| srf_datum[sid].surf.eval(new_pt))
                         }
                     });
-                    SurfaceEvaluation { sid: *sid, evaluation }
+                    SurfaceEvaluation { sid, evaluation }
                 }))
             };
 
             // Batch edge lookups to reduce function calls
-            let edges = [
-                mesh_ref.he_edge(h_ec),  // e_ec
-                mesh_ref.he_edge(h_ed),  // e_ed
-                mesh_ref.he_edge(h_cd),  // e_cd
-                mesh_ref.he_edge(h_ac),  // e_ac
-                mesh_ref.he_edge(h_bc),  // e_bc
-                mesh_ref.he_edge(h_ad),  // e_ad
-                mesh_ref.he_edge(h_bd),  // e_bd
+            let [e_ec, e_ed, e_cd, e_ac, e_bc, e_ad, e_bd] = [
+                mesh_ref.he_edge(h_ec), // e_ec
+                mesh_ref.he_edge(h_ed), // e_ed
+                mesh_ref.he_edge(h_cd), // e_cd
+                mesh_ref.he_edge(h_ac), // e_ac
+                mesh_ref.he_edge(h_bc), // e_bc
+                mesh_ref.he_edge(h_ad), // e_ad
+                mesh_ref.he_edge(h_bd), // e_bd
             ];
-            let [e_ec, e_ed, e_cd, e_ac, e_bc, e_ad, e_bd] = edges;
 
             // Batch face updates with early termination
-            let face_updates = [left_top_fid, right_top_fid, top_fid];
-            for &fid in &face_updates {
+            for fid in [left_top_fid, right_top_fid, top_fid] {
                 let face_tet_ref = &mut self.face_tets[fid];
                 if face_tet_ref[0] == old_tid {
                     face_tet_ref[0] = new_tid;
-                } else if face_tet_ref[1] == old_tid {
+                } else {
+                    debug_assert!(face_tet_ref[1] == old_tid);
                     face_tet_ref[1] = new_tid;
                 }
             }
 
-            // Optimized tetrahedron creation with reduced branching
-            let (new_tet, old_tet_data) = if !vc.valid() {
-                (
-                    Tet {
-                        vertices: [vb, ve, vd, vc],
-                        edges: [split_eid, e_bd, e_bc, e_ed, e_ec, e_cd],
-                        faces: [new_fid, top_fid, left_top_fid, right_top_fid],
-                        surface_evaluations: get_srf_eval([1, 4, 3, 2]),
-                    },
-                    (
-                        [ve, va, vd, vc],
-                        [new_eid, e_ed, e_ec, e_ad, e_ac, e_cd],
-                        [bottom_fid, new_fid, left_bottom_fid, right_bottom_fid],
-                        [4, 0, 3, 2]
-                    )
-                )
+            let new_tet = if !vc.valid() {
+                let new_tet = Tet {
+                    vertices: [vb, ve, vd, vc],
+                    edges: [split_eid, e_bd, e_bc, e_ed, e_ec, e_cd],
+                    faces: [new_fid, top_fid, left_top_fid, right_top_fid],
+                    surface_evaluations: get_srf_eval([1, 4, 3, 2]),
+                };
+                tet.vertices = [ve, va, vd, vc];
+                tet.edges = [new_eid, e_ed, e_ec, e_ad, e_ac, e_cd];
+                tet.faces = [bottom_fid, new_fid, left_bottom_fid, right_bottom_fid];
+                tet.surface_evaluations = get_srf_eval([4, 0, 3, 2]);
+                new_tet
             } else {
-                (
-                    Tet {
-                        vertices: [ve, vb, vc, vd],
-                        edges: [split_eid, e_ec, e_ed, e_bc, e_bd, e_cd],
-                        faces: [top_fid, new_fid, right_top_fid, left_top_fid],
-                        surface_evaluations: get_srf_eval([4, 1, 2, 3]),
-                    },
-                    (
-                        [va, ve, vc, vd],
-                        [new_eid, e_ac, e_ad, e_ec, e_ed, e_cd],
-                        [new_fid, bottom_fid, right_bottom_fid, left_bottom_fid],
-                        [0, 4, 2, 3]
-                    )
-                )
+                let new_tet = Tet {
+                    vertices: [ve, vb, vc, vd],
+                    edges: [split_eid, e_ec, e_ed, e_bc, e_bd, e_cd],
+                    faces: [top_fid, new_fid, right_top_fid, left_top_fid],
+                    surface_evaluations: get_srf_eval([4, 1, 2, 3]),
+                };
+                tet.vertices = [va, ve, vc, vd];
+                tet.edges = [new_eid, e_ac, e_ad, e_ec, e_ed, e_cd];
+                tet.faces = [new_fid, bottom_fid, right_bottom_fid, left_bottom_fid];
+                tet.surface_evaluations = get_srf_eval([0, 4, 2, 3]);
+                new_tet
             };
 
-            // Now get mutable reference to update old tetrahedron
-            let tet = &mut self.tets[old_tid];
-            tet.vertices = old_tet_data.0;
-            tet.edges = old_tet_data.1;
-            tet.faces = old_tet_data.2;
-            tet.surface_evaluations = get_srf_eval(old_tet_data.3);
-            
             self.tets.push(new_tet);
 
             #[cfg(debug_assertions)]
