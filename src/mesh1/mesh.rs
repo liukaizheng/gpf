@@ -4,7 +4,7 @@ use std::{
     ops::{Index, IndexMut},
 };
 
-use super::element::{EdgeId, ElementId, FaceId, HalfedgeId, VertexId};
+use super::element::{EdgeId, ElementId, Face, FaceId, Halfedge, HalfedgeId, Vertex, VertexId, VertexIter};
 
 pub struct ElementContainer<T, E: ElementId, A: Allocator> {
     pub(crate) data: Vec<T, A>,
@@ -106,6 +106,14 @@ impl<VP, HP, FP, A: Allocator> BaseMesh<VP, HP, FP, A> {
 
 }
 
+impl<VP, HP, FP, A: Allocator> BaseMesh<BaseVertex<VP>, HP, FP, A> {
+    #[inline]
+    pub fn recount_n_vertices(&mut self) {
+        self.n_vertices = self.vertices.iter().filter(|v| v.valid()).count();
+    }
+}
+
+
 impl<VP: Default + Clone, HP, FP, A: Allocator> BaseMesh<VP, HP, FP, A> {
     #[inline]
     pub fn v_min_reserve(&mut self, vid: VertexId) {
@@ -138,25 +146,37 @@ impl<VP, HP, FP: Default + Clone, A: Allocator> BaseMesh<VP, HP, FP, A> {
 }
 
 #[derive(Default, Clone)]
-pub struct Vertex<P> {
+pub struct BaseVertex<P> {
     pub halfedge: HalfedgeId,
     pub property: P,
 }
 
-impl<P> Vertex<P> {
+impl<P> Vertex for BaseVertex<P> {
     #[inline]
-    pub fn new(halfedge: HalfedgeId, property: P) -> Self {
-        Vertex { halfedge, property }
+    fn halfedge(&self) -> HalfedgeId {
+        self.halfedge
     }
 
     #[inline]
-    pub fn valid(&self) -> bool {
+    fn set_halfedge(&mut self, hid: HalfedgeId) {
+        self.halfedge = hid;
+    }
+}
+
+impl<P> BaseVertex<P> {
+    #[inline]
+    pub fn new(halfedge: HalfedgeId, property: P) -> Self {
+        BaseVertex { halfedge, property }
+    }
+
+    #[inline]
+    fn valid(&self) -> bool {
         self.halfedge.valid()
     }
 }
 
 #[derive(Default, Clone)]
-pub struct Halfedge<P> {
+pub struct BaseHalfedge<P> {
     pub vertex: VertexId,
     pub next: HalfedgeId,
     pub prev: HalfedgeId,
@@ -164,7 +184,7 @@ pub struct Halfedge<P> {
     pub property: P,
 }
 
-impl<P> Halfedge<P> {
+impl<P> BaseHalfedge<P> {
     #[inline]
     pub fn new(
         vertex: VertexId,
@@ -173,7 +193,7 @@ impl<P> Halfedge<P> {
         face: FaceId,
         property: P,
     ) -> Self {
-        Halfedge {
+        BaseHalfedge {
             vertex,
             next,
             prev,
@@ -188,16 +208,58 @@ impl<P> Halfedge<P> {
     }
 }
 
+impl<P> Halfedge for BaseHalfedge<P> {
+    #[inline]
+    fn vertex(&self) -> VertexId {
+        self.vertex
+    }
+
+    #[inline]
+    fn set_vertex(&mut self, vertex: VertexId) {
+        self.vertex = vertex;
+    }
+
+    #[inline]
+    fn prev(&self) -> HalfedgeId {
+        self.prev
+    }
+
+    #[inline]
+    fn set_prev(&mut self, prev: HalfedgeId) {
+        self.prev = prev;
+    }
+
+    #[inline]
+    fn next(&self) -> HalfedgeId {
+        self.next
+    }
+
+    #[inline]
+    fn set_next(&mut self, next: HalfedgeId) {
+        self.next = next;
+    }
+
+    #[inline]
+    fn face(&self) -> FaceId {
+        self.face
+    }
+
+    #[inline]
+    fn set_face(&mut self, face: FaceId) {
+        self.face = face;
+    }
+}
+
 #[derive(Default, Clone)]
-pub struct Face<P> {
+pub struct BaseFace<P> {
     pub halfedge: HalfedgeId,
     pub property: P,
 }
 
-impl<P> Face<P> {
+impl<P> BaseFace<P> {
     #[inline]
     pub fn new(halfedge: HalfedgeId, property: P) -> Self {
-        Face { halfedge, property }
+        BaseFace { halfedge, property }
     }
 
     #[inline]
@@ -206,42 +268,49 @@ impl<P> Face<P> {
     }
 }
 
-impl<VP, HP, FP, A: Allocator> BaseMesh<Vertex<VP>, Halfedge<HP>, Face<FP>, A> {
+impl<P> Face for BaseFace<P> {
     #[inline]
-    pub fn recount_n_vertices(&mut self) {
-        self.n_vertices = self.vertices.iter().filter(|v| v.valid()).count();
+    fn halfedge(&self) -> HalfedgeId {
+        self.halfedge
     }
 
+    #[inline]
+    fn set_halfedge(&mut self, halfedge: HalfedgeId) {
+        self.halfedge = halfedge;
+    }
+}
+
+impl<V: Vertex, H: Halfedge, F: Face, A: Allocator> BaseMesh<V, H, F, A> {
 
     pub fn he_vertices(&self, hid: HalfedgeId) -> [VertexId; 2] {
         let h2 = self.halfedge(hid);
-        let h1 = self.halfedge(h2.prev);
-        [h1.vertex, h2.vertex]
+        let h1 = self.halfedge(h2.prev());
+        [h1.vertex(), h2.vertex()]
     }
 
     #[inline]
     fn set_v_halfedge(&mut self, v: VertexId, hid: HalfedgeId) {
-        self.vertices[v].halfedge = hid;
+        self.vertices[v].set_halfedge(hid);
     }
 
     #[inline]
     fn set_f_halfedge(&mut self, fid: FaceId, hid: HalfedgeId) {
-        self.faces[fid].halfedge = hid;
+        self.faces[fid].set_halfedge(hid);
     }
 
     #[inline]
     fn set_he_vertex(&mut self, hid: HalfedgeId, vid: VertexId) {
-        self.halfedges[hid].vertex = vid;
+        self.halfedges[hid].set_vertex(vid);
     }
 
     #[inline]
     pub fn connect_halfedges(&mut self, hid1: HalfedgeId, hid2: HalfedgeId) {
-        self.halfedges[hid1].next = hid2;
-        self.halfedges[hid2].prev = hid1;
+        self.halfedges[hid1].set_next(hid2);
+        self.halfedges[hid2].set_prev(hid1);
     }
 }
 
-pub trait MeshCore {
+pub trait MeshCore: Sized {
     type Vertex;
     type Halfedge;
     type Face;
@@ -258,9 +327,19 @@ pub trait MeshCore {
     fn halfedge(&self, hid: HalfedgeId) -> &Self::Halfedge;
     fn face(&self, fid: FaceId) -> &Self::Face;
 
+    fn vertices(&self) -> impl Iterator<Item = &Self::Vertex>;
+    fn halfedges(&self) -> impl Iterator<Item = &Self::Halfedge>;
+    fn faces(&self) -> impl Iterator<Item = &Self::Face>;
+
+    fn vertices_mut(&mut self) -> impl Iterator<Item = &mut Self::Vertex>;
+    fn halfedges_mut(&mut self) -> impl Iterator<Item = &mut Self::Halfedge>;
+    fn faces_mut(&mut self) -> impl Iterator<Item = &mut Self::Face>;
+
     fn vertex_mut(&mut self, vid: VertexId) -> &mut Self::Vertex;
     fn halfedge_mut(&mut self, hid: HalfedgeId) -> &mut Self::Halfedge;
     fn face_mut(&mut self, fid: FaceId) -> &mut Self::Face;
+
+    fn vertex_iter(&self, vid: VertexId) -> VertexIter<Self>;
 
     fn he_vertices(&self, hid: HalfedgeId) -> [VertexId; 2];
 
@@ -276,39 +355,43 @@ pub trait HasBaseMesh {
     type VP;
     type HP;
     type FP;
-    fn base(&self) -> &BaseMesh<Vertex<Self::VP>, Halfedge<Self::HP>, Face<Self::FP>, Self::A>;
+    fn base(&self) -> &BaseMesh<BaseVertex<Self::VP>, BaseHalfedge<Self::HP>, BaseFace<Self::FP>, Self::A>;
     fn base_mut(
         &mut self,
-    ) -> &mut BaseMesh<Vertex<Self::VP>, Halfedge<Self::HP>, Face<Self::FP>, Self::A>;
+    ) -> &mut BaseMesh<BaseVertex<Self::VP>, BaseHalfedge<Self::HP>, BaseFace<Self::FP>, Self::A>;
 }
 
-impl<VP, HP, FP, A: Allocator> HasBaseMesh for BaseMesh<Vertex<VP>, Halfedge<HP>, Face<FP>, A> {
+impl<VP, HP, FP, A: Allocator> HasBaseMesh for BaseMesh<BaseVertex<VP>, BaseHalfedge<HP>, BaseFace<FP>, A> {
     type A = A;
     type VP = VP;
     type HP = HP;
     type FP = FP;
 
     #[inline]
-    fn base(&self) -> &BaseMesh<Vertex<Self::VP>, Halfedge<Self::HP>, Face<Self::FP>, Self::A> {
+    fn base(&self) -> &BaseMesh<BaseVertex<Self::VP>, BaseHalfedge<Self::HP>, BaseFace<Self::FP>, Self::A> {
         self
     }
 
     #[inline]
     fn base_mut(
         &mut self,
-    ) -> &mut BaseMesh<Vertex<Self::VP>, Halfedge<Self::HP>, Face<Self::FP>, Self::A> {
+    ) -> &mut BaseMesh<BaseVertex<Self::VP>, BaseHalfedge<Self::HP>, BaseFace<Self::FP>, Self::A> {
         self
     }
 }
 
 impl<T: HasBaseMesh> MeshCore for T {
-    type Vertex = Vertex<T::VP>;
-    type Halfedge = Halfedge<T::HP>;
-    type Face = Face<T::FP>;
+    type Vertex = BaseVertex<T::VP>;
+    type Halfedge = BaseHalfedge<T::HP>;
+    type Face = BaseFace<T::FP>;
 
     #[inline]
     fn n_vertices(&self) -> usize {
         self.base().n_vertices
+    }
+    #[inline]
+    fn n_vertices_capacity(&self) -> usize {
+        self.base().vertices.data.len()
     }
 
     #[inline]
@@ -321,10 +404,6 @@ impl<T: HasBaseMesh> MeshCore for T {
         self.base().n_faces
     }
 
-    #[inline]
-    fn n_vertices_capacity(&self) -> usize {
-        self.base().vertices.data.len()
-    }
 
     #[inline]
     fn n_halfedges_capacity(&self) -> usize {
@@ -367,8 +446,43 @@ impl<T: HasBaseMesh> MeshCore for T {
     }
 
     #[inline]
+    fn vertices(&self) -> impl Iterator<Item = &Self::Vertex> {
+        self.base().vertices.iter()
+    }
+
+    #[inline]
+    fn halfedges(&self) -> impl Iterator<Item = &Self::Halfedge> {
+        self.base().halfedges.iter()
+    }
+
+    #[inline]
+    fn faces(&self) -> impl Iterator<Item = &Self::Face> {
+        self.base().faces.iter()
+    }
+
+    #[inline]
+    fn vertices_mut(&mut self) -> impl Iterator<Item = &mut Self::Vertex> {
+        self.base_mut().vertices.iter_mut()
+    }
+
+    #[inline]
+    fn halfedges_mut(&mut self) -> impl Iterator<Item = &mut Self::Halfedge> {
+        self.base_mut().halfedges.iter_mut()
+    }
+
+    #[inline]
+    fn faces_mut(&mut self) -> impl Iterator<Item = &mut Self::Face> {
+        self.base_mut().faces.iter_mut()
+    }
+
+    #[inline]
     fn he_vertices(&self, hid: HalfedgeId) -> [VertexId; 2] {
         self.base().he_vertices(hid)
+    }
+
+    #[inline]
+    fn vertex_iter(&self, vid: VertexId) -> VertexIter<Self> {
+        VertexIter::new(vid, self)
     }
 
     #[inline]
@@ -397,7 +511,12 @@ pub trait Mesh: MeshCore {
     fn n_edges(&self) -> usize;
     fn n_edges_capacity(&self) -> usize;
 
+    fn edges(&self) -> impl Iterator<Item = &Self::Edge>;
+
+    fn edges_mut(&mut self) -> impl Iterator<Item = &mut Self::Edge>;
+
     fn he_edge(&self, hid: HalfedgeId) -> EdgeId;
 
     fn he_sibling(&self, hid: HalfedgeId) -> HalfedgeId;
+    fn he_incoming_next(&self, hid: HalfedgeId) -> HalfedgeId;
 }

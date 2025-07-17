@@ -1,8 +1,8 @@
 use std::ops::Deref;
 
-use crate::INVALID_IND;
+use crate::{mesh1::mesh::Mesh, INVALID_IND};
 
-use super::ElementId;
+use super::{ ElementId, Halfedge, HalfedgeId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FaceId(pub usize);
@@ -35,4 +35,14 @@ impl Deref for FaceId {
     fn deref(&self) -> &Self::Target {
         &self.0
     }
+}
+
+pub trait Face {
+    fn halfedge(&self) -> HalfedgeId;
+    fn set_halfedge(&mut self, halfedge: HalfedgeId);
+}
+
+pub struct FaceIter<'m, M: Mesh> {
+    id: FaceId,
+    mesh:&'m M,
 }

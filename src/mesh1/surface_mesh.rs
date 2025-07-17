@@ -3,39 +3,53 @@ use std::alloc::Allocator;
 use hashbrown::HashMap;
 use itertools::Itertools;
 
-use super::element::{EdgeId, ElementId, FaceId, HalfedgeId, VertexId};
+use super::element::{EdgeId, ElementId, FaceId, Halfedge, HalfedgeId, HalfedgeExt, VertexId};
 
-use super::mesh::{BaseMesh, ElementContainer, Face, Halfedge, HasBaseMesh, Mesh, MeshCore, Vertex};
+use super::mesh::{BaseMesh, ElementContainer, BaseFace, BaseHalfedge, HasBaseMesh, Mesh, MeshCore, BaseVertex};
 
 #[derive(Default, Clone)]
 pub struct HEdge<P> {
     edge: EdgeId,
     sibling: HalfedgeId,
-    v_in_next: HalfedgeId,
+    incoming_next: HalfedgeId,
     property: P,
 }
 
 impl<P> HEdge<P> {
-    pub fn new(edge: EdgeId, sibling: HalfedgeId, v_in_next: HalfedgeId, property: P) -> Self {
-        Self { edge, sibling, v_in_next, property }
+    pub fn new(edge: EdgeId, sibling: HalfedgeId, incoming_next: HalfedgeId, property: P) -> Self {
+        Self { edge, sibling, incoming_next, property }
     }
 }
 
+impl<P> HalfedgeExt for BaseHalfedge<HEdge<P>> {
+    #[inline]
+    fn sibling(&self) -> HalfedgeId {
+        self.property.sibling
+    }
+
+    #[inline]
+    fn incoming_next(&self) -> HalfedgeId {
+        self.property.incoming_next
+    }
+}
+
+
 #[derive(Default, Clone)]
-pub struct Edge<P> {
+pub struct BaseEdge<P> {
     halfedge: HalfedgeId,
     property: P,
 }
 
-impl<P> Edge<P> {
+impl<P> BaseEdge<P> {
     pub fn new(halfedge: HalfedgeId, property: P) -> Self {
         Self { halfedge, property }
     }
 }
 
+
 pub struct SurfaceMesh<VP, HP, EP, FP, A: Allocator> {
-    base: BaseMesh<Vertex<VP>, Halfedge<HEdge<HP>>, Face<FP>, A>,
-    edges: ElementContainer<Edge<EP>, EdgeId, A>,
+    base: BaseMesh<BaseVertex<VP>, BaseHalfedge<HEdge<HP>>, BaseFace<FP>, A>,
+    edges: ElementContainer<BaseEdge<EP>, EdgeId, A>,
     n_edges: usize,
 }
 
@@ -128,7 +142,7 @@ impl <VP: Default + Clone, HP: Default + Clone, EP: Default + Clone, FP: Default
         for idx in 0..n_vertices {
             let (start, end) = (v_in_separators[idx], v_in_separators[idx + 1]);
             for (&ha, &hb) in v_in_halfedges[start..end].iter().circular_tuple_windows() {
-                mesh.halfedge_mut(ha).property.v_in_next = hb;
+                mesh.halfedge_mut(ha).property.incoming_next = hb;
             }
         }
 
@@ -136,12 +150,12 @@ impl <VP: Default + Clone, HP: Default + Clone, EP: Default + Clone, FP: Default
     }
 
     #[inline]
-    pub fn edge(&self, eid: EdgeId) -> &Edge<EP> {
+    pub fn edge(&self, eid: EdgeId) -> &BaseEdge<EP> {
         &self.edges[eid]
     }
 
     #[inline]
-    pub fn edge_mut(&mut self, eid: EdgeId) -> &mut Edge<EP> {
+    pub fn edge_mut(&mut self, eid: EdgeId) -> &mut BaseEdge<EP> {
         &mut self.edges[eid]
     }
 
@@ -154,7 +168,7 @@ impl <VP: Default + Clone, HP: Default + Clone, EP: Default + Clone, FP: Default
     pub fn new_edges(&mut self, n: usize) -> EdgeId {
         let ret = EdgeId(self.n_edges_capacity());
         let cap = *ret + n;
-        self.edges.data.resize(cap, Edge::default());
+        self.edges.data.resize(cap, BaseEdge::default());
         self.n_edges += n;
         ret
     }
@@ -197,19 +211,19 @@ impl<VP, HP, EP, FP, A: Allocator> HasBaseMesh for SurfaceMesh<VP, HP, EP, FP, A
     type HP = HEdge<HP>;
     type FP = FP;
 
-    fn base(&self) -> &BaseMesh<Vertex<Self::VP>, Halfedge<Self::HP>, Face<Self::FP>, Self::A> {
+    fn base(&self) -> &BaseMesh<BaseVertex<Self::VP>, BaseHalfedge<Self::HP>, BaseFace<Self::FP>, Self::A> {
         &self.base
     }
 
     fn base_mut(
         &mut self,
-    ) -> &mut BaseMesh<Vertex<Self::VP>, Halfedge<Self::HP>, Face<Self::FP>, Self::A> {
+    ) -> &mut BaseMesh<BaseVertex<Self::VP>, BaseHalfedge<Self::HP>, BaseFace<Self::FP>, Self::A> {
         &mut self.base
     }
 }
 
 impl<VP, HP, EP, FP, A: Allocator> Mesh for SurfaceMesh<VP, HP, EP, FP, A> {
-    type Edge = Edge<EP>;
+    type Edge = BaseEdge<EP>;
 
     #[inline]
     fn n_edges(&self) -> usize {
@@ -222,14 +236,30 @@ impl<VP, HP, EP, FP, A: Allocator> Mesh for SurfaceMesh<VP, HP, EP, FP, A> {
     }
 
     #[inline]
+    fn edges(&self) -> impl Iterator<Item = &Self::Edge> {
+        self.edges.iter()
+    }
+
+    #[inline]
+    fn edges_mut(&mut self) -> impl Iterator<Item = &mut Self::Edge> {
+        self.edges.iter_mut()
+    }
+
+    #[inline]
     fn he_sibling(&self, hid: HalfedgeId) -> HalfedgeId {
         self.halfedge(hid).property.sibling
+    }
+
+    #[inline]
+    fn he_incoming_next(&self, hid: HalfedgeId) -> HalfedgeId {
+        self.halfedge(hid).property.incoming_next
     }
 
     #[inline]
     fn he_edge(&self, hid: HalfedgeId) -> EdgeId {
         self.halfedge(hid).property.edge
     }
+
 }
 
 mod tests {
@@ -250,6 +280,7 @@ mod tests {
             std::alloc::Global,
         );
         println!("the size of mesh is {:?}", std::mem::size_of_val(&mesh));
+        let incoming_halfedges = Vec::from_iter(mesh.vertex_iter(0.into()).incoming_halfedge_ids());
 
         debug_assert!(mesh.n_vertices() == 7);
     }
