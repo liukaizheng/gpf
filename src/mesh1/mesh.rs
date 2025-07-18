@@ -4,7 +4,10 @@ use std::{
     ops::{Index, IndexMut},
 };
 
-use super::element::{EdgeId, ElementId, Face, FaceId, Halfedge, HalfedgeId, Vertex, VertexId, VertexIter};
+use super::element::{
+    EdgeId, ElementId, Face, FaceId, FaceIter, FaceIterMut, Halfedge, HalfedgeId, HalfedgeIter,
+    HalfedgeIterMut, Vertex, VertexId, VertexIter, VertexIterMut,
+};
 
 pub struct ElementContainer<T, E: ElementId, A: Allocator> {
     pub(crate) data: Vec<T, A>,
@@ -103,7 +106,6 @@ impl<VP, HP, FP, A: Allocator> BaseMesh<VP, HP, FP, A> {
     pub fn face_mut(&mut self, fid: FaceId) -> &mut FP {
         &mut self.faces[fid]
     }
-
 }
 
 impl<VP, HP, FP, A: Allocator> BaseMesh<BaseVertex<VP>, HP, FP, A> {
@@ -112,7 +114,6 @@ impl<VP, HP, FP, A: Allocator> BaseMesh<BaseVertex<VP>, HP, FP, A> {
         self.n_vertices = self.vertices.iter().filter(|v| v.valid()).count();
     }
 }
-
 
 impl<VP: Default + Clone, HP, FP, A: Allocator> BaseMesh<VP, HP, FP, A> {
     #[inline]
@@ -125,7 +126,6 @@ impl<VP: Default + Clone, HP, FP, A: Allocator> BaseMesh<VP, HP, FP, A> {
 }
 
 impl<VP, HP: Default + Clone, FP, A: Allocator> BaseMesh<VP, HP, FP, A> {
-
     #[inline]
     pub fn new_halfedges(&mut self, n: usize) -> HalfedgeId {
         let ret = HalfedgeId(self.halfedges.len().into());
@@ -281,7 +281,6 @@ impl<P> Face for BaseFace<P> {
 }
 
 impl<V: Vertex, H: Halfedge, F: Face, A: Allocator> BaseMesh<V, H, F, A> {
-
     #[inline]
     fn he_from(&self, hid: HalfedgeId) -> VertexId {
         self.halfedge(self.halfedge(hid).prev()).vertex()
@@ -351,6 +350,12 @@ pub trait MeshCore: Sized {
     fn face_mut(&mut self, fid: FaceId) -> &mut Self::Face;
 
     fn vertex_iter(&self, vid: VertexId) -> VertexIter<Self>;
+    fn halfedge_iter(&self, hid: HalfedgeId) -> HalfedgeIter<Self>;
+    fn face_iter(&self, fid: FaceId) -> FaceIter<Self>;
+
+    fn vertex_iter_mut(&mut self, vid: VertexId) -> VertexIterMut<Self>;
+    fn halfedge_iter_mut(&mut self, hid: HalfedgeId) -> HalfedgeIterMut<Self>;
+    fn face_iter_mut(&mut self, fid: FaceId) -> FaceIterMut<Self>;
 
     fn he_from(&self, hid: HalfedgeId) -> VertexId;
     fn he_to(&self, hid: HalfedgeId) -> VertexId;
@@ -368,27 +373,34 @@ pub trait HasBaseMesh {
     type VP;
     type HP;
     type FP;
-    fn base(&self) -> &BaseMesh<BaseVertex<Self::VP>, BaseHalfedge<Self::HP>, BaseFace<Self::FP>, Self::A>;
+    fn base(
+        &self,
+    ) -> &BaseMesh<BaseVertex<Self::VP>, BaseHalfedge<Self::HP>, BaseFace<Self::FP>, Self::A>;
     fn base_mut(
         &mut self,
     ) -> &mut BaseMesh<BaseVertex<Self::VP>, BaseHalfedge<Self::HP>, BaseFace<Self::FP>, Self::A>;
 }
 
-impl<VP, HP, FP, A: Allocator> HasBaseMesh for BaseMesh<BaseVertex<VP>, BaseHalfedge<HP>, BaseFace<FP>, A> {
+impl<VP, HP, FP, A: Allocator> HasBaseMesh
+    for BaseMesh<BaseVertex<VP>, BaseHalfedge<HP>, BaseFace<FP>, A>
+{
     type A = A;
     type VP = VP;
     type HP = HP;
     type FP = FP;
 
     #[inline]
-    fn base(&self) -> &BaseMesh<BaseVertex<Self::VP>, BaseHalfedge<Self::HP>, BaseFace<Self::FP>, Self::A> {
+    fn base(
+        &self,
+    ) -> &BaseMesh<BaseVertex<Self::VP>, BaseHalfedge<Self::HP>, BaseFace<Self::FP>, Self::A> {
         self
     }
 
     #[inline]
     fn base_mut(
         &mut self,
-    ) -> &mut BaseMesh<BaseVertex<Self::VP>, BaseHalfedge<Self::HP>, BaseFace<Self::FP>, Self::A> {
+    ) -> &mut BaseMesh<BaseVertex<Self::VP>, BaseHalfedge<Self::HP>, BaseFace<Self::FP>, Self::A>
+    {
         self
     }
 }
@@ -416,7 +428,6 @@ impl<T: HasBaseMesh> MeshCore for T {
     fn n_faces(&self) -> usize {
         self.base().n_faces
     }
-
 
     #[inline]
     fn n_halfedges_capacity(&self) -> usize {
@@ -489,6 +500,36 @@ impl<T: HasBaseMesh> MeshCore for T {
     }
 
     #[inline]
+    fn vertex_iter(&self, vid: VertexId) -> VertexIter<Self> {
+        VertexIter::new(vid, self)
+    }
+
+    #[inline]
+    fn halfedge_iter(&self, hid: HalfedgeId) -> HalfedgeIter<Self> {
+        HalfedgeIter::new(hid, self)
+    }
+
+    #[inline]
+    fn face_iter(&self, fid: FaceId) -> FaceIter<Self> {
+        FaceIter::new(fid, self)
+    }
+
+    #[inline]
+    fn vertex_iter_mut(&mut self, vid: VertexId) -> VertexIterMut<Self> {
+        VertexIterMut::new(vid, self)
+    }
+
+    #[inline]
+    fn halfedge_iter_mut(&mut self, hid: HalfedgeId) -> HalfedgeIterMut<Self> {
+        HalfedgeIterMut::new(hid, self)
+    }
+
+    #[inline]
+    fn face_iter_mut(&mut self, fid: FaceId) -> FaceIterMut<Self> {
+        FaceIterMut::new(fid, self)
+    }
+
+    #[inline]
     fn he_from(&self, hid: HalfedgeId) -> VertexId {
         self.base().he_from(hid)
     }
@@ -501,11 +542,6 @@ impl<T: HasBaseMesh> MeshCore for T {
     #[inline]
     fn he_vertices(&self, hid: HalfedgeId) -> [VertexId; 2] {
         self.base().he_vertices(hid)
-    }
-
-    #[inline]
-    fn vertex_iter(&self, vid: VertexId) -> VertexIter<Self> {
-        VertexIter::new(vid, self)
     }
 
     #[inline]
