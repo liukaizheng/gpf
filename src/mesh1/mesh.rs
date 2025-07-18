@@ -282,6 +282,17 @@ impl<P> Face for BaseFace<P> {
 
 impl<V: Vertex, H: Halfedge, F: Face, A: Allocator> BaseMesh<V, H, F, A> {
 
+    #[inline]
+    fn he_from(&self, hid: HalfedgeId) -> VertexId {
+        self.halfedge(self.halfedge(hid).prev()).vertex()
+    }
+
+    #[inline]
+    fn he_to(&self, hid: HalfedgeId) -> VertexId {
+        self.halfedge(hid).vertex()
+    }
+
+    #[inline]
     pub fn he_vertices(&self, hid: HalfedgeId) -> [VertexId; 2] {
         let h2 = self.halfedge(hid);
         let h1 = self.halfedge(h2.prev());
@@ -341,6 +352,8 @@ pub trait MeshCore: Sized {
 
     fn vertex_iter(&self, vid: VertexId) -> VertexIter<Self>;
 
+    fn he_from(&self, hid: HalfedgeId) -> VertexId;
+    fn he_to(&self, hid: HalfedgeId) -> VertexId;
     fn he_vertices(&self, hid: HalfedgeId) -> [VertexId; 2];
 
     fn connect_halfedges(&mut self, hid1: HalfedgeId, hid2: HalfedgeId);
@@ -476,6 +489,16 @@ impl<T: HasBaseMesh> MeshCore for T {
     }
 
     #[inline]
+    fn he_from(&self, hid: HalfedgeId) -> VertexId {
+        self.base().he_from(hid)
+    }
+
+    #[inline]
+    fn he_to(&self, hid: HalfedgeId) -> VertexId {
+        self.base().he_to(hid)
+    }
+
+    #[inline]
     fn he_vertices(&self, hid: HalfedgeId) -> [VertexId; 2] {
         self.base().he_vertices(hid)
     }
@@ -508,15 +531,20 @@ impl<T: HasBaseMesh> MeshCore for T {
 
 pub trait Mesh: MeshCore {
     type Edge;
+
     fn n_edges(&self) -> usize;
     fn n_edges_capacity(&self) -> usize;
 
     fn edges(&self) -> impl Iterator<Item = &Self::Edge>;
-
     fn edges_mut(&mut self) -> impl Iterator<Item = &mut Self::Edge>;
+
+    fn edge(&self, eid: EdgeId) -> &Self::Edge;
+    fn edge_mut(&mut self, eid: EdgeId) -> &mut Self::Edge;
 
     fn he_edge(&self, hid: HalfedgeId) -> EdgeId;
 
     fn he_sibling(&self, hid: HalfedgeId) -> HalfedgeId;
     fn he_incoming_next(&self, hid: HalfedgeId) -> HalfedgeId;
+
+    fn e_halfedge(&self, eid: EdgeId) -> HalfedgeId;
 }

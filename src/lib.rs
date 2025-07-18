@@ -3,7 +3,6 @@
 #![feature(iter_partition_in_place)]
 #![feature(allocator_api)]
 #![feature(portable_simd)]
-#![feature(let_chains)]
 #![feature(iter_array_chunks)]
 #![feature(array_chunks)]
 #![feature(btree_cursors)]

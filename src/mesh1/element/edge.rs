@@ -1,7 +1,7 @@
 
-use std::ops::Deref;
+use std::{marker::PhantomData, ops::Deref, ptr::NonNull};
 
-use crate::INVALID_IND;
+use crate::{mesh1::{element::HalfedgeId, mesh::Mesh}, INVALID_IND};
 
 use super::ElementId;
 
@@ -35,5 +35,50 @@ impl Deref for EdgeId {
     #[inline]
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+pub trait Edge {
+    fn halfedge(&self) -> HalfedgeId;
+}
+
+pub struct EdgeIter<'m, M: Mesh> {
+    pub id: EdgeId,
+    pub data: &'m M::Edge,
+    pub mesh: NonNull<M>,
+    _marker: PhantomData<&'m M>,
+}
+
+pub struct EdgeIterMut<'m, M: Mesh> {
+    pub id: EdgeId,
+    pub data: &'m M::Edge,
+    pub mesh: NonNull<M>,
+    _marker: PhantomData<&'m mut M>,
+}
+
+impl<'m, M: Mesh> EdgeIter<'m, M> {
+    pub fn new(id: EdgeId, mesh: &'m M) -> Self {
+        let data = mesh.edge(id);
+        EdgeIter {
+            id,
+            data,
+            mesh: NonNull::from(mesh),
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<'m, M: Mesh> EdgeIterMut<'m, M> {
+    pub fn new(id: EdgeId, mesh: &'m mut M) -> Self {
+        let mut mesh = NonNull::from_mut(mesh);
+        unsafe {
+            let data = mesh.as_mut().edge_mut(id);
+            EdgeIterMut {
+                id,
+                data,
+                mesh,
+                _marker: PhantomData,
+            }
+        }
     }
 }

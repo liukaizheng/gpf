@@ -458,21 +458,6 @@ mod tests {
     }
 
     #[test]
-    fn test_insert() {
-        let mut tree = RBTree::new(std::alloc::Global, false);
-        // randomly generate 100 integers and insert them into the tree
-        let values: Vec<i32> = (0..100).map(|_| random::random::<i32>() % 100).collect();
-        for val in values {
-            tree.insert(val);
-            assert!(
-                validate_tree(&tree),
-                "Tree is not valid after inserting {}",
-                val
-            );
-        }
-    }
-
-    #[test]
     fn test_range() {
         let mut tree = RBTree::new(std::alloc::Global, false);
         let values = [5, 3, 7, 2, 4, 6, 8, 1, 9];

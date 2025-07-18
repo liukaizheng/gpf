@@ -1,8 +1,11 @@
-use std::ops::Deref;
+use std::{marker::PhantomData, ops::Deref, ptr::NonNull};
 
-use crate::{mesh1::mesh::Mesh, INVALID_IND};
+use crate::{
+    INVALID_IND,
+    mesh1::mesh::{Mesh, MeshCore},
+};
 
-use super::{ ElementId, Halfedge, HalfedgeId};
+use super::{ElementId, Halfedge, HalfedgeId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FaceId(pub usize);
@@ -42,7 +45,43 @@ pub trait Face {
     fn set_halfedge(&mut self, halfedge: HalfedgeId);
 }
 
-pub struct FaceIter<'m, M: Mesh> {
-    id: FaceId,
-    mesh:&'m M,
+pub struct FaceIter<'m, M: MeshCore> {
+    pub id: FaceId,
+    pub data: &'m M::Face,
+    pub mesh: NonNull<M>,
+    _marker: PhantomData<&'m M>,
+}
+
+pub struct FaceIterMut<'m, M: MeshCore> {
+    pub id: FaceId,
+    pub data: &'m M::Face,
+    pub mesh: NonNull<M>,
+    _marker: PhantomData<&'m mut M>,
+}
+
+impl<'m, M: MeshCore> FaceIter<'m, M> {
+    pub fn new(id: FaceId, mesh: &'m M) -> Self {
+        let data = mesh.face(id);
+        FaceIter {
+            id,
+            data,
+            mesh: NonNull::from(mesh),
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<'m, M: MeshCore> FaceIterMut<'m, M> {
+    pub fn new(id: FaceId, mesh: &'m mut M) -> Self {
+        let mut mesh = NonNull::from_mut(mesh);
+        unsafe {
+            let data = mesh.as_mut().face_mut(id);
+            FaceIterMut {
+                id,
+                data,
+                mesh,
+                _marker: PhantomData,
+            }
+        }
+    }
 }

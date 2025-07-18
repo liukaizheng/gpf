@@ -3,7 +3,9 @@ use std::alloc::Allocator;
 use hashbrown::HashMap;
 use itertools::Itertools;
 
-use super::element::{EdgeId, ElementId, FaceId, Halfedge, HalfedgeId, HalfedgeExt, VertexId};
+use crate::mesh1::element::Edge;
+
+use super::element::{EdgeId, ElementId, FaceId, HalfedgeId, HalfedgeExt, VertexId};
 
 use super::mesh::{BaseMesh, ElementContainer, BaseFace, BaseHalfedge, HasBaseMesh, Mesh, MeshCore, BaseVertex};
 
@@ -23,6 +25,11 @@ impl<P> HEdge<P> {
 
 impl<P> HalfedgeExt for BaseHalfedge<HEdge<P>> {
     #[inline]
+    fn edge(&self) -> EdgeId {
+        self.property.edge
+    }
+
+    #[inline]
     fn sibling(&self) -> HalfedgeId {
         self.property.sibling
     }
@@ -38,6 +45,14 @@ impl<P> HalfedgeExt for BaseHalfedge<HEdge<P>> {
 pub struct BaseEdge<P> {
     halfedge: HalfedgeId,
     property: P,
+}
+
+impl<P> Edge for BaseEdge<P> {
+
+    #[inline]
+    fn halfedge(&self) -> HalfedgeId {
+        self.halfedge
+    }
 }
 
 impl<P> BaseEdge<P> {
@@ -246,6 +261,16 @@ impl<VP, HP, EP, FP, A: Allocator> Mesh for SurfaceMesh<VP, HP, EP, FP, A> {
     }
 
     #[inline]
+    fn edge(&self, eid: EdgeId) -> &Self::Edge {
+        &self.edges[eid]
+    }
+
+    #[inline]
+    fn edge_mut(&mut self, eid: EdgeId) -> &mut Self::Edge {
+        &mut self.edges[eid]
+    }
+
+    #[inline]
     fn he_sibling(&self, hid: HalfedgeId) -> HalfedgeId {
         self.halfedge(hid).property.sibling
     }
@@ -260,9 +285,15 @@ impl<VP, HP, EP, FP, A: Allocator> Mesh for SurfaceMesh<VP, HP, EP, FP, A> {
         self.halfedge(hid).property.edge
     }
 
+    #[inline]
+    fn e_halfedge(&self, eid: EdgeId) -> HalfedgeId {
+        self.edge(eid).halfedge
+    }
 }
 
 mod tests {
+    use crate::mesh1::element::VertexEdgesAndVertices;
+
     #[test]
     fn test_surface_mesh() {
         use crate::mesh1::mesh::MeshCore;
@@ -279,9 +310,15 @@ mod tests {
             ],
             std::alloc::Global,
         );
+        debug_assert!(mesh.n_vertices() == 7);
         println!("the size of mesh is {:?}", std::mem::size_of_val(&mesh));
         let incoming_halfedges = Vec::from_iter(mesh.vertex_iter(0.into()).incoming_halfedge_ids());
+        debug_assert!(incoming_halfedges.len() == 6);
 
-        debug_assert!(mesh.n_vertices() == 7);
+        let outgoing_halfedges = Vec::from_iter(mesh.vertex_iter(0.into()).outgoing_halfedge_ids());
+        debug_assert!(outgoing_halfedges.len() == 6);
+
+        let edges = Vec::from_iter(mesh.vertex_iter(0.into()).edge_ids());
+        debug_assert!(edges.len() == 6);
     }
 }
