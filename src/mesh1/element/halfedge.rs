@@ -1,8 +1,8 @@
 use std::ops::Deref;
 
-use crate::{mesh1::mesh::Mesh, INVALID_IND};
+use crate::{INVALID_IND, mesh1::mesh::Mesh};
 
-use super::{ ElementId, FaceId, VertexId};
+use super::{ElementId, FaceId, VertexId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct HalfedgeId(pub usize);
@@ -38,7 +38,6 @@ impl Deref for HalfedgeId {
 }
 
 pub trait Halfedge {
-
     fn vertex(&self) -> VertexId;
     fn set_vertex(&mut self, vertex: VertexId);
 

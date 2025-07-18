@@ -1,6 +1,12 @@
 use std::{iter::from_fn, ops::Deref};
 
-use crate::{ mesh1::{element::HalfedgeIter, mesh::{Mesh, MeshCore}}, INVALID_IND};
+use crate::{
+    INVALID_IND,
+    mesh1::{
+        element::HalfedgeIter,
+        mesh::{Mesh, MeshCore},
+    },
+};
 
 use super::{ElementId, Halfedge, HalfedgeExt, HalfedgeId};
 
@@ -45,10 +51,10 @@ pub trait Vertex {
 pub struct VertexIter<'m, M: MeshCore> {
     id: VertexId,
     data: &'m M::Vertex,
-    mesh:&'m M,
+    mesh: &'m M,
 }
 
-impl <'m, M: MeshCore> VertexIter<'m, M> {
+impl<'m, M: MeshCore> VertexIter<'m, M> {
     pub fn new(id: VertexId, mesh: &'m M) -> Self {
         let data = mesh.vertex(id);
         VertexIter { id, data, mesh }
@@ -60,7 +66,7 @@ pub struct CirculateVertex<'m, M: Mesh> {
     first_hid: HalfedgeId,
     hid: HalfedgeId,
     he: &'m M::Halfedge,
-    mesh:&'m M,
+    mesh: &'m M,
     first: bool,
 }
 
@@ -104,25 +110,56 @@ impl<'m, M: Mesh<Halfedge: HalfedgeExt>> HalfedgeIncomingNext for CirculateVerte
     }
 }
 
-impl<'m, M: Mesh<Vertex: Vertex, Halfedge : Halfedge>> VertexIter<'m, M> {
+impl<'m, M: Mesh<Vertex: Vertex, Halfedge: Halfedge>> VertexIter<'m, M> {
     pub fn incoming_halfedges(&self) -> impl Iterator<Item = HalfedgeIter<'m, M>> {
         let mut cv = CirculateVertex::new(self.id, self.data.halfedge(), self.mesh);
-        from_fn( move || {
+        from_fn(move || {
             if !cv.valid() {
                 return None;
             }
-            let ret = HalfedgeIter{ id: cv.hid, mesh: self.mesh};
+            let ret = HalfedgeIter {
+                id: cv.hid,
+                mesh: self.mesh,
+            };
             cv.next();
             Some(ret)
         })
     }
     pub fn incoming_halfedge_ids(&self) -> impl Iterator<Item = HalfedgeId> {
         let mut cv = CirculateVertex::new(self.id, self.data.halfedge(), self.mesh);
-        from_fn( move || {
+        from_fn(move || {
             if !cv.valid() {
                 return None;
             }
             let ret = cv.hid;
+            debug_assert!(cv.he.vertex() == self.id);
+            cv.next();
+            Some(ret)
+        })
+    }
+
+    pub fn outgoing_halfedges(&self) -> impl Iterator<Item = HalfedgeIter<'m, M>> {
+        let mut cv = CirculateVertex::new(self.id, self.data.halfedge(), self.mesh);
+        from_fn(move || {
+            if !cv.valid() {
+                return None;
+            }
+            let ret = HalfedgeIter {
+                id: cv.he.next(),
+                mesh: self.mesh,
+            };
+            cv.next();
+            Some(ret)
+        })
+    }
+
+    pub fn outgoing_halfedge_ids(&self) -> impl Iterator<Item = HalfedgeId> {
+        let mut cv = CirculateVertex::new(self.id, self.data.halfedge(), self.mesh);
+        from_fn(move || {
+            if !cv.valid() {
+                return None;
+            }
+            let ret = cv.he.next();
             debug_assert!(cv.he.vertex() == self.id);
             cv.next();
             Some(ret)
