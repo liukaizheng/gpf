@@ -5,14 +5,15 @@ mod vertex;
 
 use std::alloc::Allocator;
 
-
+pub use edge::*;
 pub use face::*;
 pub use halfedge::*;
 pub use vertex::*;
-pub use edge::*;
 
 use crate::INVALID_IND;
 
+#[macro_use]
+mod macros;
 
 pub trait ElementId: From<usize> + Default {
     fn index(&self) -> usize;

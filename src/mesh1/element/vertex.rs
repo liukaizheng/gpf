@@ -1,7 +1,7 @@
 use std::{iter::from_fn, marker::PhantomData, ops::Deref, ptr::NonNull};
 
 use crate::{
-    INVALID_IND,
+    INVALID_IND, element_iter_struct,
     mesh1::{
         element::{EdgeId, EdgeIter, EdgeIterMut, HalfedgeIter, HalfedgeIterMut},
         mesh::{Mesh, MeshCore},
@@ -48,120 +48,54 @@ pub trait Vertex {
     fn set_halfedge(&mut self, hid: HalfedgeId);
 }
 
-// Macro to generate vertex iterator structs
-macro_rules! vertex_iter_struct {
-    ($name:ident, $marker:ty) => {
-        pub struct $name<'m, M: MeshCore> {
-            pub id: VertexId,
-            pub data: &'m M::Vertex,
-            pub mesh: NonNull<M>,
-            _marker: PhantomData<$marker>,
-        }
-    };
-}
-
-vertex_iter_struct!(VertexIter, &'m M);
-vertex_iter_struct!(VertexIterMut, &'m mut M);
-
-// Macro to generate circulate vertex structs
-macro_rules! circulate_vertex_struct {
-    ($name:ident, $he_type:ty, $marker:ty) => {
-        pub struct $name<'m, M: Mesh> {
-            first_hid: HalfedgeId,
-            hid: HalfedgeId,
-            he: $he_type,
-            mesh: NonNull<M>,
-            first: bool,
-            _marker: PhantomData<$marker>,
-        }
-    };
-}
-
-circulate_vertex_struct!(CirculateVertex, &'m M::Halfedge, &'m M);
-circulate_vertex_struct!(CirculateVertexMut, &'m mut M::Halfedge, &'m mut M);
+element_iter_struct!(struct VertexIter -> MeshCore, VertexId, Vertex, from, as_ref, vertex, {});
+element_iter_struct!(struct VertexIterMut -> MeshCore, VertexId, Vertex, from_mut, as_mut, vertex_mut, {mut});
 
 trait HalfedgeIncomingNext {
     fn next(&mut self);
 }
 
-impl<'m, M: MeshCore> VertexIter<'m, M> {
-    pub fn new(id: VertexId, mesh: &'m M) -> Self {
-        let data = mesh.vertex(id);
-        VertexIter {
-            id,
-            data,
-            mesh: NonNull::from(mesh),
-            _marker: PhantomData,
+// Macro to generate circulate vertex structs
+macro_rules! circulate_vertex_struct {
+    ($name:ident, $from_ref:ident, $into_ref: ident, $he_data: ident, {$( $mut_:tt )?}) => {
+        pub struct $name<'m, M: Mesh> {
+            first_hid: HalfedgeId,
+            hid: HalfedgeId,
+            he: &'m $($mut_)? M::Halfedge,
+            mesh: NonNull<M>,
+            first: bool,
+            _marker: PhantomData<&'m $($mut_)? M>,
         }
-    }
-}
+        impl<'m, M: Mesh<Vertex: Vertex, Halfedge: Halfedge>> $name<'m, M> {
+            pub fn new(from_hid: HalfedgeId, mesh: &'m $($mut_)? M) -> Self {
+                let $($mut_)? mesh = NonNull::$from_ref(mesh);
+                unsafe {
+                    let hid = mesh.as_ref().halfedge(from_hid).prev();
+                    let he = mesh.$into_ref().$he_data(hid);
+                    Self {
+                        first: true,
+                        first_hid: hid,
+                        hid,
+                        he,
+                        mesh,
+                        _marker: PhantomData,
+                    }
 
-impl<'m, M: MeshCore> VertexIterMut<'m, M> {
-    pub fn new(id: VertexId, mesh: &'m mut M) -> Self {
-        let mesh_ptr = NonNull::from(&*mesh);
-        let data = mesh.vertex(id);
-        VertexIterMut {
-            id,
-            data,
-            mesh: mesh_ptr,
-            _marker: PhantomData,
+                }
+
+            }
+
+            #[inline]
+            pub fn valid(&self) -> bool {
+                self.first || self.hid != self.first_hid
+            }
         }
-    }
-}
 
-impl<'m, M: Mesh<Vertex: Vertex, Halfedge: Halfedge>> CirculateVertex<'m, M> {
-    #[inline]
-    pub fn new(from_hid: HalfedgeId, mesh: &'m M) -> Self {
-        let mesh_ptr = NonNull::from(mesh);
-        let hid = mesh.halfedge(from_hid).prev();
-        let he = mesh.halfedge(hid);
-        CirculateVertex {
-            first: true,
-            first_hid: hid,
-            hid,
-            he,
-            mesh: mesh_ptr,
-            _marker: PhantomData,
-        }
-    }
-
-    #[inline]
-    pub fn valid(&self) -> bool {
-        self.first || self.hid != self.first_hid
-    }
-}
-
-impl<'m, M: Mesh<Vertex: Vertex, Halfedge: Halfedge>> CirculateVertexMut<'m, M> {
-    #[inline]
-    pub fn new(from_hid: HalfedgeId, mesh: &'m mut M) -> Self {
-        let mesh_ptr = NonNull::from(&mut *mesh);
-        let hid = mesh.halfedge(from_hid).prev();
-        let he = mesh.halfedge_mut(hid);
-        CirculateVertexMut {
-            first: true,
-            first_hid: hid,
-            hid,
-            he,
-            mesh: mesh_ptr,
-            _marker: PhantomData,
-        }
-    }
-
-    #[inline]
-    pub fn valid(&self) -> bool {
-        self.first || self.hid != self.first_hid
-    }
-}
-
-// Macro to generate HalfedgeIncomingNext implementations
-macro_rules! halfedge_incoming_next_impl {
-    ($name:ident, $he_access:ident) => {
         impl<'m, M: Mesh<Halfedge: Halfedge>> HalfedgeIncomingNext for $name<'m, M> {
             default fn next(&mut self) {
                 unsafe {
-                    let mesh = self.mesh.as_ref();
-                    self.hid = mesh.he_incoming_next(self.hid);
-                    self.he = mesh.$he_access(self.hid);
+                    self.hid = self.mesh.as_ref().he_incoming_next(self.hid);
+                    self.he = self.mesh.$into_ref().$he_data(self.hid);
                     self.first = false;
                 }
             }
@@ -171,7 +105,7 @@ macro_rules! halfedge_incoming_next_impl {
             fn next(&mut self) {
                 self.hid = self.he.incoming_next();
                 unsafe {
-                    self.he = self.mesh.as_ref().$he_access(self.hid);
+                    self.he = self.mesh.$into_ref().$he_data(self.hid);
                 }
                 self.first = false;
             }
@@ -179,29 +113,8 @@ macro_rules! halfedge_incoming_next_impl {
     };
 }
 
-halfedge_incoming_next_impl!(CirculateVertex, halfedge);
-
-// Special implementation for CirculateVertexMut since it needs mutable access
-impl<'m, M: Mesh<Halfedge: Halfedge>> HalfedgeIncomingNext for CirculateVertexMut<'m, M> {
-    default fn next(&mut self) {
-        unsafe {
-            let mesh = self.mesh.as_ref();
-            self.hid = mesh.he_incoming_next(self.hid);
-            self.he = self.mesh.as_mut().halfedge_mut(self.hid);
-            self.first = false;
-        }
-    }
-}
-
-impl<'m, M: Mesh<Halfedge: HalfedgeExt>> HalfedgeIncomingNext for CirculateVertexMut<'m, M> {
-    fn next(&mut self) {
-        self.hid = self.he.incoming_next();
-        unsafe {
-            self.he = self.mesh.as_mut().halfedge_mut(self.hid);
-        }
-        self.first = false;
-    }
-}
+circulate_vertex_struct!(CirculateVertex, from, as_ref, halfedge, {});
+circulate_vertex_struct!(CirculateVertexMut, from_mut, as_mut, halfedge_mut, {mut});
 
 pub trait VertexEdgesAndVertices<'m, M: Mesh<Edge: 'm> + 'm> {
     fn edges(&self) -> impl Iterator<Item = EdgeIter<'m, M>>;
