@@ -1,7 +1,11 @@
 use std::{marker::PhantomData, ops::Deref, ptr::NonNull};
 
 use crate::{
-    mesh1::{element::{EdgeId, VertexId}, mesh::MeshCore}, INVALID_IND
+    INVALID_IND, element_iter_struct,
+    mesh1::{
+        element::{self, EdgeId, EdgeIter, EdgeIterMut, VertexId, VertexIter, VertexIterMut},
+        mesh::{Mesh, MeshCore},
+    },
 };
 
 use super::{ElementId, FaceId};
@@ -59,43 +63,100 @@ pub trait HalfedgeExt: Halfedge {
     fn incoming_next(&self) -> HalfedgeId;
 }
 
-pub struct HalfedgeIter<'m, M: MeshCore> {
-    pub id: HalfedgeId,
-    pub data: &'m M::Halfedge,
-    pub mesh: NonNull<M>,
-    _marker: PhantomData<&'m M>,
+element_iter_struct!(struct HalfedgeIter -> MeshCore, HalfedgeId, Halfedge, from, as_ref, halfedge, {});
+element_iter_struct!(struct HalfedgeIterMut -> MeshCore, HalfedgeId, Halfedge, from_mut, as_mut, halfedge_mut, {mut});
+
+macro_rules! halfedge_base_methods {
+    (struct $name:ident, $vertex: ident, $halfedge: ident, $from: ident, $to: ident, $next: ident, $prev: ident, $into_ref:ident, {$( $mut_:tt )?}) => {
+        impl<'m, M: MeshCore<Halfedge: Halfedge>> $name<'m, M> {
+            #[inline]
+            fn $from(& $($mut_)? self) -> $vertex<'m, M> {
+                unsafe {
+                    let vid = self.mesh.as_ref().he_to(self.data.prev());
+                    $vertex::new(vid, self.mesh.$into_ref())
+                }
+            }
+            #[inline]
+            fn $to(& $($mut_)? self) -> $vertex<'m, M> {
+                unsafe { $vertex::new(self.data.vertex(), self.mesh.$into_ref()) }
+            }
+
+            #[inline]
+            fn $next(& $($mut_)? self) -> $halfedge<'m, M> {
+                unsafe { $halfedge::new(self.data.next(), self.mesh.$into_ref()) }
+            }
+
+            #[inline]
+            fn $prev(& $($mut_)? self) -> $halfedge<'m, M> {
+                unsafe { $halfedge::new(self.data.prev(), self.mesh.$into_ref()) }
+            }
+        }
+    };
+}
+halfedge_base_methods! (struct HalfedgeIter, VertexIter, HalfedgeIter, from, to, next, prev, as_ref, {});
+halfedge_base_methods! (struct HalfedgeIterMut, VertexIter, HalfedgeIter, from, to, next, prev, as_ref, {});
+halfedge_base_methods! (struct HalfedgeIterMut, VertexIterMut, HalfedgeIterMut, from_mut, to_mut, next_mut, prev_mut, as_mut, { mut });
+
+pub trait HalfedgeIterMethod<'m, M: Mesh> {
+    fn edge(&self) -> EdgeIter<'m, M>;
+    fn sibling(&self) -> HalfedgeIter<'m, M>;
+    fn incoming_next(&self) -> HalfedgeIter<'m, M>;
 }
 
-pub struct HalfedgeIterMut<'m, M: MeshCore> {
-    pub id: HalfedgeId,
-    pub data: &'m M::Halfedge,
-    pub mesh: NonNull<M>,
-    _marker: PhantomData<&'m mut M>,
+pub trait HalfedgeIterMutMethod<'m, M: Mesh>: HalfedgeIterMethod<'m, M> {
+    fn edge_mut(&self) -> EdgeIterMut<'m, M>;
+    fn sibling_mut(&self) -> HalfedgeIterMut<'m, M>;
+    fn incoming_next_mut(&self) -> HalfedgeIterMut<'m, M>;
 }
 
-impl<'m, M: MeshCore> HalfedgeIter<'m, M> {
-    pub fn new(id: HalfedgeId, mesh: &'m M) -> Self {
-        let data = mesh.halfedge(id);
-        HalfedgeIter {
-            id,
-            data,
-            mesh: NonNull::from(mesh),
-            _marker: PhantomData,
+default impl<'m, M: Mesh<Halfedge: Halfedge>> HalfedgeIterMethod<'m, M> for HalfedgeIter<'m, M> {
+    #[inline]
+    fn edge(&self) -> EdgeIter<'m, M> {
+        unsafe {
+            let eid = self.mesh.as_ref().he_edge(self.id);
+            EdgeIter::new(eid, self.mesh.as_ref())
+        }
+    }
+
+    #[inline]
+    fn sibling(&self) -> HalfedgeIter<'m, M> {
+        unsafe {
+            let hid = self.mesh.as_ref().he_sibling(self.id);
+            HalfedgeIter::new(hid, self.mesh.as_ref())
+        }
+    }
+
+    #[inline]
+    fn incoming_next(&self) -> HalfedgeIter<'m, M> {
+        unsafe {
+            let hid = self.mesh.as_ref().he_incoming_next(self.id);
+            HalfedgeIter::new(hid, self.mesh.as_ref())
         }
     }
 }
 
-impl<'m, M: MeshCore> HalfedgeIterMut<'m, M> {
-    pub fn new(id: HalfedgeId, mesh: &'m mut M) -> Self {
-        let mut mesh = NonNull::from_mut(mesh);
+impl<'m, M: Mesh<Halfedge: HalfedgeExt>> HalfedgeIterMethod<'m, M> for HalfedgeIter<'m, M> {
+    #[inline]
+    fn edge(&self) -> EdgeIter<'m, M> {
         unsafe {
-            let data = mesh.as_mut().halfedge_mut(id);
-            HalfedgeIterMut {
-                id,
-                data,
-                mesh,
-                _marker: PhantomData,
-            }
+            let eid = self.data.edge();
+            EdgeIter::new(eid, self.mesh.as_ref())
+        }
+    }
+
+    #[inline]
+    fn sibling(&self) -> HalfedgeIter<'m, M> {
+        unsafe {
+            let hid = self.data.sibling();
+            HalfedgeIter::new(hid, self.mesh.as_ref())
+        }
+    }
+
+    #[inline]
+    fn incoming_next(&self) -> HalfedgeIter<'m, M> {
+        unsafe {
+            let hid = self.data.incoming_next();
+            HalfedgeIter::new(hid, self.mesh.as_ref())
         }
     }
 }
