@@ -292,6 +292,16 @@ impl<V: Vertex, H: Halfedge, F: Face, A: Allocator> BaseMesh<V, H, F, A> {
     }
 
     #[inline]
+    fn he_prev(&self, hid: HalfedgeId) -> HalfedgeId {
+        self.halfedge(hid).prev()
+    }
+
+    #[inline]
+    fn he_next(&self, hid: HalfedgeId) -> HalfedgeId {
+        self.halfedge(hid).next()
+    }
+
+    #[inline]
     pub fn he_vertices(&self, hid: HalfedgeId) -> [VertexId; 2] {
         let h2 = self.halfedge(hid);
         let h1 = self.halfedge(h2.prev());
@@ -360,6 +370,8 @@ pub trait MeshCore: Sized {
     fn he_from(&self, hid: HalfedgeId) -> VertexId;
     fn he_to(&self, hid: HalfedgeId) -> VertexId;
     fn he_vertices(&self, hid: HalfedgeId) -> [VertexId; 2];
+    fn he_prev(&self, hid: HalfedgeId) -> HalfedgeId;
+    fn he_next(&self, hid: HalfedgeId) -> HalfedgeId;
 
     fn connect_halfedges(&mut self, hid1: HalfedgeId, hid2: HalfedgeId);
 
@@ -537,6 +549,16 @@ impl<T: HasBaseMesh> MeshCore for T {
     #[inline]
     fn he_to(&self, hid: HalfedgeId) -> VertexId {
         self.base().he_to(hid)
+    }
+
+    #[inline]
+    fn he_prev(&self, hid: HalfedgeId) -> HalfedgeId {
+        self.base().he_prev(hid)
+    }
+
+    #[inline]
+    fn he_next(&self, hid: HalfedgeId) -> HalfedgeId {
+        self.base().he_next(hid)
     }
 
     #[inline]

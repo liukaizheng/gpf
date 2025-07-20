@@ -132,6 +132,9 @@ pub trait VertexEdgesAndVerticesMut<'m, M: Mesh + 'm>: VertexEdgesAndVertices<'m
 macro_rules! halfedge_iter_methods {
     ($impl_type:ident, $circulate_type:ident, $he_iter_type:ident) => {
         impl<'m, M: Mesh<Vertex: Vertex, Halfedge: Halfedge>> $impl_type<'m, M> {
+            pub fn halfedge(&self) -> HalfedgeIter<'m, M> {
+                unsafe { HalfedgeIter::new(self.data.halfedge(), self.mesh.as_ref()) }
+            }
             pub fn incoming_halfedges(&self) -> impl Iterator<Item = $he_iter_type<'m, M>> {
                 let mut cv =
                     unsafe { $circulate_type::new(self.data.halfedge(), self.mesh.as_ref()) };
