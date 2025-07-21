@@ -3,7 +3,7 @@ use std::alloc::Allocator;
 use hashbrown::HashMap;
 use itertools::Itertools;
 
-use crate::mesh1::element::Edge;
+use crate::mesh1::element::{Edge, EdgeIter, EdgeIterMut};
 
 use super::element::{EdgeId, ElementId, FaceId, HalfedgeExt, HalfedgeId, VertexId};
 
@@ -284,6 +284,16 @@ impl<VP, HP, EP, FP, A: Allocator> Mesh for SurfaceMesh<VP, HP, EP, FP, A> {
     }
 
     #[inline]
+    fn edge_iter(&self, eid: EdgeId) -> super::element::EdgeIter<Self> {
+        EdgeIter::new(eid, self)
+    }
+
+    #[inline]
+    fn edge_iter_mut(&mut self, eid: EdgeId) -> super::element::EdgeIterMut<Self> {
+        EdgeIterMut::new(eid, self)
+    }
+
+    #[inline]
     fn he_sibling(&self, hid: HalfedgeId) -> HalfedgeId {
         self.halfedge(hid).property.sibling
     }
@@ -305,12 +315,12 @@ impl<VP, HP, EP, FP, A: Allocator> Mesh for SurfaceMesh<VP, HP, EP, FP, A> {
 }
 
 mod tests {
-    use crate::mesh1::element::VertexEdgesAndVertices;
-
     #[test]
     fn test_surface_mesh() {
         use super::SurfaceMesh;
         use crate::mesh1::mesh::MeshCore;
+        use crate::mesh1::element::VertexEdgesAndVertices;
+        use crate::mesh1::mesh::Mesh;
 
         let mut mesh = SurfaceMesh::<(), (), (), (), _>::new_in(
             vec![
@@ -339,5 +349,14 @@ mod tests {
 
         let vertices1 = Vec::from_iter(mesh.vertex_iter_mut(0.into()).vertices().map(|v| v.id));
         debug_assert!(vertices1.len() == 6);
+
+        let edge_halfedges = Vec::from_iter(mesh.edge_iter(0.into()).halfedges().map(|he| he.id));
+        debug_assert!(edge_halfedges.len() == 2);
+
+        let face_halfedges = Vec::from_iter(mesh.face_iter(0.into()).halfedges().map(|he| he.id));
+        debug_assert!(face_halfedges.len() == 3);
+
+        let face_halfedges1 = Vec::from_iter(mesh.face_iter(0.into()).halfedges().rev().map(|he| he.from()));
+        debug_assert!(face_halfedges1.len() == 3);
     }
 }

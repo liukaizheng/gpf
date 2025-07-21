@@ -73,29 +73,29 @@ macro_rules! halfedge_base_methods {
     (struct $name:ident, $vertex: ident, $halfedge: ident, $face: ident, $from: ident, $to: ident, $next: ident, $prev: ident, $face_method: ident, $into_ref:ident, {$( $mut_:tt )?}) => {
         impl<'m, M: MeshCore<Halfedge: Halfedge>> $name<'m, M> {
             #[inline]
-            fn $from(& $($mut_)? self) -> $vertex<'m, M> {
+            pub fn $from(& $($mut_)? self) -> $vertex<'m, M> {
                 unsafe {
                     let vid = self.mesh.as_ref().he_to(self.data.prev());
                     $vertex::new(vid, self.mesh.$into_ref())
                 }
             }
             #[inline]
-            fn $to(& $($mut_)? self) -> $vertex<'m, M> {
+            pub fn $to(& $($mut_)? self) -> $vertex<'m, M> {
                 unsafe { $vertex::new(self.data.vertex(), self.mesh.$into_ref()) }
             }
 
             #[inline]
-            fn $next(& $($mut_)? self) -> $halfedge<'m, M> {
+            pub fn $next(& $($mut_)? self) -> $halfedge<'m, M> {
                 unsafe { $halfedge::new(self.data.next(), self.mesh.$into_ref()) }
             }
 
             #[inline]
-            fn $prev(& $($mut_)? self) -> $halfedge<'m, M> {
+            pub fn $prev(& $($mut_)? self) -> $halfedge<'m, M> {
                 unsafe { $halfedge::new(self.data.prev(), self.mesh.$into_ref()) }
             }
 
             #[inline]
-            fn $face_method(& $($mut_)? self) -> $face<'m, M> {
+            pub fn $face_method(& $($mut_)? self) -> $face<'m, M> {
                 unsafe { $face::new(self.data.face(), self.mesh.$into_ref()) }
             }
         }

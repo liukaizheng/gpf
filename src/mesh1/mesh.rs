@@ -4,6 +4,8 @@ use std::{
     ops::{Index, IndexMut},
 };
 
+use crate::mesh1::element::{EdgeIter, EdgeIterMut};
+
 use super::element::{
     EdgeId, ElementId, Face, FaceId, FaceIter, FaceIterMut, Halfedge, HalfedgeId, HalfedgeIter,
     HalfedgeIterMut, Vertex, VertexId, VertexIter, VertexIterMut,
@@ -598,6 +600,9 @@ pub trait Mesh: MeshCore {
 
     fn edge(&self, eid: EdgeId) -> &Self::Edge;
     fn edge_mut(&mut self, eid: EdgeId) -> &mut Self::Edge;
+
+    fn edge_iter(&self, eid: EdgeId) -> EdgeIter<Self>;
+    fn edge_iter_mut(&mut self, eid: EdgeId) -> EdgeIterMut<Self>;
 
     fn he_edge(&self, hid: HalfedgeId) -> EdgeId;
 
