@@ -1,14 +1,17 @@
-use std::{iter::from_fn, marker::PhantomData, ops::Deref, ptr::NonNull};
+use std::{marker::PhantomData, ops::Deref, ptr::NonNull};
 
 use crate::{
     INVALID_IND, element_iter_struct,
     mesh1::{
-        element::{EdgeId, EdgeIter, EdgeIterMut, HalfedgeIter, HalfedgeIterMut},
+        element::{
+            EdgeIter, EdgeHalfedge, EdgeIterMut, HalfedgeIter, HalfedgeIterMethod, HalfedgeIterMut,
+            HalfedgeIterMutMethod,
+        },
         mesh::{Mesh, MeshCore},
     },
 };
 
-use super::{ElementId, Halfedge, HalfedgeExt, HalfedgeId};
+use super::{ElementId, Halfedge, HalfedgeId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VertexId(usize);
@@ -49,373 +52,297 @@ pub trait Vertex {
 }
 
 element_iter_struct!(struct VertexIter -> MeshCore, VertexId, Vertex, from, as_ref, vertex, {});
-element_iter_struct!(struct VertexIterMut -> MeshCore, VertexId, Vertex, from_mut, as_mut, vertex_mut, {mut});
-
-trait HalfedgeIncomingNext {
-    fn next(&mut self);
-}
+element_iter_struct!(struct VertexIterMut -> MeshCore, VertexId, Vertex, from_mut, as_mut, vertex_mut, { mut });
 
 // Macro to generate circulate vertex structs
 macro_rules! circulate_vertex_struct {
-    ($name:ident, $from_ref:ident, $into_ref: ident, $he_data: ident, {$( $mut_:tt )?}) => {
+    ($name:ident, $halfedge_iter: ident, $halfedge_trait: ident, $halfedge_method: ident, $incoming_next:ident, {$( $mut_:tt )?}) => {
         pub struct $name<'m, M: Mesh> {
             first_hid: HalfedgeId,
-            hid: HalfedgeId,
-            he: &'m $($mut_)? M::Halfedge,
-            mesh: NonNull<M>,
+            halfedge: $halfedge_iter<'m, M>,
             first: bool,
-            _marker: PhantomData<&'m $($mut_)? M>,
         }
         impl<'m, M: Mesh<Vertex: Vertex, Halfedge: Halfedge>> $name<'m, M> {
-            pub fn new(from_hid: HalfedgeId, mesh: &'m $($mut_)? M) -> Self {
-                let $($mut_)? mesh = NonNull::$from_ref(mesh);
-                unsafe {
-                    let hid = mesh.as_ref().halfedge(from_hid).prev();
-                    let he = mesh.$into_ref().$he_data(hid);
-                    Self {
-                        first: true,
-                        first_hid: hid,
-                        hid,
-                        he,
-                        mesh,
-                        _marker: PhantomData,
+
+            #[inline]
+            fn new(from_hid: HalfedgeId, mesh: &'m $($mut_)? M) -> Self {
+                let hid = mesh.halfedge(from_hid).prev();
+                Self {
+                    first_hid: hid,
+                    halfedge: $halfedge_iter::new(hid, mesh),
+                    first: true,
+                }
+            }
+        }
+
+        impl<'m, M: Mesh> $name<'m, M> {
+            #[inline]
+            fn valid(&self) -> bool {
+                self.first || self.halfedge.id != self.first_hid
+            }
+        }
+
+        impl <'m, M: Mesh<Halfedge : Halfedge>> Iterator for $name<'m, M> {
+            type Item = $halfedge_iter<'m, M>;
+
+            fn next(&mut self) -> Option<Self::Item> where $halfedge_iter<'m, M>: $halfedge_trait<'m, M> {
+                if !self.valid() {
+                    return None;
+                }
+                self.first = false;
+                let next_halfedge = self.halfedge.$incoming_next();
+                Some(std::mem::replace(&mut self.halfedge, next_halfedge))
+            }
+        }
+     };
+}
+
+circulate_vertex_struct!(
+    CirculateVertex,
+    HalfedgeIter,
+    HalfedgeIterMethod,
+    halfedge,
+    incoming_next,
+    {}
+);
+circulate_vertex_struct!(CirculateVertexMut, HalfedgeIterMut, HalfedgeIterMutMethod, halfedge_mut, incoming_next_mut, { mut });
+
+macro_rules! vertex_edges_struct {
+    ($name:ident, $halfedge_iter: ident, $edge_iter: ident, $halfedge_trait: ident,  $incoming_next: ident, $halfedge_next: ident, $edge_method:ident, {$( $mut_:tt )?}) => {
+        pub struct $name<'m, M: Mesh> {
+            first_hid: HalfedgeId,
+            halfedge: $halfedge_iter<'m, M>,
+            visited: bool,
+            first: bool,
+        }
+
+        impl <'m, M: Mesh<Vertex: Vertex, Halfedge: Halfedge>> $name<'m, M> {
+            #[inline]
+            fn new(vid: VertexId, mesh: &'m $($mut_)? M) -> Self {
+                let next_hid = mesh.vertex(vid).halfedge();
+                let hid = mesh.halfedge(next_hid).prev();
+                Self {
+                    first_hid: hid,
+                    halfedge: $halfedge_iter::new(hid, mesh),
+                    visited: false,
+                    first: true,
+                }
+            }
+        }
+
+        impl <'m, M: Mesh<Halfedge: Halfedge>> $name<'m, M> {
+            #[inline]
+            fn next_halfedge(&mut self) {
+                self.first = false;
+                if self.visited {
+                    self.visited = false;
+                    self.halfedge = self.halfedge.$incoming_next();
+                } else {
+                    self.visited = true;
+                }
+            }
+        }
+        impl<'m, M: Mesh> $name<'m, M> {
+            #[inline]
+            fn valid(&self) -> bool {
+                self.first || self.visited || self.halfedge.id != self.first_hid
+            }
+        }
+
+        impl <'m, M: Mesh<Halfedge : Halfedge>> Iterator for $name<'m, M> {
+            type Item = $edge_iter<'m, M>;
+
+            fn next(&mut self) -> Option<Self::Item> where $halfedge_iter<'m, M>: $halfedge_trait<'m, M> {
+                loop {
+                    if !self.valid() {
+                        return None;
+                    }
+                    if self.visited {
+                        let $($mut_)? halfedge = self.halfedge.$halfedge_next();
+                        let edge = halfedge.$edge_method();
+                        if edge.halfedge().id == halfedge.id {
+                            self.next_halfedge();
+                            return Some(edge);
+                        }
+                    } else {
+                        let edge = self.halfedge.$edge_method();
+                        if edge.halfedge().id == self.halfedge.id {
+                            self.next_halfedge();
+                            return Some(edge);
+                        }
+                    };
+                    self.next_halfedge();
+                }
+            }
+        }
+    }
+}
+vertex_edges_struct!(
+    VertexEdges,
+    HalfedgeIter,
+    EdgeIter,
+    HalfedgeIterMethod,
+    incoming_next,
+    next,
+    edge,
+    {}
+);
+vertex_edges_struct!(VertexEdgesMut, HalfedgeIterMut, EdgeIterMut, HalfedgeIterMutMethod, incoming_next_mut, next_mut, edge_mut, {mut});
+
+macro_rules! vertex_vertices_struct {
+    ($name:ident, $halfedge_iter: ident, $edge_iter: ident, $vertex_iter: ident, $halfedge_trait: ident, $incoming_next: ident, $halfedge_next: ident, $edge_method: ident, $to_vertex: ident, $from_vertex: ident, {$( $mut_:tt )?}) => {
+        pub struct $name<'m, M: Mesh> {
+            first_hid: HalfedgeId,
+            halfedge: $halfedge_iter<'m, M>,
+            visited: bool,
+            first: bool,
+        }
+
+        impl <'m, M: Mesh<Vertex: Vertex, Halfedge: Halfedge>> $name<'m, M> {
+            #[inline]
+            fn new(vid: VertexId, mesh: &'m $($mut_)? M) -> Self {
+                let next_hid = mesh.vertex(vid).halfedge();
+                let hid = mesh.halfedge(next_hid).prev();
+                Self {
+                    first_hid: hid,
+                    halfedge: $halfedge_iter::new(hid, mesh),
+                    visited: false,
+                    first: true,
+                }
+            }
+        }
+
+        impl <'m, M: Mesh<Halfedge: Halfedge>> $name<'m, M> {
+            #[inline]
+            fn next_halfedge(&mut self) {
+                self.first = false;
+                if self.visited {
+                    self.visited = false;
+                    self.halfedge = self.halfedge.$incoming_next();
+                } else {
+                    self.visited = true;
+                }
+            }
+        }
+
+        impl<'m, M: Mesh> $name<'m, M> {
+            #[inline]
+            fn valid(&self) -> bool {
+                self.first || self.visited || self.halfedge.id != self.first_hid
+            }
+        }
+
+        impl <'m, M: Mesh<Halfedge : Halfedge>> Iterator for $name<'m, M> {
+            type Item = $vertex_iter<'m, M>;
+
+            fn next(&mut self) -> Option<Self::Item> where $halfedge_iter<'m, M>: $halfedge_trait<'m, M> {
+                loop {
+                    if !self.valid() {
+                        return None;
                     }
 
+                    if self.visited {
+                        let $($mut_)? halfedge = self.halfedge.$halfedge_next();
+                        let edge = halfedge.$edge_method();
+                        if edge.halfedge().id == halfedge.id {
+                            self.next_halfedge();
+                            return Some(halfedge.$to_vertex());
+                        }
+                    } else {
+                        let edge = self.halfedge.edge();
+                        if edge.halfedge().id == self.halfedge.id {
+                            self.next_halfedge();
+                            return Some(self.halfedge.$from_vertex());
+                        }
+                    };
+                    self.next_halfedge();
                 }
+            }
+        }
 
+    }
+}
+
+vertex_vertices_struct!(
+    VertexVertices,
+    HalfedgeIter,
+    EdgeIter,
+    VertexIter,
+    HalfedgeIterMethod,
+    incoming_next,
+    next,
+    edge,
+    to,
+    from,
+    {}
+);
+vertex_vertices_struct!(VertexVerticesMut, HalfedgeIterMut, EdgeIterMut, VertexIterMut, HalfedgeIterMutMethod, incoming_next_mut, next_mut, edge_mut, to_mut, from_mut, {mut});
+
+macro_rules! vertex_methods {
+    ($name: ident, $incoming_method: ident, $circulate_vertex: ident, $vertex_edges: ident, $vertex_vertices: ident, $outgoing_method: ident, $halfedge_iter: ident, $halfedge_next: ident, $edges: ident, $vertices: ident, $into_ref: ident, {$( $mut_:tt )?}) => {
+        impl<'m, M: Mesh<Vertex: Vertex, Halfedge: Halfedge>> $name<'m, M> {
+            #[inline]
+            pub fn $incoming_method(& $($mut_)? self) -> $circulate_vertex<'m, M> {
+                unsafe { $circulate_vertex::new(self.data.halfedge(), self.mesh.$into_ref()) }
             }
 
             #[inline]
-            pub fn valid(&self) -> bool {
-                self.first || self.hid != self.first_hid
+            pub fn $outgoing_method(& $($mut_)? self) -> impl Iterator<Item = $halfedge_iter<'m, M>> {
+                self.$incoming_method().map(|$($mut_)? iter| iter.$halfedge_next())
             }
-        }
 
-        impl<'m, M: Mesh<Halfedge: Halfedge>> HalfedgeIncomingNext for $name<'m, M> {
-            default fn next(&mut self) {
-                unsafe {
-                    self.hid = self.mesh.as_ref().he_incoming_next(self.hid);
-                    self.he = self.mesh.$into_ref().$he_data(self.hid);
-                    self.first = false;
-                }
+            #[inline]
+            pub fn $edges(& $($mut_)? self) -> $vertex_edges<'m, M> {
+                unsafe {$vertex_edges::new(self.id, self.mesh.$into_ref())}
             }
-        }
 
-        impl<'m, M: Mesh<Halfedge: HalfedgeExt>> HalfedgeIncomingNext for $name<'m, M> {
-            fn next(&mut self) {
-                self.hid = self.he.incoming_next();
-                unsafe {
-                    self.he = self.mesh.$into_ref().$he_data(self.hid);
-                }
-                self.first = false;
+            #[inline]
+            pub fn $vertices(& $($mut_)? self) -> $vertex_vertices<'m, M> {
+                unsafe {$vertex_vertices::new(self.id, self.mesh.$into_ref())}
             }
         }
     };
 }
 
-circulate_vertex_struct!(CirculateVertex, from, as_ref, halfedge, {});
-circulate_vertex_struct!(CirculateVertexMut, from_mut, as_mut, halfedge_mut, {mut});
-
-pub trait VertexEdgesAndVertices<'m, M: Mesh<Edge: 'm> + 'm> {
-    fn edges(&self) -> impl Iterator<Item = EdgeIter<'m, M>>;
-    fn edge_ids(&self) -> impl Iterator<Item = EdgeId>;
-    fn vertices(&self) -> impl Iterator<Item = VertexIter<'m, M>>;
-    fn vertex_ids(&self) -> impl Iterator<Item = VertexId>;
-}
-
-pub trait VertexEdgesAndVerticesMut<'m, M: Mesh + 'm>: VertexEdgesAndVertices<'m, M> {
-    fn edges_mut(&mut self) -> impl Iterator<Item = EdgeIterMut<'m, M>>;
-    fn vertices_mut(&mut self) -> impl Iterator<Item = VertexIterMut<'m, M>>;
-}
-
-// Macro to generate halfedge iteration methods
-macro_rules! halfedge_iter_methods {
-    ($impl_type:ident, $circulate_type:ident, $he_iter_type:ident) => {
-        impl<'m, M: Mesh<Vertex: Vertex, Halfedge: Halfedge>> $impl_type<'m, M> {
-            pub fn halfedge(&self) -> HalfedgeIter<'m, M> {
-                unsafe { HalfedgeIter::new(self.data.halfedge(), self.mesh.as_ref()) }
-            }
-            pub fn incoming_halfedges(&self) -> impl Iterator<Item = $he_iter_type<'m, M>> {
-                let mut cv =
-                    unsafe { $circulate_type::new(self.data.halfedge(), self.mesh.as_ref()) };
-                from_fn(move || {
-                    if !cv.valid() {
-                        return None;
-                    }
-                    let ret = unsafe { $he_iter_type::new(cv.hid, self.mesh.as_ref()) };
-                    cv.next();
-                    Some(ret)
-                })
-            }
-
-            pub fn incoming_halfedge_ids(&self) -> impl Iterator<Item = HalfedgeId> {
-                let mut cv =
-                    unsafe { $circulate_type::new(self.data.halfedge(), self.mesh.as_ref()) };
-                from_fn(move || {
-                    if !cv.valid() {
-                        return None;
-                    }
-                    let ret = cv.hid;
-                    debug_assert!(cv.he.vertex() == self.id);
-                    cv.next();
-                    Some(ret)
-                })
-            }
-
-            pub fn outgoing_halfedges(&self) -> impl Iterator<Item = $he_iter_type<'m, M>> {
-                let mut cv =
-                    unsafe { $circulate_type::new(self.data.halfedge(), self.mesh.as_ref()) };
-                from_fn(move || {
-                    if !cv.valid() {
-                        return None;
-                    }
-                    let ret = unsafe { $he_iter_type::new(cv.he.next(), self.mesh.as_ref()) };
-                    cv.next();
-                    Some(ret)
-                })
-            }
-
-            pub fn outgoing_halfedge_ids(&self) -> impl Iterator<Item = HalfedgeId> {
-                let mut cv =
-                    unsafe { $circulate_type::new(self.data.halfedge(), self.mesh.as_ref()) };
-                from_fn(move || {
-                    if !cv.valid() {
-                        return None;
-                    }
-                    let ret = cv.he.next();
-                    debug_assert!(cv.he.vertex() == self.id);
-                    cv.next();
-                    Some(ret)
-                })
-            }
-        }
-    };
-}
-
-halfedge_iter_methods!(VertexIter, CirculateVertex, HalfedgeIter);
-halfedge_iter_methods!(VertexIterMut, CirculateVertex, HalfedgeIter);
-
-impl<'m, M: Mesh<Vertex: Vertex, Halfedge: Halfedge>> VertexIterMut<'m, M> {
-    pub fn halfedge_mut(&mut self) -> HalfedgeIterMut<'m, M> {
-        unsafe { HalfedgeIterMut::new(self.data.halfedge(), self.mesh.as_mut()) }
-    }
-
-    pub fn incoming_halfedges_mut(&mut self) -> impl Iterator<Item = HalfedgeIterMut<'m, M>> {
-        let mut cv = unsafe { CirculateVertexMut::new(self.data.halfedge(), self.mesh.as_mut()) };
-        from_fn(move || {
-            if !cv.valid() {
-                return None;
-            }
-            let ret = unsafe { HalfedgeIterMut::new(cv.hid, self.mesh.as_mut()) };
-            cv.next();
-            Some(ret)
-        })
-    }
-
-    pub fn outgoing_halfedges_mut(&mut self) -> impl Iterator<Item = HalfedgeIterMut<'m, M>> {
-        let mut cv = unsafe { CirculateVertexMut::new(self.data.halfedge(), self.mesh.as_mut()) };
-        from_fn(move || {
-            if !cv.valid() {
-                return None;
-            }
-            let ret = unsafe { HalfedgeIterMut::new(cv.he.next(), self.mesh.as_mut()) };
-            cv.next();
-            Some(ret)
-        })
-    }
-}
-
-// Macro to generate edge/vertex iteration logic
-macro_rules! edge_vertex_iter_impl {
-    ($for_type:ident, $edge_iter_type:ident, $vertex_iter_type:ident) => {
-        impl<'m, M: Mesh<Vertex: Vertex, Halfedge: Halfedge>> VertexEdgesAndVertices<'m, M>
-            for $for_type<'m, M>
-        {
-            fn edges(&self) -> impl Iterator<Item = $edge_iter_type<'m, M>> {
-                let mut he_iter = self.incoming_halfedges();
-                let mut prev: Option<HalfedgeIter<'m, M>> = None;
-                let mesh = unsafe { self.mesh.as_ref() };
-                from_fn(move || {
-                    loop {
-                        if let Some(he_item) = prev.take() {
-                            let hid = he_item.data.next();
-                            let eid = mesh.he_edge(hid);
-                            if mesh.e_halfedge(eid) == hid {
-                                return Some($edge_iter_type::new(eid, mesh));
-                            }
-                        } else {
-                            if let Some(he_item) = he_iter.next() {
-                                let eid = mesh.he_edge(he_item.id);
-                                if mesh.e_halfedge(eid) == he_item.id {
-                                    prev = Some(he_item);
-                                    return Some($edge_iter_type::new(eid, mesh));
-                                } else {
-                                    prev = Some(he_item);
-                                }
-                            } else {
-                                return None;
-                            }
-                        }
-                    }
-                })
-            }
-
-            fn edge_ids(&self) -> impl Iterator<Item = EdgeId> {
-                let mut he_iter = self.incoming_halfedges();
-                let mut prev: Option<HalfedgeIter<'m, M>> = None;
-                let mesh = unsafe { self.mesh.as_ref() };
-                from_fn(move || {
-                    loop {
-                        if let Some(he_item) = prev.take() {
-                            let hid = he_item.data.next();
-                            let eid = mesh.he_edge(hid);
-                            if mesh.e_halfedge(eid) == hid {
-                                return Some(eid);
-                            }
-                        } else {
-                            if let Some(he_item) = he_iter.next() {
-                                let eid = mesh.he_edge(he_item.id);
-                                if mesh.e_halfedge(eid) == he_item.id {
-                                    prev = Some(he_item);
-                                    return Some(eid);
-                                } else {
-                                    prev = Some(he_item);
-                                }
-                            } else {
-                                return None;
-                            }
-                        }
-                    }
-                })
-            }
-
-            fn vertices(&self) -> impl Iterator<Item = $vertex_iter_type<'m, M>> {
-                let mut he_iter = self.incoming_halfedges();
-                let mut prev: Option<HalfedgeIter<'m, M>> = None;
-                let mesh = unsafe { self.mesh.as_ref() };
-                from_fn(move || {
-                    loop {
-                        if let Some(he_item) = prev.take() {
-                            let hid = he_item.data.next();
-                            let eid = mesh.he_edge(hid);
-                            if mesh.e_halfedge(eid) == hid {
-                                return Some($vertex_iter_type::new(mesh.he_to(hid), mesh));
-                            }
-                        } else {
-                            if let Some(he_item) = he_iter.next() {
-                                let eid = mesh.he_edge(he_item.id);
-                                if mesh.e_halfedge(eid) == he_item.id {
-                                    let vid = mesh.he_to(he_item.data.prev());
-                                    prev = Some(he_item);
-                                    return Some($vertex_iter_type::new(vid, mesh));
-                                } else {
-                                    prev = Some(he_item);
-                                }
-                            } else {
-                                return None;
-                            }
-                        }
-                    }
-                })
-            }
-
-            fn vertex_ids(&self) -> impl Iterator<Item = VertexId> {
-                let mut he_iter = self.incoming_halfedges();
-                let mut prev: Option<HalfedgeIter<'m, M>> = None;
-                let mesh = unsafe { self.mesh.as_ref() };
-                from_fn(move || {
-                    loop {
-                        if let Some(he_item) = prev.take() {
-                            let hid = he_item.data.next();
-                            let eid = mesh.he_edge(hid);
-                            if mesh.e_halfedge(eid) == hid {
-                                return Some(mesh.he_to(hid));
-                            }
-                        } else {
-                            if let Some(he_item) = he_iter.next() {
-                                let eid = mesh.he_edge(he_item.id);
-                                if mesh.e_halfedge(eid) == he_item.id {
-                                    let vid = mesh.he_to(he_item.data.prev());
-                                    prev = Some(he_item);
-                                    return Some(vid);
-                                } else {
-                                    prev = Some(he_item);
-                                }
-                            } else {
-                                return None;
-                            }
-                        }
-                    }
-                })
-            }
-        }
-    };
-}
-
-edge_vertex_iter_impl!(VertexIter, EdgeIter, VertexIter);
-edge_vertex_iter_impl!(VertexIterMut, EdgeIter, VertexIter);
-
-impl<'m, M: Mesh<Vertex: Vertex, Halfedge: Halfedge>> VertexEdgesAndVerticesMut<'m, M>
-    for VertexIterMut<'m, M>
-{
-    fn edges_mut(&mut self) -> impl Iterator<Item = EdgeIterMut<'m, M>> {
-        let mut he_iter = self.incoming_halfedges_mut();
-        let mut prev: Option<HalfedgeIterMut<'m, M>> = None;
-        from_fn(move || {
-            loop {
-                if let Some(mut he_item) = prev.take() {
-                    let mesh = unsafe { he_item.mesh.as_mut() };
-                    let hid = he_item.data.next();
-                    let eid = mesh.he_edge(hid);
-                    if mesh.e_halfedge(eid) == hid {
-                        return Some(EdgeIterMut::new(eid, mesh));
-                    }
-                } else {
-                    if let Some(mut he_item) = he_iter.next() {
-                        let mesh = unsafe { he_item.mesh.as_mut() };
-                        let eid = mesh.he_edge(he_item.id);
-                        if mesh.e_halfedge(eid) == he_item.id {
-                            prev = Some(he_item);
-                            return Some(EdgeIterMut::new(eid, mesh));
-                        } else {
-                            prev = Some(he_item);
-                        }
-                    } else {
-                        return None;
-                    }
-                }
-            }
-        })
-    }
-
-    fn vertices_mut(&mut self) -> impl Iterator<Item = VertexIterMut<'m, M>> {
-        let mut he_iter = self.incoming_halfedges_mut();
-        let mut prev: Option<HalfedgeIterMut<'m, M>> = None;
-        from_fn(move || {
-            loop {
-                if let Some(mut he_item) = prev.take() {
-                    let mesh = unsafe { he_item.mesh.as_mut() };
-                    let hid = he_item.data.next();
-                    let eid = mesh.he_edge(hid);
-                    if mesh.e_halfedge(eid) == hid {
-                        return Some(VertexIterMut::new(mesh.he_to(hid), mesh));
-                    }
-                } else {
-                    if let Some(mut he_item) = he_iter.next() {
-                        let mesh = unsafe { he_item.mesh.as_mut() };
-                        let eid = mesh.he_edge(he_item.id);
-                        if mesh.e_halfedge(eid) == he_item.id {
-                            let vid = mesh.he_to(he_item.data.prev());
-                            prev = Some(he_item);
-                            return Some(VertexIterMut::new(vid, mesh));
-                        } else {
-                            prev = Some(he_item);
-                        }
-                    } else {
-                        return None;
-                    }
-                }
-            }
-        })
-    }
-}
+vertex_methods!(
+    VertexIter,
+    incoming_halfedges,
+    CirculateVertex,
+    VertexEdges,
+    VertexVertices,
+    outgoing_halfedges,
+    HalfedgeIter,
+    next,
+    edges,
+    vertices,
+    as_ref,
+    {}
+);
+vertex_methods!(
+    VertexIterMut,
+    incoming_halfedges,
+    CirculateVertex,
+    VertexEdges,
+    VertexVertices,
+    outgoing_halfedges,
+    HalfedgeIter,
+    next,
+    edges,
+    vertices,
+    as_ref,
+    {}
+);
+vertex_methods!(
+    VertexIterMut,
+    incoming_halfedges_mut,
+    CirculateVertexMut,
+    VertexEdgesMut,
+    VertexVerticesMut,
+    outgoing_halfedges_mut,
+    HalfedgeIterMut,
+    next_mut,
+    edges_mut,
+    vertices_mut,
+    as_mut,
+    {mut}
+);

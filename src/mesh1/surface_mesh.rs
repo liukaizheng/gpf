@@ -319,7 +319,6 @@ mod tests {
     fn test_surface_mesh() {
         use super::SurfaceMesh;
         use crate::mesh1::mesh::MeshCore;
-        use crate::mesh1::element::VertexEdgesAndVertices;
         use crate::mesh1::mesh::Mesh;
 
         let mut mesh = SurfaceMesh::<(), (), (), (), _>::new_in(
@@ -335,20 +334,29 @@ mod tests {
         );
         debug_assert!(mesh.n_vertices() == 7);
         println!("the size of mesh is {:?}", std::mem::size_of_val(&mesh));
-        let incoming_halfedges = Vec::from_iter(mesh.vertex_iter(0.into()).incoming_halfedge_ids());
+        let incoming_halfedges = Vec::from_iter(mesh.vertex_iter(0.into()).incoming_halfedges().map(|he| he.id));
         debug_assert!(incoming_halfedges.len() == 6);
 
-        let outgoing_halfedges = Vec::from_iter(mesh.vertex_iter(0.into()).outgoing_halfedge_ids());
+        let outgoing_halfedges = Vec::from_iter(mesh.vertex_iter(0.into()).outgoing_halfedges().map(|he| he.id));
         debug_assert!(outgoing_halfedges.len() == 6);
 
-        let edges = Vec::from_iter(mesh.vertex_iter(0.into()).edge_ids());
+        let edges = Vec::from_iter(mesh.vertex_iter(0.into()).edges().map(|e| e.id));
         debug_assert!(edges.len() == 6);
 
-        let vertices = Vec::from_iter(mesh.vertex_iter(0.into()).vertex_ids());
+        let vertices = Vec::from_iter(mesh.vertex_iter(0.into()).vertices().map(|v| v.id));
         debug_assert!(vertices.len() == 6);
 
-        let vertices1 = Vec::from_iter(mesh.vertex_iter_mut(0.into()).vertices().map(|v| v.id));
-        debug_assert!(vertices1.len() == 6);
+        let incoming_halfedges1 = Vec::from_iter(mesh.vertex_iter(6.into()).incoming_halfedges().map(|he| he.id));
+        debug_assert!(incoming_halfedges1.len() == 2);
+
+        let outgoing_halfedges1 = Vec::from_iter(mesh.vertex_iter(6.into()).outgoing_halfedges().map(|he| he.id));
+        debug_assert!(outgoing_halfedges1.len() == 2);
+
+        let edge1 = Vec::from_iter(mesh.vertex_iter(6.into()).edges().map(|e| e.id));
+        debug_assert!(edge1.len() == 3);
+
+        let vertices1 = Vec::from_iter(mesh.vertex_iter_mut(6.into()).vertices().map(|v| v.id));
+        debug_assert!(vertices1.len() == 3);
 
         let edge_halfedges = Vec::from_iter(mesh.edge_iter(0.into()).halfedges().map(|he| he.id));
         debug_assert!(edge_halfedges.len() == 2);
@@ -356,7 +364,7 @@ mod tests {
         let face_halfedges = Vec::from_iter(mesh.face_iter(0.into()).halfedges().map(|he| he.id));
         debug_assert!(face_halfedges.len() == 3);
 
-        let face_halfedges1 = Vec::from_iter(mesh.face_iter(0.into()).halfedges().rev().map(|he| he.from()));
+        let face_halfedges1 = Vec::from_iter(mesh.face_iter(0.into()).halfedges().rev().map(|he| he.from().id));
         debug_assert!(face_halfedges1.len() == 3);
     }
 }

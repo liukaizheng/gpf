@@ -3,7 +3,7 @@ use std::{marker::PhantomData, ops::Deref, ptr::NonNull};
 use crate::{
     INVALID_IND, element_iter_struct,
     mesh1::{
-        element::{ HalfedgeExt, HalfedgeId, HalfedgeIter, HalfedgeIterMut},
+        element::{ Halfedge, HalfedgeId, HalfedgeIter, HalfedgeIterMut, HalfedgeIterMethod, HalfedgeIterMutMethod},
         mesh::Mesh,
     },
 };
@@ -50,123 +50,95 @@ pub trait Edge {
 element_iter_struct!(struct EdgeIter -> Mesh, EdgeId, Edge, from, as_ref, edge, {});
 element_iter_struct!(struct EdgeIterMut -> Mesh, EdgeId, Edge, from_mut, as_mut, edge_mut, {mut});
 
-trait EdgeHalfedge<'m, M: Mesh> {
-    fn one_halfedge(&self) -> HalfedgeId;
+pub trait EdgeHalfedge<'m, M: Mesh> {
+    fn halfedge(&self) -> HalfedgeIter<'m, M>;
+}
+
+pub trait EdgeHalfedgeMut<'m, M: Mesh>: EdgeHalfedge<'m, M> {
+    fn halfedge_mut(&mut self) -> HalfedgeIterMut<'m, M>;
 }
 
 macro_rules! edge_halfedge_trait {
-    ($name:ident) => {
-        impl<'m, M: Mesh> EdgeHalfedge<'m, M> for $name<'m, M> {
+    ($name:ident, $halfedge_trait: ident, $halfedge_iter: ident, $halfedge_method: ident, $into_ref: ident, {$($mut_:tt )?}) => {
+        impl <'m, M: Mesh> $halfedge_trait<'m, M> for $name<'m, M> {
             #[inline]
-            default fn one_halfedge(&self) -> HalfedgeId {
-                unsafe { self.mesh.as_ref().e_halfedge(self.id) }
+            default fn $halfedge_method(& $($mut_)? self) -> $halfedge_iter<'m, M> {
+                unsafe {
+                    let hid = self.mesh.as_ref().e_halfedge(self.id);
+                    $halfedge_iter::new(hid, self.mesh.$into_ref())
+                }
             }
         }
 
-        impl<'m, M: Mesh<Edge: Edge>> EdgeHalfedge<'m, M> for $name<'m, M> {
+        impl <'m, M: Mesh<Edge: Edge>> $halfedge_trait<'m, M> for $name<'m, M> {
             #[inline]
-            fn one_halfedge(&self) -> HalfedgeId {
-                self.data.halfedge()
+            fn $halfedge_method(& $($mut_)? self) -> $halfedge_iter<'m, M> {
+                unsafe {
+                    $halfedge_iter::new(self.data.halfedge(), self.mesh.$into_ref())
+                }
             }
         }
-    };
+    }
 }
-
-edge_halfedge_trait!(EdgeIter);
-edge_halfedge_trait!(EdgeIterMut);
-
-trait HalfedgeOperation<'m, M: Mesh> {
-    fn next_halfedge(&mut self);
-}
+edge_halfedge_trait!(EdgeIter, EdgeHalfedge, HalfedgeIter, halfedge, as_ref, {});
+edge_halfedge_trait!(EdgeIterMut, EdgeHalfedge, HalfedgeIter, halfedge, as_ref, {});
+edge_halfedge_trait!(EdgeIterMut, EdgeHalfedgeMut, HalfedgeIterMut, halfedge_mut, as_mut, {mut});
 
 macro_rules! edge_halfedges_struct {
-    (struct $name:ident, $halfedge: ident, $halfedge_method: ident, $halfedge_iter: ident, $from_ref:ident, $into_ref:ident, {$($mut_:tt )?}) => {
+    (struct $name:ident, $halfedge_method: ident, $halfedge_iter: ident, $halfedge_trait: ident, $sibling: ident, {$($mut_:tt )?}) => {
         pub struct $name<'m, M: Mesh> {
             first_hid: HalfedgeId,
-            hid: HalfedgeId,
-            he: &'m $($mut_)? M::$halfedge,
-            mesh: NonNull<M>,
+            halfedge: $halfedge_iter<'m, M>,
             first: bool,
-            _marker: PhantomData<&'m M>,
         }
 
         impl<'m, M: Mesh> $name<'m, M> {
             #[inline]
-            fn new(first_hid: HalfedgeId, mesh: &'m $($mut_)? M) -> Self {
-                unsafe {
-                    let $($mut_)? mesh = NonNull::$from_ref(mesh);
-                    let he = mesh.$into_ref().$halfedge_method(first_hid);
-                    Self {
-                        first_hid,
-                        hid: first_hid,
-                        he,
-                        mesh,
-                        first: true,
-                        _marker: PhantomData,
-                    }
+            fn new(hid: HalfedgeId, mesh: &'m $($mut_)? M) -> Self {
+                Self {
+                    first_hid: hid,
+                    halfedge: $halfedge_iter::new(hid, mesh),
+                    first: true,
                 }
             }
 
             #[inline]
             fn valid(&self) -> bool {
-                self.first || self.hid != self.first_hid
+                self.first || self.halfedge.id != self.first_hid
             }
         }
 
-        impl <'m, M: Mesh> HalfedgeOperation<'m, M> for $name<'m, M> {
-            #[inline]
-            default fn next_halfedge(&mut self) {
-                unsafe {
-                    self.hid = self.mesh.as_ref().he_sibling(self.hid);
-                }
-            }
-        }
-
-        impl <'m, M: Mesh<Halfedge : HalfedgeExt>> HalfedgeOperation<'m, M> for $name<'m, M> {
-            #[inline]
-            fn next_halfedge(&mut self) {
-                self.hid = self.he.sibling();
-            }
-        }
-
-        impl<'m, M: Mesh> Iterator for $name<'m, M> {
+        impl<'m, M: Mesh<Halfedge: Halfedge>> Iterator for $name<'m, M> {
             type Item = $halfedge_iter<'m, M>;
 
             #[inline]
-            fn next(&mut self) -> Option<Self::Item> {
+            fn next(&mut self) -> Option<Self::Item> where $halfedge_iter<'m, M>: $halfedge_trait<'m, M> {
                 if !self.valid() {
                     return None;
                 }
-                unsafe {
-                    self.first = false;
-                    let old_hid = self.hid;
-                    self.next_halfedge();
-                    let he = std::mem::replace(&mut self.he, self.mesh.$into_ref().$halfedge_method(self.hid));
-                    let ret = $halfedge_iter::new_with_data(old_hid, he, self.mesh.$into_ref());
-                    Some(ret)
-                }
+                self.first = false;
+                let sibling = self.halfedge.$sibling();
+                Some(std::mem::replace(&mut self.halfedge, sibling))
             }
         }
     };
 }
 
-edge_halfedges_struct!(struct EdgeHalfedges, Halfedge, halfedge, HalfedgeIter, from, as_ref, {});
-edge_halfedges_struct!(struct EdgeHalfedgesMut, Halfedge, halfedge_mut, HalfedgeIterMut, from_mut, as_mut, {mut});
+edge_halfedges_struct!(struct EdgeHalfedges, halfedge, HalfedgeIter, HalfedgeIterMethod, sibling, {});
+edge_halfedges_struct!(struct EdgeHalfedgesMut, halfedge_mut, HalfedgeIterMut, HalfedgeIterMutMethod, sibling_mut, {mut});
 
 macro_rules! edge_halfedges_method {
     (struct $name:ident, $halfedge_method: ident, $halfedges_method: ident, $halfedge_iter: ident, $edge_halfedges: ident, $into_ref:ident, {$($mut_:tt )?}) => {
         impl <'m, M: Mesh> $name<'m, M> {
-            #[inline]
-            pub fn $halfedge_method(& $($mut_)? self) -> $halfedge_iter<'m, M> {
-                unsafe {
-                    $halfedge_iter::new(self.one_halfedge(), self.mesh.$into_ref())
-                }
-            }
 
             #[inline]
             pub fn $halfedges_method(& $($mut_)? self) -> $edge_halfedges<'m, M> {
-                unsafe {
-                    $edge_halfedges::new(self.one_halfedge(), self.mesh.$into_ref())
+                let halfedge = self.$halfedge_method();
+                let first_hid = halfedge.id;
+                $edge_halfedges {
+                    first_hid,
+                    halfedge,
+                    first: true,
                 }
             }
         }

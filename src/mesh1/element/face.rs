@@ -49,36 +49,26 @@ element_iter_struct!(struct FaceIterMut -> MeshCore, FaceId, Face, from_mut, as_
 
 
 macro_rules! face_halfedges_struct {
-    (struct $name:ident, $halfedge_method: ident, $halfedge_iter: ident, $from_ref:ident, $into_ref:ident, {$($mut_:tt )?}) => {
+    ($name:ident, $halfedge_iter: ident, $halfedge_next: ident, $halfedge_prev: ident,  $into_ref:ident, {$($mut_:tt )?}) => {
         pub struct $name<'m, M: Mesh> {
             first_hid: HalfedgeId,
-            hid: HalfedgeId,
-            he: &'m $($mut_)? M::Halfedge,
-            mesh: NonNull<M>,
+            halfedge: $halfedge_iter<'m, M>,
             first: bool,
-            _marker: PhantomData<&'m M>,
         }
 
         impl<'m, M: Mesh> $name<'m, M> {
             #[inline]
-            fn new(first_hid: HalfedgeId, mesh: &'m $($mut_)? M) -> Self {
-                unsafe {
-                    let $($mut_)? mesh = NonNull::$from_ref(mesh);
-                    let he = mesh.$into_ref().$halfedge_method(first_hid);
-                    Self {
-                        first_hid,
-                        hid: first_hid,
-                        he,
-                        mesh,
-                        first: true,
-                        _marker: PhantomData,
-                    }
+            fn new(hid: HalfedgeId, mesh: &'m $($mut_)? M) -> Self {
+                Self {
+                    first_hid: hid,
+                    halfedge: $halfedge_iter::new(hid, mesh),
+                    first: true,
                 }
             }
 
             #[inline]
             fn valid(&self) -> bool {
-                self.first || self.hid != self.first_hid
+                self.first || self.halfedge.id != self.first_hid
             }
         }
 
@@ -90,37 +80,30 @@ macro_rules! face_halfedges_struct {
                 if !self.valid() {
                     return None;
                 }
-                unsafe {
-                    self.first = false;
-                    let old_hid = self.hid;
-                    self.hid = self.he.next();
-                    let he = std::mem::replace(&mut self.he, self.mesh.$into_ref().$halfedge_method(self.hid));
-                    let ret = $halfedge_iter::new_with_data(old_hid, he, self.mesh.$into_ref());
-                    Some(ret)
-                }
+
+                self.first = false;
+                let he_next = self.halfedge.$halfedge_next();
+                Some(std::mem::replace(&mut self.halfedge, he_next))
             }
         }
 
         impl<'m, M: Mesh<Halfedge: Halfedge>> DoubleEndedIterator for $name<'m, M> {
+            #[inline]
             fn next_back(&mut self) -> Option<Self::Item> {
                 if !self.valid() {
                     return None;
                 }
-                unsafe {
-                    self.first = false;
-                    let old_hid = self.hid;
-                    self.hid = self.he.prev();
-                    let he = std::mem::replace(&mut self.he, self.mesh.$into_ref().$halfedge_method(self.hid));
-                    let ret = $halfedge_iter::new_with_data(old_hid, he, self.mesh.$into_ref());
-                    Some(ret)
-                }
+
+                self.first = false;
+                let he_prev = self.halfedge.$halfedge_prev();
+                Some(std::mem::replace(&mut self.halfedge, he_prev))
             }
         }
     }
 }
 
-face_halfedges_struct!(struct FaceHalfedges, halfedge, HalfedgeIter, from, as_ref, {});
-face_halfedges_struct!(struct FaceHalfedgesMut, halfedge_mut, HalfedgeIterMut, from_mut, as_mut, {mut});
+face_halfedges_struct!(FaceHalfedges, HalfedgeIter, next, prev,  as_ref, {});
+face_halfedges_struct!(FaceHalfedgesMut, HalfedgeIterMut, next_mut, prev_mut,  as_mut, {mut});
 
 macro_rules! face_halfedges_method {
     (struct $name:ident, $halfedge_method: ident, $halfedges_method: ident, $halfedge_iter: ident, $edge_halfedges: ident, $into_ref:ident, {$($mut_:tt )?}) => {

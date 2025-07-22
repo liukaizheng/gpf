@@ -119,9 +119,9 @@ pub trait HalfedgeIterMutMethod<'m, M: Mesh>: HalfedgeIterMethod<'m, M> {
 
 macro_rules! halfedge_base_methods {
     (struct $name:ident -> $halfedge_trait: ident, $halfedge: ident, $edge: ident, $edge_method: ident, $sibling: ident, $incoming_next: ident, $into_ref:ident, {$( $mut_:tt )?}) => {
-        default impl<'m, M: Mesh<Halfedge: Halfedge>> $halfedge_trait<'m, M> for $name<'m, M> {
+        impl<'m, M: Mesh<Halfedge: Halfedge>> $halfedge_trait<'m, M> for $name<'m, M> {
             #[inline]
-            fn $edge_method(& $($mut_)? self) -> $edge<'m, M> {
+            default fn $edge_method(& $($mut_)? self) -> $edge<'m, M> {
                 unsafe {
                     let eid = self.mesh.as_ref().he_edge(self.id);
                     $edge::new(eid, self.mesh.$into_ref())
@@ -129,7 +129,7 @@ macro_rules! halfedge_base_methods {
             }
 
             #[inline]
-            fn $sibling(& $($mut_)? self) -> $halfedge<'m, M> {
+            default fn $sibling(& $($mut_)? self) -> $halfedge<'m, M> {
                 unsafe {
                     let hid = self.mesh.as_ref().he_sibling(self.id);
                     $halfedge::new(hid, self.mesh.$into_ref())
@@ -137,7 +137,7 @@ macro_rules! halfedge_base_methods {
             }
 
             #[inline]
-            fn $incoming_next(& $($mut_)? self) -> $halfedge<'m, M> {
+            default fn $incoming_next(& $($mut_)? self) -> $halfedge<'m, M> {
                 unsafe {
                     let hid = self.mesh.as_ref().he_incoming_next(self.id);
                     $halfedge::new(hid, self.mesh.$into_ref())
