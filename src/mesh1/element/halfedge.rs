@@ -4,8 +4,8 @@ use crate::{
     INVALID_IND, element_iter_struct,
     mesh1::{
         element::{
-            EdgeId, EdgeIter, EdgeIterMut, FaceIter, FaceIterMut, VertexId, VertexIter,
-            VertexIterMut,
+            EdgeId, Edge, EdgeMut, Face, FaceMut, VertexId, Vertex,
+            VertexMut,
         },
         mesh::{Mesh, MeshCore},
     },
@@ -46,7 +46,7 @@ impl Deref for HalfedgeId {
     }
 }
 
-pub trait Halfedge {
+pub trait HalfedgeData {
     fn vertex(&self) -> VertexId;
     fn set_vertex(&mut self, vertex: VertexId);
 
@@ -60,18 +60,18 @@ pub trait Halfedge {
     fn set_face(&mut self, face: FaceId);
 }
 
-pub trait HalfedgeExt: Halfedge {
+pub trait HalfedgeDataExt: HalfedgeData {
     fn edge(&self) -> EdgeId;
     fn sibling(&self) -> HalfedgeId;
     fn incoming_next(&self) -> HalfedgeId;
 }
 
-element_iter_struct!(struct HalfedgeIter -> MeshCore, HalfedgeId, Halfedge, from, as_ref, halfedge, {});
-element_iter_struct!(struct HalfedgeIterMut -> MeshCore, HalfedgeId, Halfedge, from_mut, as_mut, halfedge_mut, {mut});
+element_iter_struct!(struct Halfedge -> MeshCore, HalfedgeId, HalfedgeData, from, as_ref, halfedge_data, {});
+element_iter_struct!(struct HalfedgeMut -> MeshCore, HalfedgeId, HalfedgeData, from_mut, as_mut, halfedge_data_mut, {mut});
 
 macro_rules! halfedge_base_methods {
     (struct $name:ident, $vertex: ident, $halfedge: ident, $face: ident, $from: ident, $to: ident, $next: ident, $prev: ident, $face_method: ident, $into_ref:ident, {$( $mut_:tt )?}) => {
-        impl<'m, M: MeshCore<Halfedge: Halfedge>> $name<'m, M> {
+        impl<'m, M: MeshCore<HalfedgeData: HalfedgeData>> $name<'m, M> {
             #[inline]
             pub fn $from(& $($mut_)? self) -> $vertex<'m, M> {
                 unsafe {
@@ -101,25 +101,25 @@ macro_rules! halfedge_base_methods {
         }
     };
 }
-halfedge_base_methods! (struct HalfedgeIter, VertexIter, HalfedgeIter, FaceIter, from, to, next, prev, face, as_ref, {});
-halfedge_base_methods! (struct HalfedgeIterMut, VertexIter, HalfedgeIter, FaceIter, from, to, next, prev, face, as_ref, {});
-halfedge_base_methods! (struct HalfedgeIterMut, VertexIterMut, HalfedgeIterMut, FaceIterMut, from_mut, to_mut, next_mut, prev_mut, face_mut, as_mut, { mut });
+halfedge_base_methods! (struct Halfedge, Vertex, Halfedge, Face, from, to, next, prev, face, as_ref, {});
+halfedge_base_methods! (struct HalfedgeMut, Vertex, Halfedge, Face, from, to, next, prev, face, as_ref, {});
+halfedge_base_methods! (struct HalfedgeMut, VertexMut, HalfedgeMut, FaceMut, from_mut, to_mut, next_mut, prev_mut, face_mut, as_mut, { mut });
 
 pub trait HalfedgeIterMethod<'m, M: Mesh> {
-    fn edge(&self) -> EdgeIter<'m, M>;
-    fn sibling(&self) -> HalfedgeIter<'m, M>;
-    fn incoming_next(&self) -> HalfedgeIter<'m, M>;
+    fn edge(&self) -> Edge<'m, M>;
+    fn sibling(&self) -> Halfedge<'m, M>;
+    fn incoming_next(&self) -> Halfedge<'m, M>;
 }
 
 pub trait HalfedgeIterMutMethod<'m, M: Mesh>: HalfedgeIterMethod<'m, M> {
-    fn edge_mut(&mut self) -> EdgeIterMut<'m, M>;
-    fn sibling_mut(&mut self) -> HalfedgeIterMut<'m, M>;
-    fn incoming_next_mut(&mut self) -> HalfedgeIterMut<'m, M>;
+    fn edge_mut(&mut self) -> EdgeMut<'m, M>;
+    fn sibling_mut(&mut self) -> HalfedgeMut<'m, M>;
+    fn incoming_next_mut(&mut self) -> HalfedgeMut<'m, M>;
 }
 
 macro_rules! halfedge_base_methods {
     (struct $name:ident -> $halfedge_trait: ident, $halfedge: ident, $edge: ident, $edge_method: ident, $sibling: ident, $incoming_next: ident, $into_ref:ident, {$( $mut_:tt )?}) => {
-        impl<'m, M: Mesh<Halfedge: Halfedge>> $halfedge_trait<'m, M> for $name<'m, M> {
+        impl<'m, M: Mesh<HalfedgeData: HalfedgeData>> $halfedge_trait<'m, M> for $name<'m, M> {
             #[inline]
             default fn $edge_method(& $($mut_)? self) -> $edge<'m, M> {
                 unsafe {
@@ -145,7 +145,7 @@ macro_rules! halfedge_base_methods {
             }
         }
 
-        impl<'m, M: Mesh<Halfedge: HalfedgeExt>> $halfedge_trait<'m, M> for $name<'m, M> {
+        impl<'m, M: Mesh<HalfedgeData: HalfedgeDataExt>> $halfedge_trait<'m, M> for $name<'m, M> {
             #[inline]
             fn $edge_method(& $($mut_)? self) -> $edge<'m, M> {
                 unsafe {
@@ -173,6 +173,6 @@ macro_rules! halfedge_base_methods {
     };
 }
 
-halfedge_base_methods! (struct HalfedgeIter -> HalfedgeIterMethod, HalfedgeIter, EdgeIter, edge, sibling, incoming_next, as_ref, {});
-halfedge_base_methods! (struct HalfedgeIterMut -> HalfedgeIterMethod, HalfedgeIter, EdgeIter, edge, sibling, incoming_next, as_ref, {});
-halfedge_base_methods! (struct HalfedgeIterMut -> HalfedgeIterMutMethod, HalfedgeIterMut, EdgeIterMut, edge_mut, sibling_mut, incoming_next_mut, as_mut, {mut});
+halfedge_base_methods! (struct Halfedge -> HalfedgeIterMethod, Halfedge, Edge, edge, sibling, incoming_next, as_ref, {});
+halfedge_base_methods! (struct HalfedgeMut -> HalfedgeIterMethod, Halfedge, Edge, edge, sibling, incoming_next, as_ref, {});
+halfedge_base_methods! (struct HalfedgeMut -> HalfedgeIterMutMethod, HalfedgeMut, EdgeMut, edge_mut, sibling_mut, incoming_next_mut, as_mut, {mut});

@@ -4,14 +4,14 @@ use crate::{
     INVALID_IND, element_iter_struct,
     mesh1::{
         element::{
-            EdgeIter, EdgeHalfedge, EdgeIterMut, HalfedgeIter, HalfedgeIterMethod, HalfedgeIterMut,
+            Edge, EdgeHalfedge, EdgeMut, Halfedge, HalfedgeIterMethod, HalfedgeMut,
             HalfedgeIterMutMethod,
         },
         mesh::{Mesh, MeshCore},
     },
 };
 
-use super::{ElementId, Halfedge, HalfedgeId};
+use super::{ElementId, HalfedgeData, HalfedgeId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VertexId(usize);
@@ -46,13 +46,13 @@ impl Deref for VertexId {
     }
 }
 
-pub trait Vertex {
+pub trait VertexData {
     fn halfedge(&self) -> HalfedgeId;
     fn set_halfedge(&mut self, hid: HalfedgeId);
 }
 
-element_iter_struct!(struct VertexIter -> MeshCore, VertexId, Vertex, from, as_ref, vertex, {});
-element_iter_struct!(struct VertexIterMut -> MeshCore, VertexId, Vertex, from_mut, as_mut, vertex_mut, { mut });
+element_iter_struct!(struct Vertex -> MeshCore, VertexId, VertexData, from, as_ref, vertex_data, {});
+element_iter_struct!(struct VertexMut -> MeshCore, VertexId, VertexData, from_mut, as_mut, vertex_data_mut, { mut });
 
 // Macro to generate circulate vertex structs
 macro_rules! circulate_vertex_struct {
@@ -62,11 +62,11 @@ macro_rules! circulate_vertex_struct {
             halfedge: $halfedge_iter<'m, M>,
             first: bool,
         }
-        impl<'m, M: Mesh<Vertex: Vertex, Halfedge: Halfedge>> $name<'m, M> {
+        impl<'m, M: Mesh<VertexData: VertexData, HalfedgeData: HalfedgeData>> $name<'m, M> {
 
             #[inline]
             fn new(from_hid: HalfedgeId, mesh: &'m $($mut_)? M) -> Self {
-                let hid = mesh.halfedge(from_hid).prev();
+                let hid = mesh.halfedge_data(from_hid).prev();
                 Self {
                     first_hid: hid,
                     halfedge: $halfedge_iter::new(hid, mesh),
@@ -82,7 +82,7 @@ macro_rules! circulate_vertex_struct {
             }
         }
 
-        impl <'m, M: Mesh<Halfedge : Halfedge>> Iterator for $name<'m, M> {
+        impl <'m, M: Mesh<HalfedgeData : HalfedgeData>> Iterator for $name<'m, M> {
             type Item = $halfedge_iter<'m, M>;
 
             fn next(&mut self) -> Option<Self::Item> where $halfedge_iter<'m, M>: $halfedge_trait<'m, M> {
@@ -99,13 +99,13 @@ macro_rules! circulate_vertex_struct {
 
 circulate_vertex_struct!(
     CirculateVertex,
-    HalfedgeIter,
+    Halfedge,
     HalfedgeIterMethod,
     halfedge,
     incoming_next,
     {}
 );
-circulate_vertex_struct!(CirculateVertexMut, HalfedgeIterMut, HalfedgeIterMutMethod, halfedge_mut, incoming_next_mut, { mut });
+circulate_vertex_struct!(CirculateVertexMut, HalfedgeMut, HalfedgeIterMutMethod, halfedge_mut, incoming_next_mut, { mut });
 
 macro_rules! vertex_edges_struct {
     ($name:ident, $halfedge_iter: ident, $edge_iter: ident, $halfedge_trait: ident,  $incoming_next: ident, $halfedge_next: ident, $edge_method:ident, {$( $mut_:tt )?}) => {
@@ -116,11 +116,11 @@ macro_rules! vertex_edges_struct {
             first: bool,
         }
 
-        impl <'m, M: Mesh<Vertex: Vertex, Halfedge: Halfedge>> $name<'m, M> {
+        impl <'m, M: Mesh<VertexData: VertexData, HalfedgeData: HalfedgeData>> $name<'m, M> {
             #[inline]
             fn new(vid: VertexId, mesh: &'m $($mut_)? M) -> Self {
-                let next_hid = mesh.vertex(vid).halfedge();
-                let hid = mesh.halfedge(next_hid).prev();
+                let next_hid = mesh.vertex_data(vid).halfedge();
+                let hid = mesh.halfedge_data(next_hid).prev();
                 Self {
                     first_hid: hid,
                     halfedge: $halfedge_iter::new(hid, mesh),
@@ -130,7 +130,7 @@ macro_rules! vertex_edges_struct {
             }
         }
 
-        impl <'m, M: Mesh<Halfedge: Halfedge>> $name<'m, M> {
+        impl <'m, M: Mesh<HalfedgeData: HalfedgeData>> $name<'m, M> {
             #[inline]
             fn next_halfedge(&mut self) {
                 self.first = false;
@@ -149,7 +149,7 @@ macro_rules! vertex_edges_struct {
             }
         }
 
-        impl <'m, M: Mesh<Halfedge : Halfedge>> Iterator for $name<'m, M> {
+        impl <'m, M: Mesh<HalfedgeData : HalfedgeData>> Iterator for $name<'m, M> {
             type Item = $edge_iter<'m, M>;
 
             fn next(&mut self) -> Option<Self::Item> where $halfedge_iter<'m, M>: $halfedge_trait<'m, M> {
@@ -179,15 +179,15 @@ macro_rules! vertex_edges_struct {
 }
 vertex_edges_struct!(
     VertexEdges,
-    HalfedgeIter,
-    EdgeIter,
+    Halfedge,
+    Edge,
     HalfedgeIterMethod,
     incoming_next,
     next,
     edge,
     {}
 );
-vertex_edges_struct!(VertexEdgesMut, HalfedgeIterMut, EdgeIterMut, HalfedgeIterMutMethod, incoming_next_mut, next_mut, edge_mut, {mut});
+vertex_edges_struct!(VertexEdgesMut, HalfedgeMut, EdgeMut, HalfedgeIterMutMethod, incoming_next_mut, next_mut, edge_mut, {mut});
 
 macro_rules! vertex_vertices_struct {
     ($name:ident, $halfedge_iter: ident, $edge_iter: ident, $vertex_iter: ident, $halfedge_trait: ident, $incoming_next: ident, $halfedge_next: ident, $edge_method: ident, $to_vertex: ident, $from_vertex: ident, {$( $mut_:tt )?}) => {
@@ -198,11 +198,11 @@ macro_rules! vertex_vertices_struct {
             first: bool,
         }
 
-        impl <'m, M: Mesh<Vertex: Vertex, Halfedge: Halfedge>> $name<'m, M> {
+        impl <'m, M: Mesh<VertexData: VertexData, HalfedgeData: HalfedgeData>> $name<'m, M> {
             #[inline]
             fn new(vid: VertexId, mesh: &'m $($mut_)? M) -> Self {
-                let next_hid = mesh.vertex(vid).halfedge();
-                let hid = mesh.halfedge(next_hid).prev();
+                let next_hid = mesh.vertex_data(vid).halfedge();
+                let hid = mesh.halfedge_data(next_hid).prev();
                 Self {
                     first_hid: hid,
                     halfedge: $halfedge_iter::new(hid, mesh),
@@ -212,7 +212,7 @@ macro_rules! vertex_vertices_struct {
             }
         }
 
-        impl <'m, M: Mesh<Halfedge: Halfedge>> $name<'m, M> {
+        impl <'m, M: Mesh<HalfedgeData: HalfedgeData>> $name<'m, M> {
             #[inline]
             fn next_halfedge(&mut self) {
                 self.first = false;
@@ -232,7 +232,7 @@ macro_rules! vertex_vertices_struct {
             }
         }
 
-        impl <'m, M: Mesh<Halfedge : Halfedge>> Iterator for $name<'m, M> {
+        impl <'m, M: Mesh<HalfedgeData : HalfedgeData>> Iterator for $name<'m, M> {
             type Item = $vertex_iter<'m, M>;
 
             fn next(&mut self) -> Option<Self::Item> where $halfedge_iter<'m, M>: $halfedge_trait<'m, M> {
@@ -265,9 +265,9 @@ macro_rules! vertex_vertices_struct {
 
 vertex_vertices_struct!(
     VertexVertices,
-    HalfedgeIter,
-    EdgeIter,
-    VertexIter,
+    Halfedge,
+    Edge,
+    Vertex,
     HalfedgeIterMethod,
     incoming_next,
     next,
@@ -276,11 +276,11 @@ vertex_vertices_struct!(
     from,
     {}
 );
-vertex_vertices_struct!(VertexVerticesMut, HalfedgeIterMut, EdgeIterMut, VertexIterMut, HalfedgeIterMutMethod, incoming_next_mut, next_mut, edge_mut, to_mut, from_mut, {mut});
+vertex_vertices_struct!(VertexVerticesMut, HalfedgeMut, EdgeMut, VertexMut, HalfedgeIterMutMethod, incoming_next_mut, next_mut, edge_mut, to_mut, from_mut, {mut});
 
 macro_rules! vertex_methods {
     ($name: ident, $incoming_method: ident, $circulate_vertex: ident, $vertex_edges: ident, $vertex_vertices: ident, $outgoing_method: ident, $halfedge_iter: ident, $halfedge_next: ident, $edges: ident, $vertices: ident, $into_ref: ident, {$( $mut_:tt )?}) => {
-        impl<'m, M: Mesh<Vertex: Vertex, Halfedge: Halfedge>> $name<'m, M> {
+        impl<'m, M: Mesh<VertexData: VertexData, HalfedgeData: HalfedgeData>> $name<'m, M> {
             #[inline]
             pub fn $incoming_method(& $($mut_)? self) -> $circulate_vertex<'m, M> {
                 unsafe { $circulate_vertex::new(self.data.halfedge(), self.mesh.$into_ref()) }
@@ -305,13 +305,13 @@ macro_rules! vertex_methods {
 }
 
 vertex_methods!(
-    VertexIter,
+    Vertex,
     incoming_halfedges,
     CirculateVertex,
     VertexEdges,
     VertexVertices,
     outgoing_halfedges,
-    HalfedgeIter,
+    Halfedge,
     next,
     edges,
     vertices,
@@ -319,13 +319,13 @@ vertex_methods!(
     {}
 );
 vertex_methods!(
-    VertexIterMut,
+    VertexMut,
     incoming_halfedges,
     CirculateVertex,
     VertexEdges,
     VertexVertices,
     outgoing_halfedges,
-    HalfedgeIter,
+    Halfedge,
     next,
     edges,
     vertices,
@@ -333,13 +333,13 @@ vertex_methods!(
     {}
 );
 vertex_methods!(
-    VertexIterMut,
+    VertexMut,
     incoming_halfedges_mut,
     CirculateVertexMut,
     VertexEdgesMut,
     VertexVerticesMut,
     outgoing_halfedges_mut,
-    HalfedgeIterMut,
+    HalfedgeMut,
     next_mut,
     edges_mut,
     vertices_mut,

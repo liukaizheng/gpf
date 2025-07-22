@@ -22,20 +22,6 @@ macro_rules! element_iter_struct {
                     }
                 }
             }
-
-            #[inline]
-            pub fn new_with_data(id: $elem_id, data: &'m $($mut_)? M::$elem, mesh: &'m $($mut_)? M) -> Self {
-                let $($mut_)? mesh = NonNull::$from_ref(mesh);
-                unsafe {
-                    Self {
-                        id,
-                        data,
-                        mesh,
-                        _marker: PhantomData,
-                    }
-                }
-            }
         }
     };
-
 }

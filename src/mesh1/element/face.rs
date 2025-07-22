@@ -1,10 +1,10 @@
 use std::{marker::PhantomData, ops::Deref, ptr::NonNull};
 
 use crate::{
-    element_iter_struct, mesh1::{element::{HalfedgeIter, HalfedgeIterMut}, mesh::{Mesh, MeshCore}}, INVALID_IND
+    element_iter_struct, mesh1::{element::{Halfedge, HalfedgeMut}, mesh::{Mesh, MeshCore}}, INVALID_IND
 };
 
-use super::{ElementId, Halfedge, HalfedgeId};
+use super::{ElementId, HalfedgeData, HalfedgeId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FaceId(pub usize);
@@ -39,13 +39,13 @@ impl Deref for FaceId {
     }
 }
 
-pub trait Face {
+pub trait FaceData {
     fn halfedge(&self) -> HalfedgeId;
     fn set_halfedge(&mut self, halfedge: HalfedgeId);
 }
 
-element_iter_struct!(struct FaceIter -> MeshCore, FaceId, Face, from, as_ref, face, {});
-element_iter_struct!(struct FaceIterMut -> MeshCore, FaceId, Face, from_mut, as_mut, face_mut, {mut});
+element_iter_struct!(struct Face -> MeshCore, FaceId, FaceData, from, as_ref, face_data, {});
+element_iter_struct!(struct FaceMut -> MeshCore, FaceId, FaceData, from_mut, as_mut, face_data_mut, {mut});
 
 
 macro_rules! face_halfedges_struct {
@@ -72,7 +72,7 @@ macro_rules! face_halfedges_struct {
             }
         }
 
-        impl<'m, M: Mesh<Halfedge: Halfedge>> Iterator for $name<'m, M> {
+        impl<'m, M: Mesh<HalfedgeData: HalfedgeData>> Iterator for $name<'m, M> {
             type Item = $halfedge_iter<'m, M>;
 
             #[inline]
@@ -87,7 +87,7 @@ macro_rules! face_halfedges_struct {
             }
         }
 
-        impl<'m, M: Mesh<Halfedge: Halfedge>> DoubleEndedIterator for $name<'m, M> {
+        impl<'m, M: Mesh<HalfedgeData: HalfedgeData>> DoubleEndedIterator for $name<'m, M> {
             #[inline]
             fn next_back(&mut self) -> Option<Self::Item> {
                 if !self.valid() {
@@ -102,12 +102,12 @@ macro_rules! face_halfedges_struct {
     }
 }
 
-face_halfedges_struct!(FaceHalfedges, HalfedgeIter, next, prev,  as_ref, {});
-face_halfedges_struct!(FaceHalfedgesMut, HalfedgeIterMut, next_mut, prev_mut,  as_mut, {mut});
+face_halfedges_struct!(FaceHalfedges, Halfedge, next, prev,  as_ref, {});
+face_halfedges_struct!(FaceHalfedgesMut, HalfedgeMut, next_mut, prev_mut,  as_mut, {mut});
 
 macro_rules! face_halfedges_method {
     (struct $name:ident, $halfedge_method: ident, $halfedges_method: ident, $halfedge_iter: ident, $edge_halfedges: ident, $into_ref:ident, {$($mut_:tt )?}) => {
-        impl <'m, M: Mesh<Halfedge: Halfedge, Face: Face>> $name<'m, M> {
+        impl <'m, M: Mesh<HalfedgeData: HalfedgeData, FaceData: FaceData>> $name<'m, M> {
             #[inline]
             pub fn $halfedge_method(& $($mut_)? self) -> $halfedge_iter<'m, M> {
                 unsafe {
@@ -125,6 +125,6 @@ macro_rules! face_halfedges_method {
     }
 }
 
-face_halfedges_method!(struct FaceIter, halfedge, halfedges, HalfedgeIter, FaceHalfedges, as_ref, {});
-face_halfedges_method!(struct FaceIterMut, halfedge, halfedges, HalfedgeIter, FaceHalfedges, as_ref, {});
-face_halfedges_method!(struct FaceIterMut, halfedge_mut, halfedges_mut, HalfedgeIterMut, FaceHalfedgesMut, as_mut, {mut});
+face_halfedges_method!(struct Face, halfedge, halfedges, Halfedge, FaceHalfedges, as_ref, {});
+face_halfedges_method!(struct FaceMut, halfedge, halfedges, Halfedge, FaceHalfedges, as_ref, {});
+face_halfedges_method!(struct FaceMut, halfedge_mut, halfedges_mut, HalfedgeMut, FaceHalfedgesMut, as_mut, {mut});
