@@ -1,9 +1,9 @@
 use std::{marker::PhantomData, ops::Deref, ptr::NonNull};
 
 use crate::{
-    INVALID_IND, element_iter_struct,
+    INVALID_IND,
     mesh1::{
-        element::{ HalfedgeData, HalfedgeId, Halfedge, HalfedgeMut, HalfedgeIterMethod, HalfedgeIterMutMethod},
+        element::{ HalfedgeData, HalfedgeId, Halfedge, HalfedgeMut, HalfedgeNavigation, HalfedgeNavigationMut},
         mesh::Mesh,
     },
 };
@@ -47,8 +47,8 @@ pub trait EdgeData {
     fn halfedge(&self) -> HalfedgeId;
 }
 
-element_iter_struct!(struct Edge -> Mesh, EdgeId, EdgeData, from, as_ref, edge_data, {});
-element_iter_struct!(struct EdgeMut -> Mesh, EdgeId, EdgeData, from_mut, as_mut, edge_data_mut, {mut});
+element_handle_struct!(struct Edge -> Mesh, EdgeId, EdgeData, from, as_ref, edge_data, {});
+element_handle_struct!(struct EdgeMut -> Mesh, EdgeId, EdgeData, from_mut, as_mut, edge_data_mut, {mut});
 
 pub trait EdgeHalfedge<'m, M: Mesh> {
     fn halfedge(&self) -> Halfedge<'m, M>;
@@ -58,7 +58,7 @@ pub trait EdgeHalfedgeMut<'m, M: Mesh>: EdgeHalfedge<'m, M> {
     fn halfedge_mut(&mut self) -> HalfedgeMut<'m, M>;
 }
 
-macro_rules! edge_halfedge_trait {
+macro_rules! impl_edge_halfedge_access {
     ($name:ident, $halfedge_trait: ident, $halfedge_iter: ident, $halfedge_method: ident, $into_ref: ident, {$($mut_:tt )?}) => {
         impl <'m, M: Mesh> $halfedge_trait<'m, M> for $name<'m, M> {
             #[inline]
@@ -80,11 +80,11 @@ macro_rules! edge_halfedge_trait {
         }
     }
 }
-edge_halfedge_trait!(Edge, EdgeHalfedge, Halfedge, halfedge, as_ref, {});
-edge_halfedge_trait!(EdgeMut, EdgeHalfedge, Halfedge, halfedge, as_ref, {});
-edge_halfedge_trait!(EdgeMut, EdgeHalfedgeMut, HalfedgeMut, halfedge_mut, as_mut, {mut});
+impl_edge_halfedge_access!(Edge, EdgeHalfedge, Halfedge, halfedge, as_ref, {});
+impl_edge_halfedge_access!(EdgeMut, EdgeHalfedge, Halfedge, halfedge, as_ref, {});
+impl_edge_halfedge_access!(EdgeMut, EdgeHalfedgeMut, HalfedgeMut, halfedge_mut, as_mut, {mut});
 
-macro_rules! edge_halfedges_struct {
+macro_rules! edge_halfedge_iterator {
     (struct $name:ident, $halfedge_method: ident, $halfedge_iter: ident, $halfedge_trait: ident, $sibling: ident, {$($mut_:tt )?}) => {
         pub struct $name<'m, M: Mesh> {
             first_hid: HalfedgeId,
@@ -124,10 +124,10 @@ macro_rules! edge_halfedges_struct {
     };
 }
 
-edge_halfedges_struct!(struct EdgeHalfedges, halfedge, Halfedge, HalfedgeIterMethod, sibling, {});
-edge_halfedges_struct!(struct EdgeHalfedgesMut, halfedge_mut, HalfedgeMut, HalfedgeIterMutMethod, sibling_mut, {mut});
+edge_halfedge_iterator!(struct EdgeHalfedges, halfedge, Halfedge, HalfedgeNavigation, sibling, {});
+edge_halfedge_iterator!(struct EdgeHalfedgesMut, halfedge_mut, HalfedgeMut, HalfedgeNavigationMut, sibling_mut, {mut});
 
-macro_rules! edge_halfedges_method {
+macro_rules! impl_edge_halfedge_methods {
     (struct $name:ident, $halfedge_method: ident, $halfedges_method: ident, $halfedge_iter: ident, $edge_halfedges: ident, $into_ref:ident, {$($mut_:tt )?}) => {
         impl <'m, M: Mesh> $name<'m, M> {
 
@@ -145,6 +145,6 @@ macro_rules! edge_halfedges_method {
     }
 }
 
-edge_halfedges_method!(struct Edge, halfedge, halfedges, Halfedge, EdgeHalfedges, as_ref, {});
-edge_halfedges_method!(struct EdgeMut, halfedge, halfedges, Halfedge, EdgeHalfedges, as_ref, {});
-edge_halfedges_method!(struct EdgeMut, halfedge_mut, halfedges_mut, HalfedgeMut, EdgeHalfedgesMut, as_mut, {mut});
+impl_edge_halfedge_methods!(struct Edge, halfedge, halfedges, Halfedge, EdgeHalfedges, as_ref, {});
+impl_edge_halfedge_methods!(struct EdgeMut, halfedge, halfedges, Halfedge, EdgeHalfedges, as_ref, {});
+impl_edge_halfedge_methods!(struct EdgeMut, halfedge_mut, halfedges_mut, HalfedgeMut, EdgeHalfedgesMut, as_mut, {mut});

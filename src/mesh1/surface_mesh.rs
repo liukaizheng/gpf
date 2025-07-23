@@ -12,14 +12,14 @@ use super::mesh::{
 };
 
 #[derive(Default, Clone)]
-pub struct HEdge<P> {
+pub struct ExtendedHalfedge<P> {
     edge: EdgeId,
     sibling: HalfedgeId,
     incoming_next: HalfedgeId,
     property: P,
 }
 
-impl<P> HEdge<P> {
+impl<P> ExtendedHalfedge<P> {
     pub fn new(edge: EdgeId, sibling: HalfedgeId, incoming_next: HalfedgeId, property: P) -> Self {
         Self {
             edge,
@@ -30,7 +30,7 @@ impl<P> HEdge<P> {
     }
 }
 
-impl<P> HalfedgeDataExt for BaseHalfedgeData<HEdge<P>> {
+impl<P> HalfedgeDataExt for BaseHalfedgeData<ExtendedHalfedge<P>> {
     #[inline]
     fn edge(&self) -> EdgeId {
         self.property.edge
@@ -67,7 +67,7 @@ impl<P> BaseEdgeData<P> {
 }
 
 pub struct SurfaceMesh<VP, HP, EP, FP, A: Allocator> {
-    base: BaseMesh<BaseVertexData<VP>, BaseHalfedgeData<HEdge<HP>>, BaseFaceData<FP>, A>,
+    base: BaseMesh<BaseVertexData<VP>, BaseHalfedgeData<ExtendedHalfedge<HP>>, BaseFaceData<FP>, A>,
     edges: ElementContainer<BaseEdgeData<EP>, EdgeId, A>,
     n_edges: usize,
 }
@@ -233,7 +233,7 @@ impl<
 impl<VP, HP, EP, FP, A: Allocator> HasBaseMesh for SurfaceMesh<VP, HP, EP, FP, A> {
     type A = A;
     type VP = VP;
-    type HP = HEdge<HP>;
+    type HP = ExtendedHalfedge<HP>;
     type FP = FP;
 
     fn base(

@@ -1,5 +1,5 @@
 #[macro_export]
-macro_rules! element_iter_struct {
+macro_rules! element_handle_struct {
     (struct $name:ident -> $mesh_: tt, $elem_id:ty, $elem:tt, $from_ref:ident, $into_ref:ident, $elem_data: ident, {$( $mut_:tt )?}) => {
         pub struct $name<'m, M: $mesh_> {
             pub id: $elem_id,
