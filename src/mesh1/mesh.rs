@@ -7,8 +7,8 @@ use std::{
 use crate::mesh1::element::{Edge, EdgeMut};
 
 use super::element::{
-    EdgeId, ElementId, FaceData, FaceId, Face, FaceMut, HalfedgeData, HalfedgeId, Halfedge,
-    HalfedgeMut, VertexData, VertexId, Vertex, VertexMut,
+    EdgeId, ElementId, Face, FaceData, FaceId, FaceMut, Halfedge, HalfedgeData, HalfedgeId,
+    HalfedgeMut, Vertex, VertexData, VertexId, VertexMut,
 };
 
 pub struct ElementContainer<T, E: ElementId, A: Allocator> {
@@ -38,6 +38,16 @@ impl<T, E: ElementId, A: Allocator> ElementContainer<T, E, A> {
     #[inline]
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
         self.data.iter_mut()
+    }
+
+    #[inline]
+    pub fn range(&self, start: usize, end: usize) -> impl Iterator<Item = &T> {
+        self.data[start..end].iter()
+    }
+
+    #[inline]
+    pub fn range_mut(&mut self, start: usize, end: usize) -> impl Iterator<Item = &mut T> {
+        self.data[start..end].iter_mut()
     }
 }
 
@@ -90,6 +100,22 @@ impl<VP, HP, FP, A: Allocator> BaseMesh<VP, HP, FP, A> {
     }
 
     #[inline]
+    pub fn vertex_range(&self, start: VertexId, count: usize) -> impl Iterator<Item = &VP> {
+        let end = (*start + count).min(self.vertices.len());
+        self.vertices.range(*start, end)
+    }
+
+    #[inline]
+    pub fn vertex_range_mut(
+        &mut self,
+        start: VertexId,
+        count: usize,
+    ) -> impl Iterator<Item = &mut VP> {
+        let end = (*start + count).min(self.vertices.len());
+        self.vertices.range_mut(*start, end)
+    }
+
+    #[inline]
     pub fn halfedge(&self, hid: HalfedgeId) -> &HP {
         &self.halfedges[hid]
     }
@@ -100,6 +126,22 @@ impl<VP, HP, FP, A: Allocator> BaseMesh<VP, HP, FP, A> {
     }
 
     #[inline]
+    pub fn halfedge_range(&self, start: HalfedgeId, count: usize) -> impl Iterator<Item = &HP> {
+        let end = (*start + count).min(self.halfedges.len());
+        self.halfedges.range(*start, end)
+    }
+
+    #[inline]
+    pub fn halfedge_range_mut(
+        &mut self,
+        start: HalfedgeId,
+        count: usize,
+    ) -> impl Iterator<Item = &mut HP> {
+        let end = (*start + count).min(self.halfedges.len());
+        self.halfedges.range_mut(*start, end)
+    }
+
+    #[inline]
     pub fn face(&self, fid: FaceId) -> &FP {
         &self.faces[fid]
     }
@@ -107,6 +149,18 @@ impl<VP, HP, FP, A: Allocator> BaseMesh<VP, HP, FP, A> {
     #[inline]
     pub fn face_mut(&mut self, fid: FaceId) -> &mut FP {
         &mut self.faces[fid]
+    }
+
+    #[inline]
+    pub fn face_range(&self, start: FaceId, count: usize) -> impl Iterator<Item = &FP> {
+        let end = (*start + count).min(self.faces.len());
+        self.faces.range(*start, end)
+    }
+
+    #[inline]
+    pub fn face_range_mut(&mut self, start: FaceId, count: usize) -> impl Iterator<Item = &mut FP> {
+        let end = (*start + count).min(self.faces.len());
+        self.faces.range_mut(*start, end)
     }
 }
 
@@ -124,6 +178,16 @@ impl<VP: Default + Clone, HP, FP, A: Allocator> BaseMesh<VP, HP, FP, A> {
         if self.vertices.len() < len {
             self.vertices.data.resize(len, VP::default());
         }
+    }
+}
+
+impl<VP: Default + Clone, HP: Default, FP, A: Allocator> BaseMesh<VP, HP, FP, A> {
+    #[inline]
+    pub fn new_vertices(&mut self, n: usize) -> VertexId {
+        let ret = VertexId(self.vertices.len().into());
+        self.vertices.data.resize(*ret + n, VP::default());
+        self.n_halfedges += n;
+        ret
     }
 }
 
@@ -361,6 +425,34 @@ pub trait MeshCore: Sized {
     fn halfedge_data_mut(&mut self, hid: HalfedgeId) -> &mut Self::HalfedgeData;
     fn face_data_mut(&mut self, fid: FaceId) -> &mut Self::FaceData;
 
+    fn vertex_range(
+        &'_ self,
+        vid: VertexId,
+        count: usize,
+    ) -> impl Iterator<Item = Vertex<'_, Self>>;
+    fn halfedge_range(
+        &'_ self,
+        hid: HalfedgeId,
+        count: usize,
+    ) -> impl Iterator<Item = Halfedge<'_, Self>>;
+    fn face_range(&'_ self, fid: FaceId, count: usize) -> impl Iterator<Item = Face<'_, Self>>;
+
+    fn vertex_range_mut(
+        &'_ mut self,
+        vid: VertexId,
+        count: usize,
+    ) -> impl Iterator<Item = VertexMut<'_, Self>>;
+    fn halfedge_range_mut(
+        &'_ mut self,
+        hid: HalfedgeId,
+        count: usize,
+    ) -> impl Iterator<Item = HalfedgeMut<'_, Self>>;
+    fn face_range_mut(
+        &'_ mut self,
+        fid: FaceId,
+        count: usize,
+    ) -> impl Iterator<Item = FaceMut<'_, Self>>;
+
     fn vertex(&self, vid: VertexId) -> Vertex<Self>;
     fn halfedge(&self, hid: HalfedgeId) -> Halfedge<Self>;
     fn face(&self, fid: FaceId) -> Face<Self>;
@@ -389,10 +481,20 @@ pub trait HasBaseMesh {
     type FP;
     fn base(
         &self,
-    ) -> &BaseMesh<BaseVertexData<Self::VP>, BaseHalfedgeData<Self::HP>, BaseFaceData<Self::FP>, Self::A>;
+    ) -> &BaseMesh<
+        BaseVertexData<Self::VP>,
+        BaseHalfedgeData<Self::HP>,
+        BaseFaceData<Self::FP>,
+        Self::A,
+    >;
     fn base_mut(
         &mut self,
-    ) -> &mut BaseMesh<BaseVertexData<Self::VP>, BaseHalfedgeData<Self::HP>, BaseFaceData<Self::FP>, Self::A>;
+    ) -> &mut BaseMesh<
+        BaseVertexData<Self::VP>,
+        BaseHalfedgeData<Self::HP>,
+        BaseFaceData<Self::FP>,
+        Self::A,
+    >;
 }
 
 impl<VP, HP, FP, A: Allocator> HasBaseMesh
@@ -406,15 +508,24 @@ impl<VP, HP, FP, A: Allocator> HasBaseMesh
     #[inline]
     fn base(
         &self,
-    ) -> &BaseMesh<BaseVertexData<Self::VP>, BaseHalfedgeData<Self::HP>, BaseFaceData<Self::FP>, Self::A> {
+    ) -> &BaseMesh<
+        BaseVertexData<Self::VP>,
+        BaseHalfedgeData<Self::HP>,
+        BaseFaceData<Self::FP>,
+        Self::A,
+    > {
         self
     }
 
     #[inline]
     fn base_mut(
         &mut self,
-    ) -> &mut BaseMesh<BaseVertexData<Self::VP>, BaseHalfedgeData<Self::HP>, BaseFaceData<Self::FP>, Self::A>
-    {
+    ) -> &mut BaseMesh<
+        BaseVertexData<Self::VP>,
+        BaseHalfedgeData<Self::HP>,
+        BaseFaceData<Self::FP>,
+        Self::A,
+    > {
         self
     }
 }
@@ -514,6 +625,83 @@ impl<T: HasBaseMesh> MeshCore for T {
     }
 
     #[inline]
+    fn vertex_range(
+        &'_ self,
+        vid: VertexId,
+        count: usize,
+    ) -> impl Iterator<Item = Vertex<'_, Self>> {
+        self.base()
+            .vertex_range(vid, count)
+            .zip(*vid..*vid + count)
+            .map(|(data, vid)| Vertex::new_with_data(vid.into(), data, self))
+    }
+
+    #[inline]
+    fn halfedge_range(
+        &'_ self,
+        hid: HalfedgeId,
+        count: usize,
+    ) -> impl Iterator<Item = Halfedge<'_, Self>> {
+        self.base()
+            .halfedge_range(hid, count)
+            .zip(*hid..*hid + count)
+            .map(|(data, vid)| Halfedge::new_with_data(vid.into(), data, self))
+    }
+
+    #[inline]
+    fn face_range(&'_ self, fid: FaceId, count: usize) -> impl Iterator<Item = Face<'_, Self>> {
+        self.base()
+            .face_range(fid, count)
+            .zip(*fid..*fid + count)
+            .map(|(data, vid)| Face::new_with_data(vid.into(), data, self))
+    }
+
+    #[inline]
+    fn vertex_range_mut(
+        &'_ mut self,
+        vid: VertexId,
+        count: usize,
+    ) -> impl Iterator<Item = VertexMut<'_, Self>> {
+        let mesh_ptr = self as *mut Self;
+        self.base_mut()
+            .vertex_range_mut(vid, count)
+            .zip(*vid..*vid + count)
+            .map(move |(data, vid)| unsafe {
+                VertexMut::new_with_data(vid.into(), data, &mut *mesh_ptr)
+            })
+    }
+
+    #[inline]
+    fn halfedge_range_mut(
+        &'_ mut self,
+        hid: HalfedgeId,
+        count: usize,
+    ) -> impl Iterator<Item = HalfedgeMut<'_, Self>> {
+        let mesh_ptr = self as *mut Self;
+        self.base_mut()
+            .halfedge_range_mut(hid, count)
+            .zip(*hid..*hid + count)
+            .map(move |(data, hid)| unsafe {
+                HalfedgeMut::new_with_data(hid.into(), data, &mut *mesh_ptr)
+            })
+    }
+
+    #[inline]
+    fn face_range_mut(
+        &'_ mut self,
+        fid: FaceId,
+        count: usize,
+    ) -> impl Iterator<Item = FaceMut<'_, Self>> {
+        let mesh_ptr = self as *mut Self;
+        self.base_mut()
+            .face_range_mut(fid, count)
+            .zip(*fid..*fid + count)
+            .map(move |(data, fid)| unsafe {
+                FaceMut::new_with_data(fid.into(), data, &mut *mesh_ptr)
+            })
+    }
+
+    #[inline]
     fn vertex(&self, vid: VertexId) -> Vertex<Self> {
         Vertex::new(vid, self)
     }
@@ -600,6 +788,14 @@ pub trait Mesh: MeshCore {
 
     fn edge_data(&self, eid: EdgeId) -> &Self::EdgeData;
     fn edge_data_mut(&mut self, eid: EdgeId) -> &mut Self::EdgeData;
+
+    fn edge_range(&'_ self, eid: EdgeId, count: usize) -> impl Iterator<Item = Edge<'_, Self>>;
+
+    fn edge_range_mut(
+        &'_ mut self,
+        eid: EdgeId,
+        count: usize,
+    ) -> impl Iterator<Item = EdgeMut<'_, Self>>;
 
     fn edge(&self, eid: EdgeId) -> Edge<Self>;
     fn edge_mut(&mut self, eid: EdgeId) -> EdgeMut<Self>;

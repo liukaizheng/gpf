@@ -1,12 +1,16 @@
 use std::{marker::PhantomData, ops::Deref, ptr::NonNull};
 
 use crate::{
-    INVALID_IND, mesh1::{element::{Halfedge, HalfedgeMut}, mesh::{Mesh, MeshCore}}
+    INVALID_IND,
+    mesh1::{
+        element::{Halfedge, HalfedgeMut},
+        mesh::{Mesh, MeshCore},
+    },
 };
 
 use super::{ElementId, HalfedgeData, HalfedgeId};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FaceId(pub usize);
 
 impl Default for FaceId {
@@ -46,7 +50,6 @@ pub trait FaceData {
 
 element_handle_struct!(struct Face -> MeshCore, FaceId, FaceData, from, as_ref, face_data, {});
 element_handle_struct!(struct FaceMut -> MeshCore, FaceId, FaceData, from_mut, as_mut, face_data_mut, {mut});
-
 
 macro_rules! face_halfedge_iterator {
     ($name:ident, $halfedge_iter: ident, $halfedge_next: ident, $halfedge_prev: ident,  $into_ref:ident, {$($mut_:tt )?}) => {
@@ -102,7 +105,7 @@ macro_rules! face_halfedge_iterator {
     }
 }
 
-face_halfedge_iterator!(FaceHalfedges, Halfedge, next, prev,  as_ref, {});
+face_halfedge_iterator!(FaceHalfedges, Halfedge, next, prev, as_ref, {});
 face_halfedge_iterator!(FaceHalfedgesMut, HalfedgeMut, next_mut, prev_mut,  as_mut, {mut});
 
 macro_rules! impl_face_halfedge_methods {

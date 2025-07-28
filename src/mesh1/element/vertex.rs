@@ -4,7 +4,7 @@ use crate::{
     INVALID_IND,
     mesh1::{
         element::{
-            Edge, EdgeHalfedge, EdgeMut, Halfedge, HalfedgeNavigation, HalfedgeMut,
+            Edge, EdgeHalfedge, EdgeMut, Halfedge, HalfedgeMut, HalfedgeNavigation,
             HalfedgeNavigationMut,
         },
         mesh::{Mesh, MeshCore},
@@ -13,8 +13,8 @@ use crate::{
 
 use super::{ElementId, HalfedgeData, HalfedgeId};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct VertexId(usize);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct VertexId(pub usize);
 
 impl Default for VertexId {
     #[inline]

@@ -3,14 +3,17 @@ use std::{marker::PhantomData, ops::Deref, ptr::NonNull};
 use crate::{
     INVALID_IND,
     mesh1::{
-        element::{ HalfedgeData, HalfedgeId, Halfedge, HalfedgeMut, HalfedgeNavigation, HalfedgeNavigationMut},
+        element::{
+            Halfedge, HalfedgeData, HalfedgeId, HalfedgeMut, HalfedgeNavigation,
+            HalfedgeNavigationMut,
+        },
         mesh::Mesh,
     },
 };
 
 use super::ElementId;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EdgeId(pub usize);
 
 impl Default for EdgeId {

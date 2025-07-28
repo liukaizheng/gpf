@@ -3,17 +3,14 @@ use std::{marker::PhantomData, ops::Deref, ptr::NonNull};
 use crate::{
     INVALID_IND,
     mesh1::{
-        element::{
-            EdgeId, Edge, EdgeMut, Face, FaceMut, VertexId, Vertex,
-            VertexMut,
-        },
+        element::{Edge, EdgeId, EdgeMut, Face, FaceMut, Vertex, VertexId, VertexMut},
         mesh::{Mesh, MeshCore},
     },
 };
 
 use super::{ElementId, FaceId};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct HalfedgeId(pub usize);
 
 impl Default for HalfedgeId {
@@ -176,3 +173,11 @@ macro_rules! impl_halfedge_base_methods {
 impl_halfedge_base_methods! (struct Halfedge -> HalfedgeNavigation, Halfedge, Edge, edge, sibling, incoming_next, as_ref, {});
 impl_halfedge_base_methods! (struct HalfedgeMut -> HalfedgeNavigation, Halfedge, Edge, edge, sibling, incoming_next, as_ref, {});
 impl_halfedge_base_methods! (struct HalfedgeMut -> HalfedgeNavigationMut, HalfedgeMut, EdgeMut, edge_mut, sibling_mut, incoming_next_mut, as_mut, {mut});
+
+impl<'m, M: Mesh<HalfedgeData: HalfedgeData>> HalfedgeMut<'m, M> {
+    #[inline]
+    pub fn connect(&mut self, other: &mut Self) {
+        self.data.set_next(other.id);
+        other.data.set_prev(self.id);
+    }
+}
