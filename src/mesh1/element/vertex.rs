@@ -56,7 +56,14 @@ element_handle_struct!(struct VertexMut -> MeshCore, VertexId, VertexData, from_
 
 // Macro to generate circulate vertex structs
 macro_rules! vertex_circulator {
-    ($name:ident, $halfedge_iter: ident, $halfedge_trait: ident, $halfedge_method: ident, $incoming_next:ident, {$( $mut_:tt )?}) => {
+    (
+        $name:ident,
+        $halfedge_iter: ident,
+        $halfedge_trait: ident,
+        $halfedge_method: ident,
+        $incoming_next:ident,
+        {$( $mut_:tt )?}
+    ) => {
         pub struct $name<'m, M: Mesh> {
             first_hid: HalfedgeId,
             halfedge: $halfedge_iter<'m, M>,
@@ -108,7 +115,16 @@ vertex_circulator!(
 vertex_circulator!(VertexCirculatorMut, HalfedgeMut, HalfedgeNavigationMut, halfedge_mut, incoming_next_mut, { mut });
 
 macro_rules! vertex_edge_iterator {
-    ($name:ident, $halfedge_iter: ident, $edge_iter: ident, $halfedge_trait: ident,  $incoming_next: ident, $halfedge_next: ident, $edge_method:ident, {$( $mut_:tt )?}) => {
+    (
+        $name:ident,
+        $halfedge_iter: ident,
+        $edge_iter: ident,
+        $halfedge_trait: ident,
+        $incoming_next: ident,
+        $halfedge_next: ident,
+        $edge_method:ident,
+        {$( $mut_:tt )?}
+    ) => {
         pub struct $name<'m, M: Mesh> {
             first_hid: HalfedgeId,
             halfedge: $halfedge_iter<'m, M>,
@@ -190,7 +206,19 @@ vertex_edge_iterator!(
 vertex_edge_iterator!(VertexNeighborEdgesMut, HalfedgeMut, EdgeMut, HalfedgeNavigationMut, incoming_next_mut, next_mut, edge_mut, {mut});
 
 macro_rules! vertex_neighbor_iterator {
-    ($name:ident, $halfedge_iter: ident, $edge_iter: ident, $vertex_iter: ident, $halfedge_trait: ident, $incoming_next: ident, $halfedge_next: ident, $edge_method: ident, $to_vertex: ident, $from_vertex: ident, {$( $mut_:tt )?}) => {
+    (
+        $name:ident,
+        $halfedge_iter: ident,
+        $edge_iter: ident,
+        $vertex_iter: ident,
+        $halfedge_trait: ident,
+        $incoming_next: ident,
+        $halfedge_next: ident,
+        $edge_method: ident,
+        $to_vertex: ident,
+        $from_vertex: ident,
+        {$( $mut_:tt )?}
+    ) => {
         pub struct $name<'m, M: Mesh> {
             first_hid: HalfedgeId,
             halfedge: $halfedge_iter<'m, M>,
@@ -279,8 +307,27 @@ vertex_neighbor_iterator!(
 vertex_neighbor_iterator!(VertexNeighborsMut, HalfedgeMut, EdgeMut, VertexMut, HalfedgeNavigationMut, incoming_next_mut, next_mut, edge_mut, to_mut, from_mut, {mut});
 
 macro_rules! impl_vertex_methods {
-    ($name: ident, $incoming_method: ident, $circulate_vertex: ident, $vertex_edges: ident, $vertex_vertices: ident, $outgoing_method: ident, $halfedge_iter: ident, $halfedge_next: ident, $edges: ident, $vertices: ident, $into_ref: ident, {$( $mut_:tt )?}) => {
+    (
+        $name: ident,
+        $halfedge_method: ident,
+        $incoming_method: ident,
+        $circulate_vertex: ident,
+        $vertex_edges: ident,
+        $vertex_vertices: ident,
+        $outgoing_method: ident,
+        $halfedge_iter: ident,
+        $halfedge_next: ident,
+        $edges: ident,
+        $vertices: ident,
+        $into_ref: ident,
+        {$( $mut_:tt )?}
+    ) => {
         impl<'m, M: Mesh<VertexData: VertexData, HalfedgeData: HalfedgeData>> $name<'m, M> {
+            #[inline]
+            pub fn $halfedge_method(& $($mut_)? self) -> $halfedge_iter<'m, M> {
+                unsafe { $halfedge_iter::new(self.data.halfedge(), self.mesh.$into_ref()) }
+            }
+
             #[inline]
             pub fn $incoming_method(& $($mut_)? self) -> $circulate_vertex<'m, M> {
                 unsafe { $circulate_vertex::new(self.data.halfedge(), self.mesh.$into_ref()) }
@@ -306,6 +353,7 @@ macro_rules! impl_vertex_methods {
 
 impl_vertex_methods!(
     Vertex,
+    halfedge,
     incoming_halfedges,
     VertexCirculator,
     VertexNeighborEdges,
@@ -320,6 +368,7 @@ impl_vertex_methods!(
 );
 impl_vertex_methods!(
     VertexMut,
+    halfedge,
     incoming_halfedges,
     VertexCirculator,
     VertexNeighborEdges,
@@ -334,6 +383,7 @@ impl_vertex_methods!(
 );
 impl_vertex_methods!(
     VertexMut,
+    halfedge_mut,
     incoming_halfedges_mut,
     VertexCirculatorMut,
     VertexNeighborEdgesMut,

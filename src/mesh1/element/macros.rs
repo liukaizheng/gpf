@@ -4,7 +4,7 @@ macro_rules! element_handle_struct {
         pub struct $name<'m, M: $mesh_> {
             pub id: $elem_id,
             pub data: &'m $($mut_)? M::$elem,
-            pub mesh: NonNull<M>,
+            mesh: NonNull<M>,
             _marker: PhantomData<&'m $($mut_)? M>,
         }
 
@@ -22,7 +22,6 @@ macro_rules! element_handle_struct {
                     }
                 }
             }
-
 
             #[inline]
             pub fn new_with_data(id: $elem_id, data: &'m $($mut_)? M::$elem, mesh: &'m $($mut_)? M) -> Self {

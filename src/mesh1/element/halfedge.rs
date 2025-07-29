@@ -59,8 +59,13 @@ pub trait HalfedgeData {
 
 pub trait HalfedgeDataExt: HalfedgeData {
     fn edge(&self) -> EdgeId;
+    fn set_edge(&mut self, eid: EdgeId);
+
     fn sibling(&self) -> HalfedgeId;
+    fn set_sibling(&mut self, sibling: HalfedgeId);
+
     fn incoming_next(&self) -> HalfedgeId;
+    fn set_incoming_next(&mut self, next: HalfedgeId);
 }
 
 element_handle_struct!(struct Halfedge -> MeshCore, HalfedgeId, HalfedgeData, from, as_ref, halfedge_data, {});
@@ -179,5 +184,14 @@ impl<'m, M: Mesh<HalfedgeData: HalfedgeData>> HalfedgeMut<'m, M> {
     pub fn connect(&mut self, other: &mut Self) {
         self.data.set_next(other.id);
         other.data.set_prev(self.id);
+    }
+}
+
+impl<'m, M: Mesh<HalfedgeData: HalfedgeDataExt>> HalfedgeMut<'m, M> {
+    #[inline]
+    pub fn insert_incoming_next(&mut self, middle: &mut Self) {
+        let next = self.incoming_next_mut();
+        self.data.set_incoming_next(middle.id);
+        middle.data.set_incoming_next(next.id);
     }
 }

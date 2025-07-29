@@ -22,14 +22,3 @@ pub trait ElementId: From<usize> + Default {
         self.index() != INVALID_IND
     }
 }
-
-#[inline(always)]
-pub fn ele_ranges<E: ElementId, A: Allocator + Copy>(
-    start: usize,
-    len: usize,
-    bump: A,
-) -> Vec<E, A> {
-    let mut result = Vec::new_in(bump);
-    result.extend((start..(start + len)).map(|idx| idx.into()));
-    result
-}

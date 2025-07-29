@@ -4,13 +4,15 @@ use std::ptr::NonNull;
 use hashbrown::HashMap;
 use itertools::Itertools;
 
-use crate::mesh1::element::{Edge, EdgeData, EdgeHalfedge, EdgeMut, Halfedge, HalfedgeMut};
+use crate::mesh1::element::{
+    Edge, EdgeData, EdgeHalfedge, EdgeMut, FaceData, HalfedgeData, HalfedgeMut,
+};
 
 use super::element::{EdgeId, ElementId, FaceId, HalfedgeDataExt, HalfedgeId, VertexId};
 
 use super::mesh::{
     BaseFaceData, BaseHalfedgeData, BaseMesh, BaseVertexData, ElementContainer, HasBaseMesh, Mesh,
-    MeshCore,
+    MeshCore, edge_from_vertices,
 };
 
 #[derive(Default, Clone)]
@@ -39,13 +41,28 @@ impl<P> HalfedgeDataExt for BaseHalfedgeData<ExtendedHalfedge<P>> {
     }
 
     #[inline]
+    fn set_edge(&mut self, edge: EdgeId) {
+        self.property.edge = edge;
+    }
+
+    #[inline]
     fn sibling(&self) -> HalfedgeId {
         self.property.sibling
     }
 
     #[inline]
+    fn set_sibling(&mut self, sibling: HalfedgeId) {
+        self.property.sibling = sibling;
+    }
+
+    #[inline]
     fn incoming_next(&self) -> HalfedgeId {
         self.property.incoming_next
+    }
+
+    #[inline]
+    fn set_incoming_next(&mut self, incoming_next: HalfedgeId) {
+        self.property.incoming_next = incoming_next;
     }
 }
 
@@ -237,13 +254,15 @@ impl<
     }
 
     pub fn split_edge(&mut self, eid: EdgeId) -> VertexId {
-        let (vb, n_halfedges) = {
+        let (vb, edge_hid, n_halfedges) = {
             let edge = self.edge(eid);
-            (edge.halfedge().data.vertex, edge.halfedges().count())
+            let he = edge.halfedge();
+            (edge.halfedge().data.vertex, he.id, edge.halfedges().count())
         };
         let start_hid = self.new_halfedges(n_halfedges);
         let new_eid = self.new_edges(1);
         let new_vid = self.new_vertices(1);
+        self.vertex_data_mut(new_vid).halfedge = edge_hid;
 
         let mut old_prev_he: Option<HalfedgeMut<'_, Self>> = None;
         let mut new_prev_he: Option<HalfedgeMut<'_, Self>> = None;
@@ -251,9 +270,8 @@ impl<
         let mut new_first_hid = HalfedgeId::default();
         let mut mesh = NonNull::from_mut(self);
         unsafe {
-            for (mut raw_old_he, mut raw_new_he) in mesh
-                .as_mut()
-                .edge_mut(eid)
+            let mut old_edge = mesh.as_mut().edge_mut(eid);
+            for (mut raw_old_he, mut raw_new_he) in old_edge
                 .halfedges_mut()
                 .zip(mesh.as_mut().halfedge_range_mut(start_hid, n_halfedges))
             {
@@ -267,6 +285,7 @@ impl<
                 let mut prev_he = raw_old_he.prev_mut();
                 prev_he.connect(&mut raw_new_he);
                 raw_new_he.connect(&mut raw_old_he);
+                raw_new_he.data.set_face(raw_old_he.data.face);
 
                 let [old_he, new_he] = if from_vertex.id != vb {
                     raw_new_he.data.property.edge = new_eid;
@@ -285,30 +304,100 @@ impl<
                     let new_prev_he = new_prev_he.as_mut().unwrap_unchecked();
                     old_prev_he.data.property.sibling = old_he.id;
                     new_prev_he.data.property.sibling = new_he.id;
-                    if old_prev_he.id >= start_hid {
+                    if old_prev_he.data.vertex == new_vid {
                         old_prev_he.data.property.incoming_next = new_hid;
                     } else {
+                        debug_assert!(new_prev_he.data.vertex == new_vid);
                         new_prev_he.data.property.incoming_next = new_hid;
                     }
                 }
                 old_prev_he.replace(old_he);
                 new_prev_he.replace(new_he);
             }
+            old_edge.data.halfedge = old_first_hid;
+            self.edge_data_mut(new_eid).halfedge = new_first_hid;
+
+            let old_prev_he = old_prev_he.unwrap_unchecked();
+            let new_prev_he = new_prev_he.unwrap_unchecked();
+            if old_prev_he.data.vertex == new_vid {
+                old_prev_he.data.property.incoming_next = start_hid;
+            } else {
+                debug_assert!(new_prev_he.data.vertex == new_vid);
+                new_prev_he.data.property.incoming_next = start_hid;
+            }
+
+            old_prev_he.data.property.sibling = old_first_hid;
+            new_prev_he.data.property.sibling = new_first_hid;
         }
 
-        let old_prev_he = old_prev_he.unwrap();
-        let new_prev_he = new_prev_he.unwrap();
-        if old_prev_he.id > new_prev_he.id {
-            old_prev_he.data.property.incoming_next = start_hid;
-            self.vertex_data_mut(new_vid).halfedge = new_prev_he.id;
-        } else {
-            new_prev_he.data.property.incoming_next = start_hid;
-            self.vertex_data_mut(new_vid).halfedge = old_prev_he.id;
-        }
-
-        old_prev_he.data.property.sibling = old_first_hid;
-        new_prev_he.data.property.sibling = new_first_hid;
         new_vid
+    }
+
+    pub fn split_face(&mut self, fid: FaceId, va: VertexId, vb: VertexId) -> HalfedgeId {
+        let new_start_hid = self.new_halfedges(2);
+        let new_eid = self.new_edges(1);
+        let new_fid = self.new_faces(1);
+
+        let mesh_ptr = self as *mut Self;
+        let mut left_last_he = unsafe {
+            (*mesh_ptr)
+                .vertex_mut(va)
+                .incoming_halfedges_mut()
+                .find(|he| he.data.face == fid)
+                .unwrap_unchecked()
+        };
+
+        let mut right_last_he = unsafe {
+            (*mesh_ptr)
+                .vertex_mut(vb)
+                .incoming_halfedges_mut()
+                .find(|he| he.data.face == fid)
+                .unwrap_unchecked()
+        };
+
+        let mut left_first_he = right_last_he.next_mut();
+        let mut right_first_he = left_last_he.next_mut();
+
+        let mut first_he = unsafe { (*mesh_ptr).halfedge_mut(new_start_hid) };
+        let mut second_he = unsafe { (*mesh_ptr).halfedge_mut((*new_start_hid + 1).into()) };
+
+        right_last_he.connect(&mut first_he);
+        first_he.connect(&mut right_first_he);
+        left_last_he.connect(&mut second_he);
+        second_he.connect(&mut left_first_he);
+
+        first_he.data.set_vertex(va);
+        first_he.data.set_edge(new_eid);
+        first_he.data.set_face(fid);
+
+        second_he.data.set_vertex(vb);
+        second_he.data.set_edge(new_eid);
+        second_he.data.set_face(new_fid);
+
+        self.set_e_halfedge(new_eid, second_he.id);
+
+        left_last_he.insert_incoming_next(&mut first_he);
+        right_last_he.insert_incoming_next(&mut second_he);
+
+        {
+            let mut curr_he = left_first_he;
+            loop {
+                curr_he.data.face = new_fid;
+                curr_he = curr_he.next_mut();
+                if curr_he.id == second_he.id {
+                    break;
+                }
+            }
+        }
+
+        self.face_mut(fid).data.set_halfedge(first_he.id);
+        self.face_mut(new_fid).data.set_halfedge(second_he.id);
+        second_he.id
+    }
+
+    #[inline]
+    fn set_e_halfedge(&mut self, eid: EdgeId, hid: HalfedgeId) {
+        self.edges[eid].halfedge = hid;
     }
 }
 
@@ -426,6 +515,34 @@ impl<VP, HP, EP, FP, A: Allocator> Mesh for SurfaceMesh<VP, HP, EP, FP, A> {
     }
 
     #[inline]
+    fn edges(&'_ self) -> impl Iterator<Item = Edge<'_, Self>> {
+        self.edge_datum()
+            .zip(0..self.n_edges_capacity())
+            .filter_map(|(data, eid)| {
+                if data.halfedge.valid() {
+                    Some(Edge::new_with_data(eid.into(), data, self))
+                } else {
+                    None
+                }
+            })
+    }
+
+    #[inline]
+    fn edges_mut(&'_ mut self) -> impl Iterator<Item = EdgeMut<'_, Self>> {
+        let mesh_ptr = self as *mut Self;
+        let n_edges_capacity = self.n_edges_capacity();
+        self.edge_datum_mut()
+            .zip(0..n_edges_capacity)
+            .filter_map(move |(data, eid)| unsafe {
+                if data.halfedge.valid() {
+                    Some(EdgeMut::new(eid.into(), &mut *mesh_ptr))
+                } else {
+                    None
+                }
+            })
+    }
+
+    #[inline]
     fn he_sibling(&self, hid: HalfedgeId) -> HalfedgeId {
         self.halfedge_data(hid).property.sibling
     }
@@ -444,9 +561,15 @@ impl<VP, HP, EP, FP, A: Allocator> Mesh for SurfaceMesh<VP, HP, EP, FP, A> {
     fn e_halfedge(&self, eid: EdgeId) -> HalfedgeId {
         self.edge_data(eid).halfedge
     }
+
+    #[inline]
+    fn e_from_vertices(&self, va: VertexId, vb: VertexId) -> EdgeId {
+        edge_from_vertices(self, va, vb)
+    }
 }
 
 mod tests {
+
     #[test]
     fn test_surface_mesh() {
         use super::SurfaceMesh;
@@ -503,5 +626,58 @@ mod tests {
         let face_halfedges1 =
             Vec::from_iter(mesh.face(0.into()).halfedges().rev().map(|he| he.from().id));
         debug_assert!(face_halfedges1.len() == 3);
+    }
+
+    #[test]
+    fn test_split_edge() {
+        use super::SurfaceMesh;
+        use crate::mesh1::element::VertexId;
+        use crate::mesh1::element::{HalfedgeDataExt, HalfedgeNavigation};
+        use crate::mesh1::mesh::Mesh;
+        use crate::mesh1::mesh::MeshCore;
+        use itertools::Itertools;
+        use std::collections::HashSet;
+
+        let mut mesh = SurfaceMesh::<(), (), (), (), _>::new_in(
+            vec![
+                vec![0, 1, 2],
+                vec![0, 1, 3],
+                vec![1, 0, 4],
+                vec![0, 1, 5],
+                vec![1, 0, 6],
+            ],
+            std::alloc::Global,
+        );
+        let eid = mesh.e_from_vertices(0.into(), 1.into());
+        let edge_n_halfedges = mesh.edge(eid).halfedges().count();
+        let new_vid = mesh.split_edge(eid);
+        for face in mesh.faces() {
+            let halfedges = face.halfedges().collect::<Vec<_>>();
+            assert_eq!(halfedges.len(), 4);
+            for (he1, he2) in halfedges.iter().circular_tuple_windows() {
+                debug_assert!(he1.data.next == he2.id);
+                debug_assert!(he2.data.prev == he1.id);
+            }
+            let mut vertices = HashSet::<VertexId, _>::new();
+            for he in halfedges.iter() {
+                let v = he.data.vertex;
+                debug_assert!(he.data.face == face.id);
+                vertices.insert(v);
+            }
+            debug_assert!(vertices.len() == 4);
+        }
+
+        let old_halfedges = mesh.edge(eid).halfedges().collect_vec();
+        debug_assert!(old_halfedges.len() == edge_n_halfedges);
+        for he in old_halfedges {
+            debug_assert!(he.data.edge() == eid);
+        }
+        let new_edge = mesh.vertex(new_vid).halfedge().prev().edge();
+        let new_eid = new_edge.id;
+        let new_halfedges = new_edge.halfedges().collect_vec();
+        debug_assert!(new_halfedges.len() == edge_n_halfedges);
+        for he in new_halfedges {
+            debug_assert!(he.data.edge() == new_eid);
+        }
     }
 }

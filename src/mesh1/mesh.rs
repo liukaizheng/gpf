@@ -4,7 +4,7 @@ use std::{
     ops::{Index, IndexMut},
 };
 
-use crate::mesh1::element::{Edge, EdgeMut};
+use crate::mesh1::element::{Edge, EdgeHalfedge, EdgeMut};
 
 use super::element::{
     EdgeId, ElementId, Face, FaceData, FaceId, FaceMut, Halfedge, HalfedgeData, HalfedgeId,
@@ -186,7 +186,7 @@ impl<VP: Default + Clone, HP: Default, FP, A: Allocator> BaseMesh<VP, HP, FP, A>
     pub fn new_vertices(&mut self, n: usize) -> VertexId {
         let ret = VertexId(self.vertices.len().into());
         self.vertices.data.resize(*ret + n, VP::default());
-        self.n_halfedges += n;
+        self.n_vertices += n;
         ret
     }
 }
@@ -453,13 +453,21 @@ pub trait MeshCore: Sized {
         count: usize,
     ) -> impl Iterator<Item = FaceMut<'_, Self>>;
 
-    fn vertex(&self, vid: VertexId) -> Vertex<Self>;
-    fn halfedge(&self, hid: HalfedgeId) -> Halfedge<Self>;
-    fn face(&self, fid: FaceId) -> Face<Self>;
+    fn vertex(&'_ self, vid: VertexId) -> Vertex<'_, Self>;
+    fn halfedge(&'_ self, hid: HalfedgeId) -> Halfedge<'_, Self>;
+    fn face(&'_ self, fid: FaceId) -> Face<'_, Self>;
 
-    fn vertex_mut(&mut self, vid: VertexId) -> VertexMut<Self>;
-    fn halfedge_mut(&mut self, hid: HalfedgeId) -> HalfedgeMut<Self>;
-    fn face_mut(&mut self, fid: FaceId) -> FaceMut<Self>;
+    fn vertex_mut(&'_ mut self, vid: VertexId) -> VertexMut<'_, Self>;
+    fn halfedge_mut(&'_ mut self, hid: HalfedgeId) -> HalfedgeMut<'_, Self>;
+    fn face_mut(&'_ mut self, fid: FaceId) -> FaceMut<'_, Self>;
+
+    fn vertices(&'_ self) -> impl Iterator<Item = Vertex<'_, Self>>;
+    fn halfedges(&'_ self) -> impl Iterator<Item = Halfedge<'_, Self>>;
+    fn faces(&'_ self) -> impl Iterator<Item = Face<'_, Self>>;
+
+    fn vertices_mut(&'_ mut self) -> impl Iterator<Item = VertexMut<'_, Self>>;
+    fn halfedges_mut(&'_ mut self) -> impl Iterator<Item = HalfedgeMut<'_, Self>>;
+    fn faces_mut(&'_ mut self) -> impl Iterator<Item = FaceMut<'_, Self>>;
 
     fn he_from(&self, hid: HalfedgeId) -> VertexId;
     fn he_to(&self, hid: HalfedgeId) -> VertexId;
@@ -702,33 +710,117 @@ impl<T: HasBaseMesh> MeshCore for T {
     }
 
     #[inline]
-    fn vertex(&self, vid: VertexId) -> Vertex<Self> {
+    fn vertex(&'_ self, vid: VertexId) -> Vertex<'_, Self> {
         Vertex::new(vid, self)
     }
 
     #[inline]
-    fn halfedge(&self, hid: HalfedgeId) -> Halfedge<Self> {
+    fn halfedge(&'_ self, hid: HalfedgeId) -> Halfedge<'_, Self> {
         Halfedge::new(hid, self)
     }
 
     #[inline]
-    fn face(&self, fid: FaceId) -> Face<Self> {
+    fn face(&'_ self, fid: FaceId) -> Face<'_, Self> {
         Face::new(fid, self)
     }
 
     #[inline]
-    fn vertex_mut(&mut self, vid: VertexId) -> VertexMut<Self> {
+    fn vertex_mut(&'_ mut self, vid: VertexId) -> VertexMut<'_, Self> {
         VertexMut::new(vid, self)
     }
 
     #[inline]
-    fn halfedge_mut(&mut self, hid: HalfedgeId) -> HalfedgeMut<Self> {
+    fn halfedge_mut(&'_ mut self, hid: HalfedgeId) -> HalfedgeMut<'_, Self> {
         HalfedgeMut::new(hid, self)
     }
 
     #[inline]
-    fn face_mut(&mut self, fid: FaceId) -> FaceMut<Self> {
+    fn face_mut(&'_ mut self, fid: FaceId) -> FaceMut<'_, Self> {
         FaceMut::new(fid, self)
+    }
+
+    #[inline]
+    fn vertices(&'_ self) -> impl Iterator<Item = Vertex<'_, Self>> {
+        self.vertex_datum()
+            .zip(0..self.n_vertices_capacity())
+            .filter_map(|(data, vid)| {
+                if data.halfedge.valid() {
+                    Some(Vertex::new_with_data(vid.into(), data, self))
+                } else {
+                    None
+                }
+            })
+    }
+
+    #[inline]
+    fn halfedges(&'_ self) -> impl Iterator<Item = Halfedge<'_, Self>> {
+        self.halfedge_datum()
+            .zip(0..self.n_halfedges_capacity())
+            .filter_map(|(data, hid)| {
+                if data.vertex.valid() {
+                    Some(Halfedge::new_with_data(hid.into(), data, self))
+                } else {
+                    None
+                }
+            })
+    }
+
+    #[inline]
+    fn faces(&'_ self) -> impl Iterator<Item = Face<'_, Self>> {
+        self.face_datum()
+            .zip(0..self.n_faces_capacity())
+            .filter_map(|(data, fid)| {
+                if data.halfedge.valid() {
+                    Some(Face::new_with_data(fid.into(), data, self))
+                } else {
+                    None
+                }
+            })
+    }
+
+    #[inline]
+    fn vertices_mut(&'_ mut self) -> impl Iterator<Item = VertexMut<'_, Self>> {
+        let n_vertices_capacity = self.n_vertices_capacity();
+        let mesh_ptr = self as *mut Self;
+        self.vertex_datum_mut()
+            .zip(0..n_vertices_capacity)
+            .filter_map(move |(data, vid)| unsafe {
+                if data.halfedge.valid() {
+                    Some(VertexMut::new_with_data(vid.into(), data, &mut *mesh_ptr))
+                } else {
+                    None
+                }
+            })
+    }
+
+    #[inline]
+    fn halfedges_mut(&'_ mut self) -> impl Iterator<Item = HalfedgeMut<'_, Self>> {
+        let n_halfedges_capacity = self.n_halfedges_capacity();
+        let mesh_ptr = self as *mut Self;
+        self.halfedge_datum_mut()
+            .zip(0..n_halfedges_capacity)
+            .filter_map(move |(data, hid)| unsafe {
+                if data.vertex.valid() {
+                    Some(HalfedgeMut::new_with_data(hid.into(), data, &mut *mesh_ptr))
+                } else {
+                    None
+                }
+            })
+    }
+
+    #[inline]
+    fn faces_mut(&'_ mut self) -> impl Iterator<Item = FaceMut<'_, Self>> {
+        let mesh_ptr = self as *mut Self;
+        let n_faces_capacity = self.n_faces_capacity();
+        self.face_datum_mut()
+            .zip(0..n_faces_capacity)
+            .filter_map(move |(data, fid)| unsafe {
+                if data.halfedge.valid() {
+                    Some(FaceMut::new_with_data(fid.into(), data, &mut *mesh_ptr))
+                } else {
+                    None
+                }
+            })
     }
 
     #[inline]
@@ -783,8 +875,8 @@ pub trait Mesh: MeshCore {
     fn n_edges(&self) -> usize;
     fn n_edges_capacity(&self) -> usize;
 
-    fn edge_datum(&self) -> impl Iterator<Item = &Self::EdgeData>;
-    fn edge_datum_mut(&mut self) -> impl Iterator<Item = &mut Self::EdgeData>;
+    fn edge_datum(&'_ self) -> impl Iterator<Item = &Self::EdgeData>;
+    fn edge_datum_mut(&'_ mut self) -> impl Iterator<Item = &mut Self::EdgeData>;
 
     fn edge_data(&self, eid: EdgeId) -> &Self::EdgeData;
     fn edge_data_mut(&mut self, eid: EdgeId) -> &mut Self::EdgeData;
@@ -797,8 +889,11 @@ pub trait Mesh: MeshCore {
         count: usize,
     ) -> impl Iterator<Item = EdgeMut<'_, Self>>;
 
-    fn edge(&self, eid: EdgeId) -> Edge<Self>;
-    fn edge_mut(&mut self, eid: EdgeId) -> EdgeMut<Self>;
+    fn edge(&'_ self, eid: EdgeId) -> Edge<'_, Self>;
+    fn edge_mut(&'_ mut self, eid: EdgeId) -> EdgeMut<'_, Self>;
+
+    fn edges(&'_ self) -> impl Iterator<Item = Edge<'_, Self>>;
+    fn edges_mut(&'_ mut self) -> impl Iterator<Item = EdgeMut<'_, Self>>;
 
     fn he_edge(&self, hid: HalfedgeId) -> EdgeId;
 
@@ -806,4 +901,26 @@ pub trait Mesh: MeshCore {
     fn he_incoming_next(&self, hid: HalfedgeId) -> HalfedgeId;
 
     fn e_halfedge(&self, eid: EdgeId) -> HalfedgeId;
+    fn e_from_vertices(&self, va: VertexId, vb: VertexId) -> EdgeId;
+}
+
+pub(super) fn edge_from_vertices<M: Mesh>(mesh: &M, va: VertexId, vb: VertexId) -> EdgeId
+where
+    M::VertexData: VertexData,
+    M::HalfedgeData: HalfedgeData,
+{
+    for edge in mesh.vertex(va).edges() {
+        let he = edge.halfedge();
+        let v1 = he.to();
+        if v1.id == va {
+            if he.from().id == vb {
+                return edge.id;
+            }
+        } else if v1.id == vb {
+            if he.from().id == va {
+                return edge.id;
+            }
+        }
+    }
+    EdgeId::default()
 }
