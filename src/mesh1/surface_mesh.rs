@@ -300,8 +300,8 @@ impl<
                     old_first_hid = old_he.id;
                     new_first_hid = new_he.id;
                 } else {
-                    let old_prev_he = old_prev_he.as_mut().unwrap_unchecked();
-                    let new_prev_he = new_prev_he.as_mut().unwrap_unchecked();
+                    let old_prev_he = old_prev_he.unwrap_unchecked();
+                    let new_prev_he = new_prev_he.unwrap_unchecked();
                     old_prev_he.data.property.sibling = old_he.id;
                     new_prev_he.data.property.sibling = new_he.id;
                     if old_prev_he.data.vertex == new_vid {
@@ -311,8 +311,8 @@ impl<
                         new_prev_he.data.property.incoming_next = new_hid;
                     }
                 }
-                old_prev_he.replace(old_he);
-                new_prev_he.replace(new_he);
+                old_prev_he = Some(old_he);
+                new_prev_he = Some(new_he);
             }
             old_edge.data.halfedge = old_first_hid;
             self.edge_data_mut(new_eid).halfedge = new_first_hid;
@@ -360,6 +360,8 @@ impl<
 
         let mut first_he = unsafe { (*mesh_ptr).halfedge_mut(new_start_hid) };
         let mut second_he = unsafe { (*mesh_ptr).halfedge_mut((*new_start_hid + 1).into()) };
+        first_he.data.set_sibling(second_he.id);
+        second_he.data.set_sibling(first_he.id);
 
         right_last_he.connect(&mut first_he);
         first_he.connect(&mut right_first_he);
@@ -393,6 +395,46 @@ impl<
         self.face_mut(fid).data.set_halfedge(first_he.id);
         self.face_mut(new_fid).data.set_halfedge(second_he.id);
         second_he.id
+    }
+
+    pub fn add_face_by_halfedges(
+        &mut self,
+        halfedges: &[HalfedgeId],
+        build_siblings: bool,
+    ) -> FaceId {
+        let first_new_hid = self.new_halfedges(halfedges.len());
+        let new_fid = self.new_faces(1);
+        let mesh_ptr = self as *mut Self;
+
+        unsafe {
+            let mut prev_new_he: Option<HalfedgeMut<'_, _>> = None;
+            for (mut old_he, mut new_he) in halfedges
+                .iter()
+                .map(|&hid| (*mesh_ptr).halfedge_mut(hid))
+                .zip((*mesh_ptr).halfedge_range_mut(first_new_hid, halfedges.len()))
+            {
+                new_he.data.vertex = old_he.data.vertex;
+                new_he.data.property.edge = old_he.data.property.edge;
+                new_he.data.face = new_fid;
+
+                if build_siblings {
+                    old_he.insert_sibling(&mut new_he);
+                }
+                old_he.insert_incoming_next(&mut new_he);
+                if new_he.id != first_new_hid {
+                    prev_new_he.unwrap_unchecked().connect(&mut new_he);
+                }
+
+                prev_new_he = Some(new_he);
+            }
+            prev_new_he
+                .unwrap_unchecked()
+                .connect(&mut self.halfedge_mut(first_new_hid));
+        }
+
+        self.face_mut(new_fid).data.set_halfedge(first_new_hid);
+
+        new_fid
     }
 
     #[inline]
@@ -629,8 +671,9 @@ mod tests {
     }
 
     #[test]
-    fn test_split_edge() {
+    fn test_split_edge_and_split_face() {
         use super::SurfaceMesh;
+        use crate::mesh1::element::FaceId;
         use crate::mesh1::element::VertexId;
         use crate::mesh1::element::{HalfedgeDataExt, HalfedgeNavigation};
         use crate::mesh1::mesh::Mesh;
@@ -648,36 +691,68 @@ mod tests {
             ],
             std::alloc::Global,
         );
-        let eid = mesh.e_from_vertices(0.into(), 1.into());
-        let edge_n_halfedges = mesh.edge(eid).halfedges().count();
-        let new_vid = mesh.split_edge(eid);
-        for face in mesh.faces() {
-            let halfedges = face.halfedges().collect::<Vec<_>>();
-            assert_eq!(halfedges.len(), 4);
-            for (he1, he2) in halfedges.iter().circular_tuple_windows() {
+        // split edge
+        let new_vid = {
+            let eid = mesh.e_from_vertices(0.into(), 1.into());
+            let edge_n_halfedges = mesh.edge(eid).halfedges().count();
+            let new_vid = mesh.split_edge(eid);
+            for face in mesh.faces() {
+                let halfedges = face.halfedges().collect::<Vec<_>>();
+                assert_eq!(halfedges.len(), 4);
+                for (he1, he2) in halfedges.iter().circular_tuple_windows() {
+                    debug_assert!(he1.data.next == he2.id);
+                    debug_assert!(he2.data.prev == he1.id);
+                }
+                let mut vertices = HashSet::<VertexId, _>::new();
+                for he in halfedges.iter() {
+                    let v = he.data.vertex;
+                    debug_assert!(he.data.face == face.id);
+                    vertices.insert(v);
+                }
+                debug_assert!(vertices.len() == 4);
+            }
+
+            let old_halfedges = mesh.edge(eid).halfedges().collect_vec();
+            debug_assert!(old_halfedges.len() == edge_n_halfedges);
+            for he in old_halfedges {
+                debug_assert!(he.data.edge() == eid);
+            }
+            let new_edge = mesh.vertex(new_vid).halfedge().prev().edge();
+            let new_eid = new_edge.id;
+            let new_halfedges = new_edge.halfedges().collect_vec();
+            debug_assert!(new_halfedges.len() == edge_n_halfedges);
+            for he in new_halfedges {
+                debug_assert!(he.data.edge() == new_eid);
+            }
+            new_vid
+        };
+        // split face
+        {
+            let fid = FaceId::from(0);
+            let new_hid = mesh.split_face(fid, new_vid, 2.into());
+            let new_fid = mesh.he_face(new_hid);
+            let old_halfedges = mesh.face(fid).halfedges().collect_vec();
+            let new_halfedges = mesh.face(new_fid).halfedges().collect_vec();
+            debug_assert!(old_halfedges.len() == 3);
+            debug_assert!(new_halfedges.len() == 3);
+
+            for (he1, he2) in old_halfedges.iter().circular_tuple_windows() {
                 debug_assert!(he1.data.next == he2.id);
                 debug_assert!(he2.data.prev == he1.id);
             }
-            let mut vertices = HashSet::<VertexId, _>::new();
-            for he in halfedges.iter() {
-                let v = he.data.vertex;
-                debug_assert!(he.data.face == face.id);
-                vertices.insert(v);
-            }
-            debug_assert!(vertices.len() == 4);
-        }
 
-        let old_halfedges = mesh.edge(eid).halfedges().collect_vec();
-        debug_assert!(old_halfedges.len() == edge_n_halfedges);
-        for he in old_halfedges {
-            debug_assert!(he.data.edge() == eid);
-        }
-        let new_edge = mesh.vertex(new_vid).halfedge().prev().edge();
-        let new_eid = new_edge.id;
-        let new_halfedges = new_edge.halfedges().collect_vec();
-        debug_assert!(new_halfedges.len() == edge_n_halfedges);
-        for he in new_halfedges {
-            debug_assert!(he.data.edge() == new_eid);
+            for (he1, he2) in old_halfedges.iter().circular_tuple_windows() {
+                debug_assert!(he1.data.next == he2.id);
+                debug_assert!(he2.data.prev == he1.id);
+            }
+
+            for he in old_halfedges.iter() {
+                debug_assert!(he.data.face == fid);
+            }
+
+            for he in new_halfedges.iter() {
+                debug_assert!(he.data.face == new_fid);
+            }
         }
     }
 }

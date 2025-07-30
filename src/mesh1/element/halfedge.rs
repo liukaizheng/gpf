@@ -189,6 +189,13 @@ impl<'m, M: Mesh<HalfedgeData: HalfedgeData>> HalfedgeMut<'m, M> {
 
 impl<'m, M: Mesh<HalfedgeData: HalfedgeDataExt>> HalfedgeMut<'m, M> {
     #[inline]
+    pub fn insert_sibling(&mut self, middle: &mut Self) {
+        let next = self.sibling_mut();
+        self.data.set_sibling(middle.id);
+        middle.data.set_sibling(next.id);
+    }
+
+    #[inline]
     pub fn insert_incoming_next(&mut self, middle: &mut Self) {
         let next = self.incoming_next_mut();
         self.data.set_incoming_next(middle.id);
