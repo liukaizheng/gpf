@@ -68,8 +68,8 @@ impl<P> HalfedgeDataExt for BaseHalfedgeData<ExtendedHalfedge<P>> {
 
 #[derive(Default, Clone)]
 pub struct BaseEdgeData<P> {
-    halfedge: HalfedgeId,
-    property: P,
+    pub halfedge: HalfedgeId,
+    pub property: P,
 }
 
 impl<P> EdgeData for BaseEdgeData<P> {
@@ -440,6 +440,11 @@ impl<
     #[inline]
     fn set_e_halfedge(&mut self, eid: EdgeId, hid: HalfedgeId) {
         self.edges[eid].halfedge = hid;
+    }
+
+    #[inline]
+    pub fn set_he_sibling(&mut self, hid: HalfedgeId, sid: HalfedgeId) {
+        self.halfedge_mut(hid).data.set_sibling(sid);
     }
 }
 

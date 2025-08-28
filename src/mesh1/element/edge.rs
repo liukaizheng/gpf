@@ -5,9 +5,9 @@ use crate::{
     mesh1::{
         element::{
             Halfedge, HalfedgeData, HalfedgeId, HalfedgeMut, HalfedgeNavigation,
-            HalfedgeNavigationMut,
+            HalfedgeNavigationMut, Vertex, VertexMut,
         },
-        mesh::Mesh,
+        mesh::{Mesh, MeshCore},
     },
 };
 
@@ -131,9 +131,8 @@ edge_halfedge_iterator!(struct EdgeHalfedges, halfedge, Halfedge, HalfedgeNaviga
 edge_halfedge_iterator!(struct EdgeHalfedgesMut, halfedge_mut, HalfedgeMut, HalfedgeNavigationMut, sibling_mut, {mut});
 
 macro_rules! impl_edge_halfedge_methods {
-    (struct $name:ident, $halfedge_method: ident, $halfedges_method: ident, $halfedge_iter: ident, $edge_halfedges: ident, $into_ref:ident, {$($mut_:tt )?}) => {
+    (struct $name:ident, $halfedge_method: ident, $halfedges_method: ident, $vertices_method: ident, $edge_halfedges: ident, $vertex: ident, $prev_method: ident, $to_method: ident, $into_ref:ident, {$($mut_:tt )?}) => {
         impl <'m, M: Mesh> $name<'m, M> {
-
             #[inline]
             pub fn $halfedges_method(& $($mut_)? self) -> $edge_halfedges<'m, M> {
                 let halfedge = self.$halfedge_method();
@@ -145,9 +144,18 @@ macro_rules! impl_edge_halfedge_methods {
                 }
             }
         }
+
+        impl <'m, M: Mesh<HalfedgeData: HalfedgeData>> $name<'m, M> {
+            #[inline]
+            pub fn $vertices_method(& $($mut_)? self) -> [$vertex<'m, M>; 2] {
+                let $($mut_)? halfedge = self.$halfedge_method();
+                let $($mut_)? prev_he = halfedge.$prev_method();
+                [prev_he.$to_method(), halfedge.$to_method()]
+            }
+        }
     }
 }
 
-impl_edge_halfedge_methods!(struct Edge, halfedge, halfedges, Halfedge, EdgeHalfedges, as_ref, {});
-impl_edge_halfedge_methods!(struct EdgeMut, halfedge, halfedges, Halfedge, EdgeHalfedges, as_ref, {});
-impl_edge_halfedge_methods!(struct EdgeMut, halfedge_mut, halfedges_mut, HalfedgeMut, EdgeHalfedgesMut, as_mut, {mut});
+impl_edge_halfedge_methods!(struct Edge, halfedge, halfedges, vertices, EdgeHalfedges, Vertex, prev, to, as_ref, {});
+impl_edge_halfedge_methods!(struct EdgeMut, halfedge, halfedges, vertices,EdgeHalfedges, Vertex, prev, to, as_ref, {});
+impl_edge_halfedge_methods!(struct EdgeMut, halfedge_mut, halfedges_mut, vertices_mut, EdgeHalfedgesMut, VertexMut, prev_mut, to_mut, as_mut, {mut});

@@ -1,7 +1,4 @@
-use std::{
-    alloc::Allocator,
-    collections::BinaryHeap,
-};
+use std::{alloc::Allocator, collections::BinaryHeap};
 
 use bumpalo::Bump;
 use hashbrown::{HashMap, HashSet};
@@ -9,13 +6,7 @@ use itertools::Itertools;
 use tinyvec::TinyVec;
 
 use crate::{
-    INVALID_IND, decode_index,
-    geometry::{BBox, Surf, Surface},
-    math::{cross, cross_in, dot, square_norm, sub_short},
-    mesh::{EdgeId, ElementId, FaceId, HalfedgeId, Mesh, SurfaceMesh, VertexId},
-    point, point_3,
-    triangle::{convex_2, convex_3},
-    twin_index,
+    decode_index, geometry::{BBox, Surf, Surface}, is_positive, math::{cross, cross_in, dot, square_norm, sub_short}, mesh1::{EdgeHalfedge, EdgeId, ElementId, FaceId, HalfedgeId, Mesh, MeshCore, SurfaceMesh, VertexId}, point, point_3, triangle::{convex_2, convex_3}, twin_index, INVALID_IND
 };
 
 #[derive(Default, Clone)]
@@ -334,12 +325,24 @@ impl Tet {
     }
 }
 
+#[derive(Default, Clone)]
+struct VertexData {
+    pt: [f64; 3],
+}
+
+#[derive(Default, Clone)]
+struct EdgeData {
+    square_len: f64,
+}
+
+#[derive(Default, Clone)]
+struct FaceData {
+    tets: [usize; 2],
+}
+
 pub(crate) struct TetSet {
-    pub(crate) points: Vec<f64>,
-    pub(crate) mesh: SurfaceMesh<std::alloc::Global>,
+    pub(crate) mesh: SurfaceMesh<VertexData, (), EdgeData, FaceData, std::alloc::Global>,
     pub(crate) tets: Vec<Tet>,
-    pub(crate) face_tets: Vec<[usize; 2]>,
-    pub(crate) square_edge_lengths: Vec<f64>,
 }
 
 #[inline]
@@ -371,32 +374,6 @@ impl TetSet {
             [2, 3, 7, INVALID_IND],
         ];
         const TET_FACES: [[usize; 3]; 4] = [[1, 3, 2], [0, 2, 3], [0, 3, 1], [0, 1, 2]];
-        let points = vec![
-            bbox.min[0],
-            bbox.min[1],
-            bbox.min[2],
-            bbox.min[0],
-            bbox.min[1],
-            bbox.max[2],
-            bbox.min[0],
-            bbox.max[1],
-            bbox.min[2],
-            bbox.min[0],
-            bbox.max[1],
-            bbox.max[2],
-            bbox.max[0],
-            bbox.min[1],
-            bbox.min[2],
-            bbox.max[0],
-            bbox.min[1],
-            bbox.max[2],
-            bbox.max[0],
-            bbox.max[1],
-            bbox.min[2],
-            bbox.max[0],
-            bbox.max[1],
-            bbox.max[2],
-        ];
 
         let hash_tri = |mut verts: [usize; 3]| {
             verts.sort();
@@ -428,27 +405,40 @@ impl TetSet {
             }
         }
 
-        let mut tet_mesh = SurfaceMesh::new(tet_face_vertices, std::alloc::Global);
+        let mut tet_mesh = SurfaceMesh::<VertexData, (), EdgeData, FaceData, std::alloc::Global>::new_in(tet_face_vertices, std::alloc::Global);
+        tet_mesh.vertices_mut().for_each(|mut vertex| {
+            let id = *vertex.id;
+            let pt = &mut vertex.data.property.pt;
+            pt[0] = if id < 4 { bbox.min[0] } else { bbox.max[0] };
+            pt[1] = if ((id % 4) << 1) == 0 {bbox.min[1]} else {bbox.max[1]};
+            pt[2] = if is_positive(id) {bbox.min[2]} else {bbox.max[2]};
+        });
+
+        let all_surfaces_evaluations = surfaces.iter().map(|srf| {
+            Vec::from_iter(tet_mesh.vertex_datum().map(|data| srf.eval(&data.property.pt)))
+        }).collect::<Vec<_>>();
+
         let mut face_tets = vec![[INVALID_IND; 2]; tet_mesh.n_faces()];
         let mut infinite_edges = [EdgeId::default(); 8];
-        let square_edge_lengths = Vec::from_iter(tet_mesh.edges().map(|edge| {
-            let eid = *edge;
-            let [va, vb] = tet_mesh.e_vertices(eid);
-            match [va.valid(), vb.valid()] {
+        tet_mesh.edges_mut().for_each(|mut edge| {
+            let eid = edge.id;
+            let [va, vb] = edge.vertices();
+            match [va.id.valid(), vb.id.valid()] {
                 [_, false] => {
-                    infinite_edges[va] = eid;
-                    0.0
+                    infinite_edges[*va.id] = eid;
                 }
                 [false, _] => {
-                    infinite_edges[vb] = eid;
-                    0.0
+                    infinite_edges[*vb.id] = eid;
                 }
-                _ => square_norm(&sub_short::<3, _>(
-                    point::<3>(&points, *va),
-                    point::<3>(&points, *vb),
-                )),
+                _ => {
+                    let pa = &va.data.property.pt;
+                    let pb = &vb.data.property.pt;
+                    edge.data.property.square_len = square_norm(&sub_short::<3, _>(
+                        pa, pb
+                    ));
+                }
             }
-        }));
+        });
         let tets = tet_faces
             .into_iter()
             .enumerate()
@@ -458,26 +448,25 @@ impl TetSet {
                 let mut edges = [EdgeId::default(); 6];
                 for ((va, vb), edge) in vertices.into_iter().tuple_combinations().zip(&mut edges) {
                     *edge = match [va.valid(), vb.valid()] {
-                        [_, false] => infinite_edges[va],
-                        [false, _] => infinite_edges[vb],
-                        _ => tet_mesh.e_from_va_vb(va, vb),
+                        [_, false] => infinite_edges[*va],
+                        [false, _] => infinite_edges[*vb],
+                        _ => tet_mesh.e_from_vertices(va, vb),
                     };
                 }
                 let faces = ori_faces.map(|ori_fid| {
                     let (fid, reversed) = decode_index(ori_fid);
                     if reversed {
-                        face_tets[fid][1] = tid;
+                        tet_mesh.face_data_mut(fid.into()).property.tets[1] = tid;
                     } else {
-                        face_tets[fid][0] = tid;
+                        tet_mesh.face_data_mut(fid.into()).property.tets[0] = tid;
                     }
                     fid.into()
                 });
                 let surface_evaluations = if tid < 6 {
-                    let tet_points = tet_vertices.map(|idx| point::<3>(&points, idx));
-                    TinyVec::from_iter(surfaces.iter().enumerate().map(|(sid, srf)| {
+                    TinyVec::from_iter((0..surfaces.len()).map(|sid| {
                         SurfaceEvaluation {
                             sid,
-                            evaluation: tet_points.map(|p| srf.eval(p)),
+                            evaluation: tet_vertices.map(|idx| all_surfaces_evaluations[sid][idx])
                         }
                     }))
                 } else {
@@ -492,13 +481,13 @@ impl TetSet {
             })
             .collect_vec();
 
-        let mesh_ptr = unsafe { std::mem::transmute::<_, *mut SurfaceMesh>(&mut tet_mesh) };
+        let mesh_ptr = unsafe { std::mem::transmute::<_, *mut SurfaceMesh<_, _, _, _, _>>(&mut tet_mesh) };
         for edge in tet_mesh.edges() {
             let mut tet_halfedges_map = HashMap::<usize, [HalfedgeId; 2]>::new();
             for he in edge.halfedges() {
-                let hid = *he;
-                let fid = *he.face();
-                for tid in face_tets[fid] {
+                let hid = he.id;
+                let fid = he.face().id;
+                for tid in face_tets[*fid] {
                     match tet_halfedges_map.entry(tid) {
                         hashbrown::hash_map::Entry::Occupied(mut entry) => {
                             entry.get_mut()[1] = hid;
@@ -510,11 +499,12 @@ impl TetSet {
                 }
             }
 
-            let first_hid = *edge.halfedge();
+            let first_he = edge.halfedge();
+            let first_hid = first_he.id;
             let mut sorted_halfedges = Vec::with_capacity(tet_halfedges_map.len());
             sorted_halfedges.push(first_hid);
             let mut curr_hid = first_hid;
-            let mut curr_tid = face_tets[tet_mesh.he_face(first_hid)][0];
+            let mut curr_tid = face_tets[*first_he.face().id][0];
             loop {
                 curr_hid = {
                     let halfedges = tet_halfedges_map.get(&curr_tid).unwrap();
@@ -529,7 +519,7 @@ impl TetSet {
                 }
                 sorted_halfedges.push(curr_hid);
 
-                let candidates = face_tets[tet_mesh.he_face(curr_hid)];
+                let candidates = face_tets[*tet_mesh.he_face(curr_hid)];
                 curr_tid = if candidates[0] == curr_tid {
                     candidates[1]
                 } else {
@@ -568,8 +558,7 @@ impl TetSet {
             }
             split_bump.reset();
 
-            let start_face_idx =
-                self.split_edge(eid, srf_datum, &split_bump);
+            let start_face_idx = self.split_edge(eid, srf_datum, &split_bump);
 
             for fid in start_face_idx..self.face_tets.len() {
                 for tid in self.face_tets[fid] {
