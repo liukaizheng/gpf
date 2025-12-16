@@ -1,6 +1,6 @@
 use std::alloc::Allocator;
 
-use rand::{Rng, SeedableRng, distributions::Uniform, rngs::SmallRng};
+use rand::{Rng, SeedableRng, distr::Uniform, rngs::SmallRng};
 
 use crate::{
     math::{cross, norm, sub_short},
@@ -37,10 +37,10 @@ pub fn montecarlo_sampling<const N: usize, A: Allocator + Copy>(
         }
     }
 
-    let rng = SmallRng::seed_from_u64(5489);
-    let uniform = Uniform::new(0.0, 1.0);
+    let mut rng = SmallRng::seed_from_u64(5489);
+    let uniform = Uniform::new(0.0, 1.0).unwrap();
     result.extend(
-        rng.sample_iter(uniform)
+        (&mut rng).sample_iter(uniform)
             .array_chunks::<4>()
             .take(n_sampling_points)
             .map(|nums| {

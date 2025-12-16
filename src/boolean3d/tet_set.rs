@@ -1,4 +1,4 @@
-use std::{alloc::Allocator, collections::BinaryHeap};
+use std::{alloc::Allocator, collections::BinaryHeap, ptr::NonNull};
 
 use bumpalo::Bump;
 use hashbrown::{HashMap, HashSet};
@@ -78,7 +78,6 @@ impl Tet {
     fn subdividable(
         &mut self,
         points: &[f64],
-        edge_square_lengths: &[f64],
         srf_datum: &[SurfaceData],
         sq_eps: f64,
     ) -> bool {
@@ -481,7 +480,7 @@ impl TetSet {
             })
             .collect_vec();
 
-        let mesh_ptr = unsafe { std::mem::transmute::<_, *mut SurfaceMesh<_, _, _, _, _>>(&mut tet_mesh) };
+        let mesh_ptr = unsafe { std::mem::transmute::<_, *mut SurfaceMesh<VertexData, (), EdgeData, FaceData, std::alloc::Global>>(&mut tet_mesh) };
         for edge in tet_mesh.edges() {
             let mut tet_halfedges_map = HashMap::<usize, [HalfedgeId; 2]>::new();
             for he in edge.halfedges() {
@@ -534,11 +533,8 @@ impl TetSet {
         }
 
         TetSet {
-            points,
             mesh: tet_mesh,
             tets,
-            face_tets,
-            square_edge_lengths,
         }
     }
 
@@ -552,7 +548,7 @@ impl TetSet {
 
         while !pq.is_empty() {
             let EdgeAndLen { eid, len } = pq.pop().unwrap();
-            if self.square_edge_lengths[eid] != len {
+            if self.mesh.edge_data(eid).property.square_len != len {
                 // edge changed
                 continue;
             }
@@ -604,30 +600,26 @@ impl TetSet {
         srf_datum: &[SurfaceData],
         alloc: A,
     ) -> usize {
-        let [va, vb] = self.mesh.e_vertices(split_eid);
+        let [va, vb] = self.mesh.edge(split_eid).vertices().map(|v| v.id);
         let new_eid = self.mesh.n_edges_capacity().into();
-        let ve = self.mesh.split_edge(split_eid, alloc);
+        let ve = self.mesh.split_edge(split_eid);
+        let mut mesh = NonNull::from_mut(self);
         let new_pt = {
             // update points
-            let pa = point_3(&self.points, va.0);
-            let pb = point_3(&self.points, vb.0);
-            self.points.extend_from_slice(&[
-                (pa[0] + pb[0]) * 0.5,
-                (pa[1] + pb[1]) * 0.5,
-                (pa[2] + pb[2]) * 0.5,
-            ]);
-            point::<3>(&self.points, ve.0)
+            let [pa, pb, pe] = [va, vb, ve].map(|vid| &mut self.mesh.vertex_data_mut(vid).property.pt);
+            pe[0] = (pa[0] + pb[0]) * 0.5;
+            pe[1] = (pa[1] + pb[1]) * 0.5;
+            pe[2] = (pa[2] + pb[2]) * 0.5;
+            pe
         };
         {
             // update edge lengths
-            let new_edge_square_len = self.square_edge_lengths[split_eid] * 0.25;
-            self.square_edge_lengths.push(new_edge_square_len);
-            self.square_edge_lengths[split_eid] = new_edge_square_len;
+            let old_edge_data = &mut self.mesh.edge_data_mut(split_eid).property;
+            old_edge_data.square_len *= 0.25;
+            self.mesh.edge_data_mut(new_eid).property.square_len = old_edge_data.square_len;
         }
         let mut side_halfedges =
             Vec::with_capacity_in(self.mesh.edge(split_eid).halfedges().count(), alloc);
-        let mesh_ptr = unsafe { std::mem::transmute::<_, *mut SurfaceMesh>(&mut self.mesh) };
-        let mesh_ref = &self.mesh; // Cache mesh reference to reduce dereferencing
         side_halfedges.extend(mesh_ref.edge(split_eid).halfedges().map(|he| {
             let ([h_ac, h_bc], vc) = if *he.to() == vb {
                 let he_next = he.next();

@@ -35,20 +35,6 @@ macro_rules! element_id {
             }
         }
 
-        impl<'b, T> Index<$name> for bumpalo::collections::Vec<'b, T> {
-            type Output = T;
-            #[inline(always)]
-            fn index(&self, index: $name) -> &Self::Output {
-                &self[index.0]
-            }
-        }
-
-        impl<'b, T> IndexMut<$name> for bumpalo::collections::Vec<'b, T> {
-            #[inline(always)]
-            fn index_mut(&mut self, index: $name) -> &mut Self::Output {
-                &mut self[index.0]
-            }
-        }
         impl<T> Index<$name> for [T] {
             type Output = T;
             #[inline(always)]
