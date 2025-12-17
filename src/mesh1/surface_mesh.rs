@@ -7,6 +7,7 @@ use itertools::Itertools;
 use crate::mesh1::element::{
     Edge, EdgeData, EdgeHalfedge, EdgeMut, FaceData, HalfedgeData, HalfedgeMut,
 };
+use crate::mesh1::halfedge_from_oppo_vertex;
 
 use super::element::{EdgeId, ElementId, FaceId, HalfedgeDataExt, HalfedgeId, VertexId};
 
@@ -513,6 +514,11 @@ impl<VP, HP, EP, FP, A: Allocator> Mesh for SurfaceMesh<VP, HP, EP, FP, A> {
     }
 
     #[inline]
+    fn edge_reserve(&mut self, additional: usize) {
+        self.edges.reserve(additional);
+    }
+
+    #[inline]
     fn edge_datum(&self) -> impl Iterator<Item = &Self::EdgeData> {
         self.edges.iter()
     }
@@ -613,6 +619,11 @@ impl<VP, HP, EP, FP, A: Allocator> Mesh for SurfaceMesh<VP, HP, EP, FP, A> {
     fn e_from_vertices(&self, va: VertexId, vb: VertexId) -> EdgeId {
         edge_from_vertices(self, va, vb)
     }
+
+    #[inline]
+    fn he_from_oppo_vertex(&self, fid: FaceId, vid: VertexId) -> HalfedgeId {
+        halfedge_from_oppo_vertex(self, fid, vid)
+    }
 }
 
 mod tests {
@@ -680,7 +691,7 @@ mod tests {
         use super::SurfaceMesh;
         use crate::mesh1::element::FaceId;
         use crate::mesh1::element::VertexId;
-        use crate::mesh1::element::{HalfedgeDataExt, HalfedgeNavigation};
+        use crate::mesh1::element::{HalfedgeDataExt, HalfedgeNavigationBase };
         use crate::mesh1::mesh::Mesh;
         use crate::mesh1::mesh::MeshCore;
         use itertools::Itertools;

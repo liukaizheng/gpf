@@ -6,7 +6,7 @@ use itertools::Itertools;
 use tinyvec::TinyVec;
 
 use crate::{
-    decode_index, geometry::{BBox, Surf, Surface}, is_positive, math::{cross, cross_in, dot, square_norm, sub_short}, mesh1::{EdgeHalfedge, EdgeId, ElementId, FaceId, HalfedgeId, Mesh, MeshCore, SurfaceMesh, VertexId}, point, point_3, triangle::{convex_2, convex_3}, twin_index, INVALID_IND
+    INVALID_IND, decode_index, geometry::{BBox, Surf, Surface}, is_positive, math::{cross, cross_in, dot, square_norm, sub_short}, mesh1::{EdgeHalfedge, EdgeId, ElementId, FaceId, HalfedgeDataExt, HalfedgeId, HalfedgeNavigation, HalfedgeNavigationBase, HalfedgeNavigationBaseMut, HalfedgeNavigationMut, Mesh, MeshCore, SurfaceMesh, VertexId}, point, point_3, triangle::{convex_2, convex_3}, twin_index
 };
 
 #[derive(Default, Clone)]
@@ -601,9 +601,14 @@ impl TetSet {
         alloc: A,
     ) -> usize {
         let [va, vb] = self.mesh.edge(split_eid).vertices().map(|v| v.id);
+        let n_extra_edges = self.mesh.edge(split_eid).halfedges().count();
+        self.mesh.halfedge_reserve(n_extra_edges * 5);
+        self.mesh.edge_reserve(n_extra_edges + 1);
+        self.mesh.face_reserve(n_extra_edges * 3);
+
         let new_eid = self.mesh.n_edges_capacity().into();
         let ve = self.mesh.split_edge(split_eid);
-        let mut mesh = NonNull::from_mut(self);
+        let mut mesh: NonNull<SurfaceMesh<_, _, _, _, std::alloc::Global>> = NonNull::from_mut(&mut self.mesh);
         let new_pt = {
             // update points
             let [pa, pb, pe] = [va, vb, ve].map(|vid| &mut self.mesh.vertex_data_mut(vid).property.pt);
@@ -619,70 +624,67 @@ impl TetSet {
             self.mesh.edge_data_mut(new_eid).property.square_len = old_edge_data.square_len;
         }
         let mut side_halfedges =
-            Vec::with_capacity_in(self.mesh.edge(split_eid).halfedges().count(), alloc);
-        side_halfedges.extend(mesh_ref.edge(split_eid).halfedges().map(|he| {
-            let ([h_ac, h_bc], vc) = if *he.to() == vb {
+            Vec::with_capacity_in(n_extra_edges , alloc);
+        side_halfedges.extend(self.mesh.edge(split_eid).halfedges().map(|he| {
+            let (h_ac, h_bc, vc) = if he.to().id == vb {
                 let he_next = he.next();
-                ([*he.prev().prev(), *he_next], *he_next.to())
+                (he.prev().prev(), he_next, he_next.to())
             } else {
                 let he_prev = he.prev();
-                ([*he.next().next(), *he.prev()], *he_prev.from())
+                (he.next().next(), he_prev, he_prev.from())
             };
-
-            let fid = *he.face();
-            let new_hid = unsafe { (*mesh_ptr).split_face(fid, ve, vc) };
-            self.face_tets.push(self.face_tets[fid]);
-            if vc.valid() {
-                self.square_edge_lengths
-                    .push(square_norm(&sub_short::<3, _>(
-                        point::<3>(&self.points, *vc),
-                        new_pt,
-                    )));
-            } else {
-                self.square_edge_lengths.push(0.0);
+            let face = he.face();
+            let mesh_mut = unsafe {mesh.as_mut()};
+            let new_he = mesh_mut.halfedge_mut(mesh_mut.split_face(face.id, ve, vc.id));
+            let new_face = new_he.face_mut();
+            new_face.data.property.tets = face.data.property.tets;
+            if vc.id.valid() {
+                new_he.edge_mut().data.property.square_len = square_norm(
+                    sub_short::<3, _>(vc.data.property.pt.as_slice(), new_pt.as_slice()).as_slice()
+                );
             }
-
-            debug_assert!(mesh_ref.he_to(new_hid) == vc);
-            debug_assert!(mesh_ref.he_from(new_hid) == ve);
-            [new_hid, mesh_ref.he_sibling(new_hid), h_ac, h_bc]
+            debug_assert_eq!(new_he.to().id, vc.id);
+            debug_assert_eq!(new_he.from().id, ve);
+            [new_he.id, new_he.sibling().id, h_ac.id, h_bc.id]
         }));
 
-        let ret = self.face_tets.len();
+        let ret = self.mesh.n_faces();
         let mut prev_tid = INVALID_IND;
-        let mut evaluation_map = HashMap::with_capacity_in(
-            self.tets[self.face_tets[*mesh_ref.edge(split_eid).halfedge().face()][0]]
-                .surface_evaluations
-                .len(),
-            alloc,
+
+        let mut evalutation_map = HashMap::with_capacity_in(
+            self.tets[self.mesh.edge(split_eid).halfedge().face().data.property.tets[0]].surface_evaluations.len(), alloc
         );
 
         for ([h_ec, h_ce, h_ac, h_bc], [h_ed, h_de, h_ad, h_bd]) in
             side_halfedges.into_iter().circular_tuple_windows()
         {
+
+            let mesh_mut = unsafe {mesh.as_mut()};
             let [
-                left_bottom_fid,
-                left_top_fid,
-                right_bottom_fid,
-                right_top_fid,
+                left_bottom_face,
+                left_top_face,
+                right_bottom_face,
+                right_top_face,
             ] = [
-                *mesh_ref.halfedge(h_ac).face(),
-                *mesh_ref.halfedge(h_bc).face(),
-                *mesh_ref.halfedge(h_ad).face(),
-                *mesh_ref.halfedge(h_bd).face(),
+                mesh_mut.halfedge_mut(h_ac).face_mut(),
+                mesh_mut.halfedge_mut(h_bc).face_mut(),
+                mesh_mut.halfedge_mut(h_ad).face_mut(),
+                mesh_mut.halfedge_mut(h_bd).face_mut(),
             ];
-            let [vc, vd] = [mesh_ref.he_to(h_ec), mesh_ref.he_to(h_ed)];
+
+            let [vc, vd] = [self.mesh.he_to(h_ec), self.mesh.he_to(h_ed)];
 
             // Optimized tetrahedron finding
             let old_tid = if prev_tid == INVALID_IND {
-                let left_tets = self.face_tets[left_bottom_fid];
-                let right_tets = self.face_tets[right_bottom_fid];
+                let left_tets = left_bottom_face.data.property.tets;
+                let right_tets = right_bottom_face.data.property.tets;
                 if left_tets[0] == right_tets[0] || left_tets[0] == right_tets[1] {
                     left_tets[0]
                 } else {
                     left_tets[1]
                 }
             } else {
-                let face_tets = self.face_tets[left_bottom_fid];
+                let face_tets = left_bottom_face.data.property.tets;
                 if face_tets[0] == prev_tid {
                     face_tets[1]
                 } else {
@@ -697,38 +699,37 @@ impl TetSet {
             // Get immutable reference first to avoid borrowing conflicts
             let [bottom_fid, top_fid] = tet.face_from_edge(split_eid, va);
 
-            let bottom_hid = mesh_ref.get_he_from_oppo_vertex(bottom_fid, va);
+            let bottom_hid = self.mesh.he_from_oppo_vertex(bottom_fid, va);
 
-            let h_cd = if mesh_ref.he_to(bottom_hid) != vd {
-                mesh_ref.he_twin(bottom_hid)
+            let h_cd = if self.mesh.he_to(bottom_hid) != vd {
+                self.mesh.halfedge(bottom_hid).twin().id
             } else {
                 bottom_hid
             };
 
-            debug_assert!(mesh_ref.he_from(h_cd) == mesh_ref.he_to(h_ec));
-            debug_assert!(mesh_ref.he_to(h_cd) == mesh_ref.he_to(h_ed));
+            debug_assert!(self.mesh.he_from(h_cd) == self.mesh.he_to(h_ec));
+            debug_assert!(self.mesh.he_to(h_cd) == self.mesh.he_to(h_ed));
 
-            let new_fid = unsafe { (*mesh_ptr).add_face_by_halfedges(&[h_ec, h_cd, h_de], false) };
-            self.face_tets.push([new_tid, old_tid]);
+            let new_fid = unsafe { mesh_mut.add_face_by_halfedges(&[h_ec, h_cd, h_de], false) };
+            mesh_mut.face_data_mut(new_fid).property.tets = [new_tid, old_tid];
 
             // set sibling halfedges - optimized by caching halfedge lookups
             {
                 let set_sibling = |prev_hid, next_hid, curr_hid| {
-                    debug_assert!(mesh_ref.he_edge(curr_hid) == mesh_ref.he_edge(prev_hid));
-                    debug_assert!(mesh_ref.he_edge(curr_hid) == mesh_ref.he_edge(next_hid));
-                    if mesh_ref.he_sibling(prev_hid) == next_hid {
-                        unsafe {
-                            (*mesh_ptr).insert_he_sibling(prev_hid, curr_hid);
-                        }
+                    let mut prev_he = mesh_mut.halfedge_mut(prev_hid);
+                    let mut next_he = mesh_mut.halfedge_mut(next_hid);
+                    let mut curr_he = mesh_mut.halfedge_mut(curr_hid);
+                    debug_assert!(curr_he.edge().id == prev_he.edge().id);
+                    debug_assert!(curr_he.edge().id == next_he.edge().id);
+                    if prev_he.data.sibling() == next_hid {
+                        prev_he.insert_sibling(&mut curr_he);
                     } else {
-                        debug_assert!(mesh_ref.he_sibling(next_hid) == prev_hid);
-                        unsafe {
-                            (*mesh_ptr).insert_he_sibling(next_hid, curr_hid);
-                        }
+                        debug_assert!(next_he.data.sibling() == prev_hid);
+                        next_he.insert_sibling(&mut curr_he);
                     }
                 };
 
-                let mut new_hid = mesh_ref.f_halfedge(new_fid);
+                let mut new_hid = self.mesh.f_halfedge(new_fid);
                 set_sibling(h_ec, h_ce, new_hid);
 
                 new_hid = mesh_ref.he_next(new_hid);

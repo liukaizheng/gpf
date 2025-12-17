@@ -5,9 +5,10 @@ use crate::{
     mesh1::{
         element::{
             Halfedge, HalfedgeData, HalfedgeId, HalfedgeMut, HalfedgeNavigation,
-            HalfedgeNavigationMut, Vertex, VertexMut,
+            HalfedgeNavigationBase, HalfedgeNavigationBaseMut, HalfedgeNavigationMut, Vertex,
+            VertexMut,
         },
-        mesh::{Mesh, MeshCore},
+        mesh::Mesh,
     },
 };
 

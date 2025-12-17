@@ -107,13 +107,13 @@ impl_halfedge_base_methods! (struct Halfedge, Vertex, Halfedge, Face, from, to, 
 impl_halfedge_base_methods! (struct HalfedgeMut, Vertex, Halfedge, Face, from, to, next, prev, face, as_ref, {});
 impl_halfedge_base_methods! (struct HalfedgeMut, VertexMut, HalfedgeMut, FaceMut, from_mut, to_mut, next_mut, prev_mut, face_mut, as_mut, { mut });
 
-pub trait HalfedgeNavigation<'m, M: Mesh> {
+pub trait HalfedgeNavigationBase<'m, M: Mesh> {
     fn edge(&self) -> Edge<'m, M>;
     fn sibling(&self) -> Halfedge<'m, M>;
     fn incoming_next(&self) -> Halfedge<'m, M>;
 }
 
-pub trait HalfedgeNavigationMut<'m, M: Mesh>: HalfedgeNavigation<'m, M> {
+pub trait HalfedgeNavigationBaseMut<'m, M: Mesh>: HalfedgeNavigationBase<'m, M> {
     fn edge_mut(&mut self) -> EdgeMut<'m, M>;
     fn sibling_mut(&mut self) -> HalfedgeMut<'m, M>;
     fn incoming_next_mut(&mut self) -> HalfedgeMut<'m, M>;
@@ -145,6 +145,7 @@ macro_rules! impl_halfedge_base_methods {
                     $halfedge::new(hid, self.mesh.$into_ref())
                 }
             }
+
         }
 
         impl<'m, M: Mesh<HalfedgeData: HalfedgeDataExt>> $halfedge_trait<'m, M> for $name<'m, M> {
@@ -175,9 +176,38 @@ macro_rules! impl_halfedge_base_methods {
     };
 }
 
-impl_halfedge_base_methods! (struct Halfedge -> HalfedgeNavigation, Halfedge, Edge, edge, sibling, incoming_next, as_ref, {});
-impl_halfedge_base_methods! (struct HalfedgeMut -> HalfedgeNavigation, Halfedge, Edge, edge, sibling, incoming_next, as_ref, {});
-impl_halfedge_base_methods! (struct HalfedgeMut -> HalfedgeNavigationMut, HalfedgeMut, EdgeMut, edge_mut, sibling_mut, incoming_next_mut, as_mut, {mut});
+impl_halfedge_base_methods! (struct Halfedge -> HalfedgeNavigationBase, Halfedge, Edge, edge, sibling, incoming_next, as_ref, {});
+impl_halfedge_base_methods! (struct HalfedgeMut -> HalfedgeNavigationBase, Halfedge, Edge, edge, sibling, incoming_next, as_ref, {});
+impl_halfedge_base_methods! (struct HalfedgeMut -> HalfedgeNavigationBaseMut, HalfedgeMut, EdgeMut, edge_mut, sibling_mut, incoming_next_mut, as_mut, {mut});
+
+pub trait HalfedgeNavigation<'m, M: Mesh>: HalfedgeNavigationBase<'m, M> {
+    fn twin(&self) -> Halfedge<'m, M>;
+}
+
+pub trait HalfedgeNavigationMut<'m, M: Mesh>: HalfedgeNavigationBaseMut<'m, M> {
+    fn twin_mut(&mut self) -> HalfedgeMut<'m, M>;
+}
+macro_rules! impl_halfedge_twin {
+    (struct $name:ident -> $halfedge_trait: ident, $halfedge: ident, $sibling: ident, $twin: ident, {$( $mut_:tt )?}) => {
+        impl<'m, M: Mesh<HalfedgeData: HalfedgeData>> $halfedge_trait<'m, M> for $name<'m, M> {
+            #[inline]
+            fn $twin(& $($mut_)? self) -> $halfedge<'m, M> {
+                let vb = self.data.vertex();
+                let mut sibling = self.$sibling();
+                loop {
+                    if sibling.data.vertex() != vb {
+                        return sibling;
+                    }
+                    sibling = sibling.$sibling();
+                }
+            }
+        }
+    }
+}
+
+impl_halfedge_twin! (struct Halfedge -> HalfedgeNavigation, Halfedge, sibling, twin, {});
+impl_halfedge_twin! (struct HalfedgeMut -> HalfedgeNavigation, Halfedge, sibling, twin, {});
+impl_halfedge_twin! (struct HalfedgeMut -> HalfedgeNavigationMut, HalfedgeMut, sibling_mut, twin_mut, {mut});
 
 impl<'m, M: Mesh<HalfedgeData: HalfedgeData>> HalfedgeMut<'m, M> {
     #[inline]

@@ -49,6 +49,11 @@ impl<T, E: ElementId, A: Allocator> ElementContainer<T, E, A> {
     pub fn range_mut(&mut self, start: usize, end: usize) -> impl Iterator<Item = &mut T> {
         self.data[start..end].iter_mut()
     }
+
+    #[inline]
+    pub fn reserve(&mut self, additional: usize) {
+        self.data.reserve(additional);
+    }
 }
 
 impl<T, E: ElementId, A: Allocator> Index<E> for ElementContainer<T, E, A> {
@@ -414,6 +419,10 @@ pub trait MeshCore: Sized {
     fn n_halfedges_capacity(&self) -> usize;
     fn n_faces_capacity(&self) -> usize;
 
+    fn vertex_reserve(&mut self, additional: usize);
+    fn halfedge_reserve(&mut self, additional: usize);
+    fn face_reserve(&mut self, additional: usize);
+
     fn vertex_data(&self, vid: VertexId) -> &Self::VertexData;
     fn halfedge_data(&self, hid: HalfedgeId) -> &Self::HalfedgeData;
     fn face_data(&self, fid: FaceId) -> &Self::FaceData;
@@ -576,6 +585,21 @@ impl<T: HasBaseMesh> MeshCore for T {
     #[inline]
     fn n_faces_capacity(&self) -> usize {
         self.base().faces.data.len()
+    }
+
+    #[inline]
+    fn vertex_reserve(&mut self, additional: usize) {
+        self.base_mut().vertices.reserve(additional);
+    }
+
+    #[inline]
+    fn halfedge_reserve(&mut self, additional: usize) {
+        self.base_mut().halfedges.reserve(additional);
+    }
+
+    #[inline]
+    fn face_reserve(&mut self, additional: usize) {
+        self.base_mut().faces.reserve(additional);
     }
 
     #[inline]
@@ -885,6 +909,7 @@ pub trait Mesh: MeshCore {
 
     fn n_edges(&self) -> usize;
     fn n_edges_capacity(&self) -> usize;
+    fn edge_reserve(&mut self, additional: usize);
 
     fn edge_datum(&'_ self) -> impl Iterator<Item = &Self::EdgeData>;
     fn edge_datum_mut(&'_ mut self) -> impl Iterator<Item = &mut Self::EdgeData>;
@@ -910,6 +935,7 @@ pub trait Mesh: MeshCore {
 
     fn he_sibling(&self, hid: HalfedgeId) -> HalfedgeId;
     fn he_incoming_next(&self, hid: HalfedgeId) -> HalfedgeId;
+    fn he_from_oppo_vertex(&self, fid: FaceId, vid: VertexId) -> HalfedgeId;
 
     fn e_halfedge(&self, eid: EdgeId) -> HalfedgeId;
     fn e_from_vertices(&self, va: VertexId, vb: VertexId) -> EdgeId;
@@ -934,4 +960,15 @@ where
         }
     }
     EdgeId::default()
+}
+
+pub(super) fn halfedge_from_oppo_vertex<M: Mesh>(mesh: &M, fid: FaceId, vid: VertexId) -> HalfedgeId
+where
+    M::VertexData: VertexData,
+    M::HalfedgeData: HalfedgeData,
+    M::FaceData: FaceData,
+{
+    let face = mesh.face(fid);
+    let he = face.halfedges().find(|he| he.to().id == vid).unwrap();
+    he.next().next().id
 }

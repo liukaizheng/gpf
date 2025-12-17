@@ -5,7 +5,7 @@ use crate::{
     mesh1::{
         element::{
             Edge, EdgeHalfedge, EdgeMut, Halfedge, HalfedgeMut, HalfedgeNavigation,
-            HalfedgeNavigationMut,
+            HalfedgeNavigationBase, HalfedgeNavigationBaseMut, HalfedgeNavigationMut,
         },
         mesh::{Mesh, MeshCore},
     },
