@@ -7,7 +7,7 @@ edition = "2024"
 
 [dependencies]
 # bumpalo = { version = "3", features = ["collections", "allocator_api"] }
-bumpalo = {git = "https://github.com/bluurryy/bumpalo.git", branch = "nightly-changes"}
+bumpalo = {git = "https://github.com/bluurryy/bumpalo.git", branch = "nightly-changes", features = ["allocator_api"] }
 hashbrown = { version = "0", default-features = false, features = [
     "ahash",
     "nightly",

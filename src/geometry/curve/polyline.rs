@@ -19,9 +19,9 @@ impl Curve for Polyline {
         Polyline {
             points: self
                 .points
-                .array_chunks::<3>()
+                .chunks(3)
                 .rev()
-                .flat_map(|&[x, y, z]| [x, y, z])
+                .flat_map(|p| [p[0], p[1], p[2]])
                 .collect_vec(),
         }
     }

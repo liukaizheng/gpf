@@ -624,6 +624,11 @@ impl<VP, HP, EP, FP, A: Allocator> Mesh for SurfaceMesh<VP, HP, EP, FP, A> {
     fn he_from_oppo_vertex(&self, fid: FaceId, vid: VertexId) -> HalfedgeId {
         halfedge_from_oppo_vertex(self, fid, vid)
     }
+
+    #[inline]
+    fn f_halfedge(&self, fid: FaceId) -> HalfedgeId {
+        self.face_data(fid).halfedge
+    }
 }
 
 mod tests {

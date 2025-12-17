@@ -66,7 +66,7 @@ impl Plane {
                 }
                 crv => {
                     bbox.merge(
-                        &BBox::from_iter(crv.discrete(alloc).array_chunks::<3>())
+                        &BBox::from_iter(crv.discrete(alloc).chunks(3))
                             .scaled(BOX_SCALE_FACTOR),
                     );
                 }

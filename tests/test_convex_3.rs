@@ -1,6 +1,6 @@
 #![feature(allocator_api)]
 use gpf::triangle::convex_3;
-use rand::{distributions::Uniform, rngs::SmallRng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, distr::Uniform, rngs::SmallRng};
 
 fn write_obj(name: &str, points: &[f64], triangles: &[usize]) {
     use std::fs::File;
@@ -47,7 +47,7 @@ fn test_convex_3() {
 #[test]
 fn test_convex_3_rng() {
     let rng = SmallRng::seed_from_u64(5489);
-    let uniform = Uniform::new_inclusive(-1.0, 1.0);
+    let uniform = Uniform::new_inclusive(-1.0, 1.0).unwrap();
     let n_points = 1000;
     let points = Vec::from_iter(rng.sample_iter(uniform).take(n_points * 3));
 

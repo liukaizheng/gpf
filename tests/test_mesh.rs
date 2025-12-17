@@ -207,7 +207,6 @@ fn build_nomanifold_mesh() {
 
 #[test]
 fn split_edge_and_face() {
-    use bumpalo::collections::Vec;
     let bump = bumpalo::Bump::new();
     let mut mesh = SurfaceMesh::new(
         vec![vec![0, 1, 2], vec![0, 1, 3], vec![0, 1, 4], vec![0, 1, 5]],
@@ -219,9 +218,9 @@ fn split_edge_and_face() {
         assert!(validate_mesh_connectivity(&mesh).is_ok());
         for f in mesh.faces() {
             let fid = *f;
-            let f_verts = Vec::from_iter_in(
-                mesh.face(fid).halfedges().map(|hid| mesh.he_from(*hid)),
-                &bump,
+            let mut f_verts = Vec::new_in(&bump);
+            f_verts.extend(
+                mesh.face(fid).halfedges().map(|hid| mesh.he_from(*hid))
             );
             assert_eq!(f_verts.len(), 4);
         }
@@ -240,7 +239,9 @@ fn split_edge_and_face() {
         }
         assert_eq!(n_new_halfedges, 4);
     }
-    let all_edges = Vec::from_iter_in(mesh.edges().map(|e| *e), &bump);
+
+    let mut all_edges = Vec::new_in(&bump);
+    all_edges.extend(mesh.edges().map(|e| *e));
     for eid in all_edges {
         mesh.split_edge(eid, &bump);
         assert!(validate_mesh_connectivity(&mesh).is_ok());

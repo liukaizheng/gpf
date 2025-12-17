@@ -1,4 +1,3 @@
-#![feature(array_chunks)]
 #![feature(allocator_api)]
 use std::path::Path;
 
@@ -42,7 +41,7 @@ fn test1() {
     let sq_tol = 1e-10;
     let (points, triangles) = read_obj("data/mesh/shell_22.obj");
     let bump = Bump::new();
-    let mesh = ManifoldMesh::new(triangles.array_chunks::<3>(), &bump);
+    let mesh = ManifoldMesh::new(triangles.chunks(3), &bump);
 
     let start_pt = [0.955037, -0.5, -0.204065];
     let end_pt = [0.563725, -0.5, -0.5];

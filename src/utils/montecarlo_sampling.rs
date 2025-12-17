@@ -1,6 +1,7 @@
 use std::alloc::Allocator;
 
-use rand::{Rng, SeedableRng, distr::Uniform, rngs::SmallRng};
+use rand::{Rng, SeedableRng, rngs::SmallRng};
+use rand::distr::Uniform;
 
 use crate::{
     math::{cross, norm, sub_short},

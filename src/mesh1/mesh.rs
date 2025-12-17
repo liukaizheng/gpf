@@ -939,6 +939,8 @@ pub trait Mesh: MeshCore {
 
     fn e_halfedge(&self, eid: EdgeId) -> HalfedgeId;
     fn e_from_vertices(&self, va: VertexId, vb: VertexId) -> EdgeId;
+
+    fn f_halfedge(&self, fid: FaceId) -> HalfedgeId;
 }
 
 pub(super) fn edge_from_vertices<M: Mesh>(mesh: &M, va: VertexId, vb: VertexId) -> EdgeId
@@ -970,5 +972,5 @@ where
 {
     let face = mesh.face(fid);
     let he = face.halfedges().find(|he| he.to().id == vid).unwrap();
-    he.next().next().id
+    he.prev().id
 }

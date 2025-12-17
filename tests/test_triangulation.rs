@@ -3,7 +3,8 @@
 use bumpalo::Bump;
 use gpf::triangle::{tetrahedralize, triangulate_points, triangulate1};
 use itertools::Itertools;
-use rand::{Rng, SeedableRng, distributions::Uniform, rngs::SmallRng};
+use rand::distr::Uniform;
+use rand::{Rng, SeedableRng, rngs::SmallRng};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::time::Instant;
@@ -30,7 +31,7 @@ fn write_obj(points: &[f64], triangles: &[usize], name: &str) {
 #[test]
 fn test_triangulate() {
     let rng = SmallRng::seed_from_u64(5489);
-    let uniform = Uniform::new_inclusive(-1.0, 1.0);
+    let uniform = Uniform::new_inclusive(-1.0, 1.0).unwrap();
     let n_points = 1_0000;
     let points: Vec<f64> = Vec::from_iter(rng.sample_iter(uniform).take(n_points * 2));
     let indices = Vec::from_iter(0..n_points);
@@ -86,7 +87,7 @@ fn read_points(name: &str) -> Vec<f64> {
 #[test]
 fn test_tetrahedralize() {
     let rng = SmallRng::seed_from_u64(5489);
-    let uniform = Uniform::new_inclusive(-1.0, 1.0);
+    let uniform = Uniform::new_inclusive(-1.0, 1.0).unwrap();
     let n_points = 1_0000;
     // let points: Vec<'_, f64> = read_points("123.xyz", &bump);
     let points = Vec::from_iter(rng.sample_iter(uniform).take(n_points * 3));
@@ -100,7 +101,7 @@ fn test_simple() {
 
     let bump = Bump::new();
     let rng = SmallRng::seed_from_u64(5489);
-    let uniform = Uniform::new_inclusive(-1.0, 1.0);
+    let uniform = Uniform::new_inclusive(-1.0, 1.0).unwrap();
     let n_points = 20_0000;
     let points = Vec::from_iter(rng.sample_iter(uniform).take(n_points * 2));
 
@@ -162,7 +163,7 @@ fn test_cdt() {
 fn test_cdt_complex() {
     let bump = Bump::new();
     let rng = SmallRng::seed_from_u64(5489);
-    let uniform = Uniform::new_inclusive(-1.0, 1.0);
+    let uniform = Uniform::new_inclusive(-1.0, 1.0).unwrap();
     let n_points = 100;
     let points = Vec::from_iter(rng.sample_iter(uniform).take(n_points * 2));
     let mut segments = Vec::new();

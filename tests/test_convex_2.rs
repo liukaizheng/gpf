@@ -1,7 +1,7 @@
 #![feature(allocator_api)]
 use gpf::triangle::convex_2;
 use itertools::Itertools;
-use rand::{distributions::Uniform, rngs::SmallRng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, distr::Uniform, rngs::SmallRng};
 use std::io::Write; // Add this line to import the Write trait
 
 fn write_obj(name: &str, points: &[f64], hull: &[usize]) {
@@ -17,7 +17,7 @@ fn write_obj(name: &str, points: &[f64], hull: &[usize]) {
 #[test]
 fn test_convex_2() {
     let rng = SmallRng::seed_from_u64(5489);
-    let uniform = Uniform::new_inclusive(-1.0, 1.0);
+    let uniform = Uniform::new_inclusive(-1.0, 1.0).unwrap();
     let n_points = 100_0000;
     let points = Vec::from_iter(rng.sample_iter(uniform).take(n_points * 2));
 
@@ -26,7 +26,7 @@ fn test_convex_2() {
 }
 
 #[test]
-fn test_convex_colinear() {
+fn test_convex_collinear() {
     let n_points = 11;
     let points: Vec<_> = (0..n_points).flat_map(|i| [i as f64, 0.0]).collect();
 
