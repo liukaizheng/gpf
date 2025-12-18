@@ -972,7 +972,7 @@ where
     M::FaceData: FaceData,
 {
     let face = mesh.face(fid);
-    let he = face.halfedges().find(|he| he.to().id == vid).unwrap();
+    let he = face.halfedges().find(|he| he.data.vertex() == vid).unwrap();
     he.prev().id
 }
 

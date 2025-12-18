@@ -177,7 +177,7 @@ impl TetSet {
             let id = *vertex.id;
             let pt = &mut vertex.data.property.pt;
             pt[0] = if id < 4 { bbox.min[0] } else { bbox.max[0] };
-            pt[1] = if ((id % 4) << 1) == 0 {
+            pt[1] = if ((id % 4) >> 1) == 0 {
                 bbox.min[1]
             } else {
                 bbox.max[1]
@@ -200,7 +200,6 @@ impl TetSet {
             })
             .collect::<Vec<_>>();
 
-        let face_tets = vec![[INVALID_IND; 2]; tet_mesh.n_faces()];
         let mut infinite_edges = [EdgeId::default(); 8];
         unsafe {
             mesh_ptr.as_mut().edges_mut().for_each(|edge| {
@@ -265,8 +264,8 @@ impl TetSet {
             let mut tet_halfedges_map = HashMap::<usize, [HalfedgeId; 2]>::new();
             for he in edge.halfedges() {
                 let hid = he.id;
-                let fid = he.face().id;
-                for tid in face_tets[*fid] {
+                let face = he.face();
+                for tid in face.data.property.tets {
                     match tet_halfedges_map.entry(tid) {
                         hashbrown::hash_map::Entry::Occupied(mut entry) => {
                             entry.get_mut()[1] = hid;
@@ -283,7 +282,7 @@ impl TetSet {
             let mut sorted_halfedges = Vec::with_capacity(tet_halfedges_map.len());
             sorted_halfedges.push(first_hid);
             let mut curr_hid = first_hid;
-            let mut curr_tid = face_tets[*first_he.face().id][0];
+            let mut curr_tid = first_he.face().data.property.tets[0];
             loop {
                 curr_hid = {
                     let halfedges = tet_halfedges_map.get(&curr_tid).unwrap();
@@ -298,7 +297,7 @@ impl TetSet {
                 }
                 sorted_halfedges.push(curr_hid);
 
-                let candidates = face_tets[*tet_mesh.he_face(curr_hid)];
+                let candidates = tet_mesh.halfedge(curr_hid).face().data.property.tets;
                 curr_tid = if candidates[0] == curr_tid {
                     candidates[1]
                 } else {
@@ -385,11 +384,12 @@ impl TetSet {
         srf_datum: &[SurfaceData],
         alloc: A,
     ) -> usize {
-        let [va, vb] = self.mesh.edge(split_eid).vertices().map(|v| v.id);
         let n_extra_edges = self.mesh.edge(split_eid).halfedges().count();
-        self.mesh.halfedge_reserve(n_extra_edges * 5);
+        self.mesh.halfedge_reserve(n_extra_edges * 6);
         self.mesh.edge_reserve(n_extra_edges + 1);
         self.mesh.face_reserve(n_extra_edges * 3);
+
+        let [va, vb] = self.mesh.edge(split_eid).vertices().map(|v| v.id);
 
         let new_eid = self.mesh.n_edges_capacity().into();
         let ve = self.mesh.split_edge(split_eid);
@@ -417,26 +417,30 @@ impl TetSet {
         side_halfedges.extend(self.mesh.edge(split_eid).halfedges().map(|he| {
             let (h_ac, h_bc, vc) = if he.to().id == vb {
                 let he_next = he.next();
-                let vc = he_next.to();
+                let vc = he_next.data.vertex;
                 (he.prev().prev().id, he_next.id, vc)
             } else {
                 let he_prev = he.prev();
-                let vc = he_prev.from();
+                let vc = he_prev.prev().data.vertex;
                 (he.next().next().id, he_prev.id, vc)
             };
             let face = he.face();
             let mesh_mut = unsafe { mesh.as_mut() };
-            let new_hid = mesh_mut.split_face(face.id, ve, vc.id);
+            let new_hid = mesh_mut.split_face(face.id, ve, vc);
             let mut new_he = mesh_mut.halfedge_mut(new_hid);
             let new_face = new_he.face_mut();
             new_face.data.property.tets = face.data.property.tets;
-            if vc.id.valid() {
+            if vc.valid() {
                 new_he.edge_mut().data.property.square_len = square_norm(
-                    sub_short::<3, _>(vc.data.property.pt.as_slice(), new_pt.as_slice()).as_slice(),
+                    sub_short::<3, _>(
+                        self.mesh.vertex_data(vc).property.pt.as_slice(),
+                        new_pt.as_slice(),
+                    )
+                    .as_slice(),
                 );
             }
-            debug_assert_eq!(new_he.to().id, vc.id);
-            debug_assert_eq!(new_he.from().id, ve);
+            debug_assert_eq!(new_he.data.vertex, vc);
+            debug_assert_eq!(new_he.prev().data.vertex, ve);
             [new_he.id, new_he.sibling().id, h_ac, h_bc]
         }));
 
@@ -535,7 +539,7 @@ impl TetSet {
                     .face(top_fid)
                     .halfedges()
                     .find_map(|he| {
-                        if he.next().to().id == vb {
+                        if he.next().data.vertex == vb {
                             Some(he.id)
                         } else {
                             None
@@ -637,6 +641,57 @@ impl TetSet {
             };
 
             self.tets.push(new_tet);
+            #[cfg(debug_assertions)]
+            {
+                let check_tet = |tid: usize| {
+                    let tet = &self.tets[tid];
+                    for ((va, vb), eid) in
+                        tet.vertices.into_iter().tuple_combinations().zip(tet.edges)
+                    {
+                        let [vc, vd] = self.mesh.e_vertices(eid);
+                        debug_assert!((va == vc && vb == vd) || (va == vd && vb == vc));
+                        if va.valid() && vb.valid() {
+                            let pa = self.mesh.vertex_data(va).property.pt;
+                            let pb = self.mesh.vertex_data(vb).property.pt;
+                            let sq_len = square_norm(&sub_short::<3, _>(&pa, &pb));
+                            debug_assert!((sq_len - self.mesh.edge_data(eid).property.square_len).abs() < 1e-12);
+                        }
+
+                        let halfedges = Vec::from_iter(self.mesh.edge(eid).halfedges().map(|he| he.id));
+                        for (&h1, &h2) in halfedges.iter().circular_tuple_windows() {
+                            let face1 = self.mesh.halfedge(h1).face();
+                            let face2 = self.mesh.halfedge(h2).face();
+                            let [t1, t2] = face1.data.property.tets;
+                            let [t3, t4] = face2.data.property.tets;
+                            assert!(t1 == t3 || t1 == t4 || t2 == t3 || t2 == t4);
+                        }
+                    }
+
+                    if tet.vertices[3].valid() {
+                        let points = tet.vertices.map(|vid| self.mesh.vertex_data(vid).property.pt);
+                        for eval in &tet.surface_evaluations {
+                            for i in 0..4 {
+                                let e1 = eval.evaluation[i];
+                                let e2 = srf_datum[eval.sid].surf.eval(&points[i]);
+                                let length = square_norm(&sub_short::<4, _>(&e1, &e2));
+                                debug_assert!(length < 1e-12);
+                            }
+                        }
+                    }
+
+                    let mut tet_vertices = tet.vertices.map(|vid| *vid);
+                    tet_vertices.sort();
+                    for (fid, vd) in tet.faces.into_iter().zip(tet.vertices) {
+                        let he = self.mesh.face(fid).halfedge();
+                        let mut vs0 = [*he.prev().data.vertex, *he.data.vertex, *he.next().data.vertex, *vd];
+                        vs0.sort();
+                        debug_assert!(vs0 == tet_vertices);
+                    }
+                };
+
+                check_tet(old_tid);
+                check_tet(new_tid);
+            }
         }
 
         ret
@@ -669,6 +724,10 @@ impl TetSet {
                 .all(|eid| self.mesh.edge_data(eid).property.square_len < sq_eps)
         {
             return false;
+        }
+        if tid > 1000_0000 {
+            let edge_lengths = Vec::from_iter(tet.edges.into_iter().map(|eid| self.mesh.edge_data(eid).property.square_len.sqrt()));
+            println!("{:?}", edge_lengths);
         }
 
         let tet_points = tet

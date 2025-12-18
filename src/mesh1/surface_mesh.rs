@@ -343,28 +343,20 @@ impl<
         let new_eid = self.new_edges(1);
         let new_fid = self.new_faces(1);
 
-        let mesh_ptr = self as *mut Self;
+        let mut mesh = NonNull::from_ref(self);
+        let mut face = unsafe { (*mesh.as_mut()).face_mut(fid) };
         let mut left_last_he = unsafe {
-            (*mesh_ptr)
-                .vertex_mut(va)
-                .incoming_halfedges_mut()
-                .find(|he| he.data.face == fid)
-                .unwrap_unchecked()
+            face.halfedges_mut().find(|he| he.data.vertex == va).unwrap_unchecked()
         };
-
         let mut right_last_he = unsafe {
-            (*mesh_ptr)
-                .vertex_mut(vb)
-                .incoming_halfedges_mut()
-                .find(|he| he.data.face == fid)
-                .unwrap_unchecked()
+            face.halfedges_mut().find(|he| he.data.vertex == vb).unwrap_unchecked()
         };
 
         let mut left_first_he = right_last_he.next_mut();
         let mut right_first_he = left_last_he.next_mut();
 
-        let mut first_he = unsafe { (*mesh_ptr).halfedge_mut(new_start_hid) };
-        let mut second_he = unsafe { (*mesh_ptr).halfedge_mut((*new_start_hid + 1).into()) };
+        let mut first_he = unsafe { mesh.as_mut().halfedge_mut(new_start_hid) };
+        let mut second_he = unsafe { mesh.as_mut().halfedge_mut((*new_start_hid + 1).into()) };
         first_he.data.set_sibling(second_he.id);
         second_he.data.set_sibling(first_he.id);
 
@@ -383,8 +375,12 @@ impl<
 
         self.set_e_halfedge(new_eid, second_he.id);
 
-        left_last_he.insert_incoming_next(&mut first_he);
-        right_last_he.insert_incoming_next(&mut second_he);
+        if left_last_he.data.vertex.valid() {
+            left_last_he.insert_incoming_next(&mut first_he);
+        }
+        if right_last_he.data.vertex.valid() {
+            right_last_he.insert_incoming_next(&mut second_he);
+        }
 
         {
             let mut curr_he = left_first_he;
@@ -397,7 +393,7 @@ impl<
             }
         }
 
-        self.face_mut(fid).data.set_halfedge(first_he.id);
+        face.data.set_halfedge(first_he.id);
         self.face_mut(new_fid).data.set_halfedge(second_he.id);
         second_he.id
     }
@@ -425,7 +421,9 @@ impl<
                 if build_siblings {
                     old_he.insert_sibling(&mut new_he);
                 }
-                old_he.insert_incoming_next(&mut new_he);
+                if old_he.data.vertex.valid() {
+                    old_he.insert_incoming_next(&mut new_he);
+                }
                 if new_he.id != first_new_hid {
                     prev_new_he.unwrap_unchecked().connect(&mut new_he);
                 }
