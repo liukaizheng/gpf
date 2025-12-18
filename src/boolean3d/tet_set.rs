@@ -88,17 +88,17 @@ impl Tet {
 }
 
 #[derive(Default, Clone)]
-struct VertexData {
+pub(crate) struct VertexData {
     pt: [f64; 3],
 }
 
 #[derive(Default, Clone)]
-struct EdgeData {
+pub(crate) struct EdgeData {
     square_len: f64,
 }
 
 #[derive(Default, Clone)]
-struct FaceData {
+pub(crate) struct FaceData {
     tets: [usize; 2],
 }
 
@@ -114,7 +114,7 @@ pub(crate) fn tet_face_reversed(face_tets: &[usize; 2], tid: usize) -> bool {
 }
 
 impl TetSet {
-    pub(crate) fn form_bbox(bbox: BBox, surfaces: &[Surf]) -> TetSet {
+    pub(crate) fn from_bbox(bbox: BBox, surfaces: &[Surf]) -> TetSet {
         const TETS: [[usize; 4]; 18] = [
             [0, 1, 7, 3],
             [7, 0, 5, 1],
@@ -172,6 +172,7 @@ impl TetSet {
                 tet_face_vertices,
                 std::alloc::Global,
             );
+        let mut mesh_ptr = NonNull::from_ref(&tet_mesh);
         tet_mesh.vertices_mut().for_each(|vertex| {
             let id = *vertex.id;
             let pt = &mut vertex.data.property.pt;
@@ -201,23 +202,25 @@ impl TetSet {
 
         let face_tets = vec![[INVALID_IND; 2]; tet_mesh.n_faces()];
         let mut infinite_edges = [EdgeId::default(); 8];
-        tet_mesh.edges_mut().for_each(|edge| {
-            let eid = edge.id;
-            let [va, vb] = edge.vertices();
-            match [va.id.valid(), vb.id.valid()] {
-                [_, false] => {
-                    infinite_edges[*va.id] = eid;
+        unsafe {
+            mesh_ptr.as_mut().edges_mut().for_each(|edge| {
+                let eid = edge.id;
+                let [va, vb] = tet_mesh.e_vertices(eid);
+                match [va.valid(), vb.valid()] {
+                    [_, false] => {
+                        infinite_edges[*va] = eid;
+                    }
+                    [false, _] => {
+                        infinite_edges[*vb] = eid;
+                    }
+                    _ => {
+                        let pa = &tet_mesh.vertex(va).data.property.pt;
+                        let pb = &tet_mesh.vertex(vb).data.property.pt;
+                        edge.data.property.square_len = square_norm(&sub_short::<3, _>(pa, pb));
+                    }
                 }
-                [false, _] => {
-                    infinite_edges[*vb.id] = eid;
-                }
-                _ => {
-                    let pa = &va.data.property.pt;
-                    let pb = &vb.data.property.pt;
-                    edge.data.property.square_len = square_norm(&sub_short::<3, _>(pa, pb));
-                }
-            }
-        });
+            });
+        }
         let tets = tet_faces
             .into_iter()
             .enumerate()
@@ -258,12 +261,6 @@ impl TetSet {
             })
             .collect_vec();
 
-        let mesh_ptr = unsafe {
-            std::mem::transmute::<
-                _,
-                *mut SurfaceMesh<VertexData, (), EdgeData, FaceData, std::alloc::Global>,
-            >(&mut tet_mesh)
-        };
         for edge in tet_mesh.edges() {
             let mut tet_halfedges_map = HashMap::<usize, [HalfedgeId; 2]>::new();
             for he in edge.halfedges() {
@@ -311,7 +308,7 @@ impl TetSet {
 
             debug_assert!(sorted_halfedges.len() == tet_halfedges_map.len());
             for (h1, h2) in sorted_halfedges.into_iter().circular_tuple_windows() {
-                unsafe { (*mesh_ptr).set_he_sibling(h1, h2) };
+                unsafe { mesh_ptr.as_mut().set_he_sibling(h1, h2) };
             }
         }
 

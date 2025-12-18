@@ -51,7 +51,7 @@ where
             sub_bboxes,
         })
         .collect_vec();
-    let mut tet_set = TetSet::form_bbox(
+    let mut tet_set = TetSet::from_bbox(
         BBox::from_boxes(surface_datum.iter().map(|data| &data.bbox)),
         &surfaces,
     );

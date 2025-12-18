@@ -7,7 +7,7 @@ use itertools::Itertools;
 use crate::mesh1::element::{
     Edge, EdgeData, EdgeHalfedge, EdgeMut, FaceData, HalfedgeData, HalfedgeMut,
 };
-use crate::mesh1::halfedge_from_oppo_vertex;
+use crate::mesh1::{edge_vertices, halfedge_from_oppo_vertex};
 
 use super::element::{EdgeId, ElementId, FaceId, HalfedgeDataExt, HalfedgeId, VertexId};
 
@@ -135,13 +135,17 @@ impl<
                     mesh.face_data_mut(fid).halfedge = hid;
                     first_hid = hid;
                 } else {
-                    mesh.set_v_halfedge(prev_vid, hid);
+                    if prev_vid.valid() {
+                        mesh.set_v_halfedge(prev_vid, hid);
+                    }
                     mesh.connect_halfedges(prev_hid, hid);
                 }
                 prev_vid = vid;
                 prev_hid = hid;
             }
-            mesh.set_v_halfedge(prev_vid, first_hid);
+            if prev_vid.valid() {
+                mesh.set_v_halfedge(prev_vid, first_hid);
+            }
             mesh.connect_halfedges(prev_hid, first_hid);
         }
         mesh.base_mut().recount_n_vertices();
@@ -618,6 +622,11 @@ impl<VP, HP, EP, FP, A: Allocator> Mesh for SurfaceMesh<VP, HP, EP, FP, A> {
     #[inline]
     fn e_from_vertices(&self, va: VertexId, vb: VertexId) -> EdgeId {
         edge_from_vertices(self, va, vb)
+    }
+
+    #[inline]
+    fn e_vertices(&self, eid: EdgeId) -> [VertexId; 2] {
+        edge_vertices(self, eid)
     }
 
     #[inline]
