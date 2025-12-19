@@ -933,6 +933,7 @@ pub trait Mesh: MeshCore {
 
     fn he_edge(&self, hid: HalfedgeId) -> EdgeId;
 
+    fn he_twin(&self, hid: HalfedgeId) -> HalfedgeId;
     fn he_sibling(&self, hid: HalfedgeId) -> HalfedgeId;
     fn he_incoming_next(&self, hid: HalfedgeId) -> HalfedgeId;
     fn he_from_oppo_vertex(&self, fid: FaceId, vid: VertexId) -> HalfedgeId;

@@ -1,4 +1,4 @@
-use std::alloc::Allocator;
+use std::{alloc::Allocator, collections::VecDeque};
 
 use hashbrown::HashMap;
 use itertools::Itertools;
@@ -14,14 +14,10 @@ use super::{
 pub struct ManifoldMesh<VP, HP, EP, FP, A: Allocator = std::alloc::Global> {
     base: BaseMesh<BaseVertexData<VP>, BaseHalfedgeData<HP>, BaseFaceData<FP>, A>,
     edges: ElementContainer<EP, EdgeId, A>,
+    edges_cache: VecDeque<EdgeId, A>,
 }
 
 impl<VP, HP, EP, FP, A: Allocator> ManifoldMesh<VP, HP, EP, FP, A> {
-    #[inline(always)]
-    pub fn he_twin(&self, hid: HalfedgeId) -> HalfedgeId {
-        (hid.0 ^ 1).into()
-    }
-
     #[inline(always)]
     pub fn he_is_boundary(&self, hid: HalfedgeId) -> bool {
         !self.he_face(hid).valid()
@@ -55,6 +51,7 @@ impl<
         let mut mesh = Self {
             base,
             edges: ElementContainer::new_in(alloc),
+            edges_cache: VecDeque::new_in(alloc),
         };
 
         let mut edge_map = HashMap::<(usize, usize), HalfedgeId>::new();
@@ -173,6 +170,23 @@ impl<
             "halfedges capacity must stay even for implicit twins"
         );
 
+        if let Some(eid) = self.edges_cache.pop_back() {
+            debug_assert!(eid.valid());
+            debug_assert!(!self.e_is_valid(eid), "cached edges must be invalid");
+
+            let hid = HalfedgeId::from(eid.0 << 1);
+            debug_assert!(hid.valid());
+            debug_assert!(hid.0 & 1 == 0, "edges must start at even halfedge ids");
+
+            let twin_hid = self.he_twin(hid);
+            *self.halfedge_data_mut(hid) = BaseHalfedgeData::default();
+            *self.halfedge_data_mut(twin_hid) = BaseHalfedgeData::default();
+            self.edges[eid] = EP::default();
+
+            self.base.n_halfedges = self.base.n_halfedges.saturating_add(2);
+            return hid;
+        }
+
         let hid = self.base.new_halfedges(2);
         debug_assert!(hid.valid());
         debug_assert!(hid.0 & 1 == 0, "new edges must start at even halfedge ids");
@@ -197,7 +211,7 @@ impl<
 
     #[inline]
     pub fn remove_edge(&mut self, eid: EdgeId) {
-        if !eid.valid() {
+        if !eid.valid() || !self.e_is_valid(eid) {
             return;
         }
         let hid = self.e_halfedge(eid);
@@ -206,6 +220,7 @@ impl<
         self.halfedge_data_mut(hid).vertex = VertexId::default();
         self.halfedge_data_mut(twin_hid).vertex = VertexId::default();
         self.edges[eid] = EP::default();
+        self.edges_cache.push_back(eid);
 
         self.base.n_halfedges = self.base.n_halfedges.saturating_sub(2);
     }
@@ -532,7 +547,11 @@ impl<VP, HP, EP, FP, A: Allocator> ManifoldMesh<VP, HP, EP, FP, A> {
     }
 
     #[inline]
-    pub fn edge_data_range_mut(&mut self, eid: EdgeId, count: usize) -> impl Iterator<Item = &mut EP> {
+    pub fn edge_data_range_mut(
+        &mut self,
+        eid: EdgeId,
+        count: usize,
+    ) -> impl Iterator<Item = &mut EP> {
         let end = (*eid + count).min(self.edges.len());
         self.edges.range_mut(*eid, end)
     }
@@ -599,7 +618,9 @@ impl<VP, HP, EP, FP, A: Allocator> Mesh for ManifoldMesh<VP, HP, EP, FP, A> {
         let mesh_ptr = self as *mut Self;
         self.edge_data_range_mut(eid, count)
             .zip(*eid..*eid + count)
-            .map(move |(data, eid)| unsafe { EdgeMut::new_with_data(eid.into(), data, &mut *mesh_ptr) })
+            .map(move |(data, eid)| unsafe {
+                EdgeMut::new_with_data(eid.into(), data, &mut *mesh_ptr)
+            })
     }
 
     #[inline]
@@ -652,6 +673,11 @@ impl<VP, HP, EP, FP, A: Allocator> Mesh for ManifoldMesh<VP, HP, EP, FP, A> {
         self.he_twin(hid)
     }
 
+    #[inline(always)]
+    fn he_twin(&self, hid: HalfedgeId) -> HalfedgeId {
+        (hid.0 ^ 1).into()
+    }
+
     #[inline]
     fn he_incoming_next(&self, hid: HalfedgeId) -> HalfedgeId {
         self.he_prev(self.he_twin(hid))
@@ -692,7 +718,8 @@ mod tests {
 
     #[test]
     fn test_single_triangle_boundary_loop() {
-        let mesh = ManifoldMesh::<(), (), (), (), _>::new_in(vec![vec![0, 1, 2]], std::alloc::Global);
+        let mesh =
+            ManifoldMesh::<(), (), (), (), _>::new_in(vec![vec![0, 1, 2]], std::alloc::Global);
 
         assert_eq!(mesh.n_vertices(), 3);
         assert_eq!(mesh.n_faces(), 1);
@@ -732,12 +759,7 @@ mod tests {
     #[test]
     fn test_tetrahedron_closed() {
         let mesh = ManifoldMesh::<(), (), (), (), _>::new_in(
-            vec![
-                vec![0, 1, 2],
-                vec![0, 2, 3],
-                vec![0, 3, 1],
-                vec![1, 3, 2],
-            ],
+            vec![vec![0, 1, 2], vec![0, 2, 3], vec![0, 3, 1], vec![1, 3, 2]],
             std::alloc::Global,
         );
 
@@ -755,5 +777,26 @@ mod tests {
         for eid in 0..mesh.n_edges_capacity() {
             assert_eq!(mesh.edge(eid.into()).halfedges().count(), 2);
         }
+    }
+
+    #[test]
+    fn test_edge_reuse_cache() {
+        let mut mesh = ManifoldMesh::<(), (), (), (), _>::new_in(
+            Vec::<Vec<usize>>::new(),
+            std::alloc::Global,
+        );
+
+        let hid0 = mesh.new_edge();
+        let eid0 = mesh.he_edge(hid0);
+
+        mesh.set_he_vertex(hid0, VertexId::from(0));
+        mesh.set_he_vertex(mesh.he_twin(hid0), VertexId::from(1));
+
+        let halfedges_capacity = mesh.n_halfedges_capacity();
+        mesh.remove_edge(eid0);
+
+        let hid1 = mesh.new_edge();
+        assert_eq!(hid1, hid0);
+        assert_eq!(mesh.n_halfedges_capacity(), halfedges_capacity);
     }
 }

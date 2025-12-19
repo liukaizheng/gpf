@@ -12,8 +12,7 @@ use crate::{
     math::{cross, cross_in, dot, square_norm, sub_short},
     mesh1::{
         EdgeHalfedge, EdgeId, ElementId, FaceId, FaceMut, HalfedgeDataExt, HalfedgeId,
-        HalfedgeNavigation, HalfedgeNavigationBase, HalfedgeNavigationBaseMut, Mesh, MeshCore,
-        SurfaceMesh, VertexId,
+        HalfedgeNavigation, HalfedgeNavigationMut, Mesh, MeshCore, SurfaceMesh, VertexId,
     },
     point,
     triangle::{convex_2, convex_3},
@@ -654,10 +653,14 @@ impl TetSet {
                             let pa = self.mesh.vertex_data(va).property.pt;
                             let pb = self.mesh.vertex_data(vb).property.pt;
                             let sq_len = square_norm(&sub_short::<3, _>(&pa, &pb));
-                            debug_assert!((sq_len - self.mesh.edge_data(eid).property.square_len).abs() < 1e-12);
+                            debug_assert!(
+                                (sq_len - self.mesh.edge_data(eid).property.square_len).abs()
+                                    < 1e-12
+                            );
                         }
 
-                        let halfedges = Vec::from_iter(self.mesh.edge(eid).halfedges().map(|he| he.id));
+                        let halfedges =
+                            Vec::from_iter(self.mesh.edge(eid).halfedges().map(|he| he.id));
                         for (&h1, &h2) in halfedges.iter().circular_tuple_windows() {
                             let face1 = self.mesh.halfedge(h1).face();
                             let face2 = self.mesh.halfedge(h2).face();
@@ -668,7 +671,9 @@ impl TetSet {
                     }
 
                     if tet.vertices[3].valid() {
-                        let points = tet.vertices.map(|vid| self.mesh.vertex_data(vid).property.pt);
+                        let points = tet
+                            .vertices
+                            .map(|vid| self.mesh.vertex_data(vid).property.pt);
                         for eval in &tet.surface_evaluations {
                             for i in 0..4 {
                                 let e1 = eval.evaluation[i];
@@ -683,7 +688,12 @@ impl TetSet {
                     tet_vertices.sort();
                     for (fid, vd) in tet.faces.into_iter().zip(tet.vertices) {
                         let he = self.mesh.face(fid).halfedge();
-                        let mut vs0 = [*he.prev().data.vertex, *he.data.vertex, *he.next().data.vertex, *vd];
+                        let mut vs0 = [
+                            *he.prev().data.vertex,
+                            *he.data.vertex,
+                            *he.next().data.vertex,
+                            *vd,
+                        ];
                         vs0.sort();
                         debug_assert!(vs0 == tet_vertices);
                     }
@@ -726,7 +736,11 @@ impl TetSet {
             return false;
         }
         if tid > 1000_0000 {
-            let edge_lengths = Vec::from_iter(tet.edges.into_iter().map(|eid| self.mesh.edge_data(eid).property.square_len.sqrt()));
+            let edge_lengths = Vec::from_iter(
+                tet.edges
+                    .into_iter()
+                    .map(|eid| self.mesh.edge_data(eid).property.square_len.sqrt()),
+            );
             println!("{:?}", edge_lengths);
         }
 
