@@ -1,60 +1,38 @@
-use super::{element::ElementId, mesh::{BaseVertexData, Mesh, MeshCore}};
+use crate::{math::{norm, square_norm, sub_short}, mesh1::{BaseEdgeData, HalfedgeData}};
 
-pub trait VertexPosition3 {
-    fn position(&self) -> &[f64; 3];
+use super::mesh::{BaseVertexData, Mesh};
+
+pub trait VertexPosition<const N: usize> {
+    fn position(&self) -> &[f64; N];
 }
 
-impl VertexPosition3 for [f64; 3] {
+impl<const N: usize> VertexPosition<N> for [f64; N] {
     #[inline]
-    fn position(&self) -> &[f64; 3] {
+    fn position(&self) -> &[f64; N] {
         self
     }
 }
 
-impl<P: VertexPosition3> VertexPosition3 for BaseVertexData<P> {
+impl<const N: usize, P: VertexPosition<N>> VertexPosition<N> for BaseVertexData<P> {
     #[inline]
-    fn position(&self) -> &[f64; 3] {
+    fn position(&self) -> &[f64; N] {
         self.property.position()
     }
 }
 
-pub trait EdgeLengthSquaredField {
+pub trait SquaredEdgeLength {
     fn edge_length_squared(&self) -> f64;
-    fn set_edge_length_squared(&mut self, value: f64);
+    fn edge_length_squared_mut(&mut self) -> &mut f64;
 }
 
-pub trait EdgeLengthField {
+pub trait EdgeLength {
     fn edge_length(&self) -> f64;
-    fn set_edge_length(&mut self, value: f64);
+    fn edge_length_mut(&mut self) -> &mut f64;
 }
 
-impl EdgeLengthSquaredField for f64 {
-    #[inline]
-    fn edge_length_squared(&self) -> f64 {
-        *self
-    }
-
-    #[inline]
-    fn set_edge_length_squared(&mut self, value: f64) {
-        *self = value;
-    }
-}
-
-impl EdgeLengthField for f64 {
-    #[inline]
-    fn edge_length(&self) -> f64 {
-        *self
-    }
-
-    #[inline]
-    fn set_edge_length(&mut self, value: f64) {
-        *self = value;
-    }
-}
-
-impl<P> EdgeLengthSquaredField for super::surface_mesh::BaseEdgeData<P>
+impl<P> SquaredEdgeLength for BaseEdgeData<P>
 where
-    P: EdgeLengthSquaredField,
+    P: SquaredEdgeLength,
 {
     #[inline]
     fn edge_length_squared(&self) -> f64 {
@@ -62,14 +40,14 @@ where
     }
 
     #[inline]
-    fn set_edge_length_squared(&mut self, value: f64) {
-        self.property.set_edge_length_squared(value);
+    fn edge_length_squared_mut(&mut self) -> &mut f64 {
+        self.property.edge_length_squared_mut()
     }
 }
 
-impl<P> EdgeLengthField for super::surface_mesh::BaseEdgeData<P>
+impl<P> EdgeLength for super::surface_mesh::BaseEdgeData<P>
 where
-    P: EdgeLengthField,
+    P: EdgeLength,
 {
     #[inline]
     fn edge_length(&self) -> f64 {
@@ -77,99 +55,48 @@ where
     }
 
     #[inline]
-    fn set_edge_length(&mut self, value: f64) {
-        self.property.set_edge_length(value);
+    fn edge_length_mut(&mut self) -> &mut f64 {
+        self.property.edge_length_mut()
     }
 }
 
 #[inline]
-pub fn update_edge_lengths_squared_in_edge_data<M>(mesh: &mut M)
+pub fn update_edge_lengths_squared_in_edge_data<const N: usize, M>(mesh: &mut M)
 where
     M: Mesh,
-    M::VertexData: VertexPosition3,
-    M::EdgeData: EdgeLengthSquaredField,
+    M::VertexData: VertexPosition<N>,
+    M::HalfedgeData: HalfedgeData,
+    M::EdgeData: SquaredEdgeLength,
 {
-    let mut values = vec![0.0; mesh.n_edges_capacity()];
-    for edge in mesh.edges() {
-        let eid = edge.id;
-        let [va, vb] = mesh.e_vertices(eid);
-        if !va.valid() || !vb.valid() {
-            continue;
-        }
-        let pa = mesh.vertex_data(va).position();
-        let pb = mesh.vertex_data(vb).position();
-        let dx = pa[0] - pb[0];
-        let dy = pa[1] - pb[1];
-        let dz = pa[2] - pb[2];
-        values[eid.index()] = dx * dx + dy * dy + dz * dz;
-    }
-
     for edge in mesh.edges_mut() {
-        let eid = edge.id;
-        edge.data.set_edge_length_squared(values[eid.index()]);
+        let [va, vb] = edge.vertices();
+        let pa = va.data.position();
+        let pb = vb.data.position();
+        *edge.data.edge_length_squared_mut() = square_norm(&sub_short::<N, _>(pa, pb));
     }
 }
 
 #[inline]
-pub fn update_edge_lengths_in_edge_data<M>(mesh: &mut M)
+pub fn update_edge_lengths_in_edge_data<const N: usize, M>(mesh: &mut M)
 where
     M: Mesh,
-    M::VertexData: VertexPosition3,
-    M::EdgeData: EdgeLengthField,
+    M::VertexData: VertexPosition<N>,
+    M::HalfedgeData: HalfedgeData,
+    M::EdgeData: EdgeLength,
 {
-    let mut values = vec![0.0; mesh.n_edges_capacity()];
-    for edge in mesh.edges() {
-        let eid = edge.id;
-        let [va, vb] = mesh.e_vertices(eid);
-        if !va.valid() || !vb.valid() {
-            continue;
-        }
-        let pa = mesh.vertex_data(va).position();
-        let pb = mesh.vertex_data(vb).position();
-        let dx = pa[0] - pb[0];
-        let dy = pa[1] - pb[1];
-        let dz = pa[2] - pb[2];
-        values[eid.index()] = (dx * dx + dy * dy + dz * dz).sqrt();
-    }
-
     for edge in mesh.edges_mut() {
-        let eid = edge.id;
-        edge.data.set_edge_length(values[eid.index()]);
+        let [va, vb] = edge.vertices();
+        let pa = va.data.position();
+        let pb = vb.data.position();
+        *edge.data.edge_length_mut() = norm(&sub_short::<N, _>(pa, pb));
     }
-}
-
-pub trait EdgeLengthInDataExt: Mesh
-where
-    Self::VertexData: VertexPosition3,
-{
-    #[inline]
-    fn update_edge_lengths_squared_in_edge_data(&mut self)
-    where
-        Self::EdgeData: EdgeLengthSquaredField,
-    {
-        update_edge_lengths_squared_in_edge_data(self)
-    }
-
-    #[inline]
-    fn update_edge_lengths_in_edge_data(&mut self)
-    where
-        Self::EdgeData: EdgeLengthField,
-    {
-        update_edge_lengths_in_edge_data(self)
-    }
-}
-
-impl<M> EdgeLengthInDataExt for M
-where
-    M: Mesh,
-    M::VertexData: VertexPosition3,
-{
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::mesh1::SurfaceMesh;
+    use crate::mesh1::MeshCore;
 
     #[test]
     fn edge_length_updates_into_edge_property_field() {
@@ -179,27 +106,27 @@ mod tests {
             len: f64,
         }
 
-        impl EdgeLengthSquaredField for EdgeProp {
+        impl SquaredEdgeLength for EdgeProp {
             #[inline]
             fn edge_length_squared(&self) -> f64 {
                 self.square_len
             }
 
             #[inline]
-            fn set_edge_length_squared(&mut self, value: f64) {
-                self.square_len = value;
+            fn edge_length_squared_mut(&mut self) -> &mut f64 {
+                &mut self.square_len
             }
         }
 
-        impl EdgeLengthField for EdgeProp {
+        impl EdgeLength for EdgeProp {
             #[inline]
             fn edge_length(&self) -> f64 {
                 self.len
             }
 
             #[inline]
-            fn set_edge_length(&mut self, value: f64) {
-                self.len = value;
+            fn edge_length_mut(&mut self) -> &mut f64 {
+                &mut self.len
             }
         }
 
